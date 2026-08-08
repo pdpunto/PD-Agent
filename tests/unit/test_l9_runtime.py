@@ -182,16 +182,25 @@ def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
         [
             AgentResponse(assistant_message="plan", tool_calls=()),
             AgentResponse(
-                assistant_message="fix build state",
+                assistant_message="diagnose",
                 tool_calls=(
                     ToolCall(
                         call_id="2",
+                        tool_name="read_file",
+                        arguments={"path": "build-state.txt", "max_bytes": 16},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="rebuild",
+                tool_calls=(
+                    ToolCall(
+                        call_id="3",
                         tool_name="write_file",
                         arguments={"path": "build-state.txt", "content": "pass\n"},
                     ),
                 ),
             ),
-            AgentResponse(assistant_message="rebuild", tool_calls=()),
         ]
     )
     controller, storage = _controller(root, provider)
@@ -201,7 +210,7 @@ def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
     assert run_state.state.value == "COMPLETED"
     assert report.final_state.value == "COMPLETED"
     assert run_state.build_attempt_count == 2
-    assert len(provider.requests) >= 2
+    assert len(provider.requests) == 3
     assert any("tool_results" in message.content for message in provider.requests[2].messages)
     assert storage.paths_for(run_state.run_id).final_report_md.exists()
 
@@ -315,7 +324,6 @@ def test_antiloop_stops_on_repeated_noop(tmp_path: Path) -> None:
                     ToolCall(call_id="2", tool_name="write_file", arguments={"path": "build-state.txt", "content": "fail\n"}),
                 ),
             ),
-            AgentResponse(assistant_message="retry", tool_calls=()),
         ]
     )
     controller, _storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5))
@@ -324,7 +332,38 @@ def test_antiloop_stops_on_repeated_noop(tmp_path: Path) -> None:
 
     assert run_state.state.value == "FAILED"
     assert report.final_state.value == "FAILED"
-    assert "repeated" in (run_state.termination_reason or "")
+    assert run_state.termination_reason == "repeated no-op tool calls"
+    assert report.termination_reason == "repeated no-op tool calls"
+    assert run_state.build_attempt_count == 1
+    assert len(provider.requests) == 2
+
+
+def test_antiloop_stops_on_repeated_build_failure(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "build-loop", build_state="fail")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="plan", tool_calls=()),
+            AgentResponse(
+                assistant_message="diagnose",
+                tool_calls=(
+                    ToolCall(call_id="2", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),
+                ),
+            ),
+            AgentResponse(assistant_message="correct", tool_calls=()),
+        ]
+    )
+    controller, _storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5))
+
+    run_state, report = controller.run(root, "build loop")
+
+    assert run_state.state.value == "FAILED"
+    assert report.final_state.value == "FAILED"
+    assert run_state.termination_reason == "repeated build failure"
+    assert report.termination_reason == "repeated build failure"
+    assert "internal error" not in (run_state.termination_reason or "").lower()
+    assert "StateTransitionError" not in (run_state.last_error or "")
+    assert run_state.build_attempt_count == 2
+    assert len(provider.requests) == 3
 
 
 def test_runtime_source_has_no_openai_imports() -> None:

@@ -128,6 +128,10 @@ class AgentRuntime:
                         project_snapshot=project_snapshot,
                         limits=limits,
                     )
+                    if run_state.state.is_terminal():
+                        self._persist_state(run_state)
+                        break
+
                     if tool_results:
                         history.append(AgentMessage(role="user", content=self._tool_results_message(tool_results)))
 
@@ -146,7 +150,6 @@ class AgentRuntime:
                         run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
                         run_state.transition_to(RunStatus.BUILDING)
-                    self._observe_progress(run_state, tool_results=tool_results, provider_response=response)
                     self._persist_state(run_state)
                     continue
 
@@ -159,6 +162,9 @@ class AgentRuntime:
                     self._check_limits(run_state, limits)
                     build_result = self.build_runner.run(project_snapshot, run_state, limits)
                     self._observe_progress(run_state, build_result=build_result)
+                    if run_state.state.is_terminal():
+                        self._persist_state(run_state)
+                        break
                     if build_result.success:
                         run_state.transition_to(RunStatus.VALIDATING_ARTIFACT)
                     else:
@@ -273,6 +279,8 @@ class AgentRuntime:
             run_state.record_tool_call()
             self._persist_state(run_state)
             self._observe_progress(run_state, tool_results=(result,))
+            if run_state.state.is_terminal():
+                break
         return tuple(results)
 
     def _finish(
@@ -355,7 +363,6 @@ class AgentRuntime:
         *,
         tool_results: tuple[ToolResult, ...] = (),
         build_result: BuildResult | None = None,
-        provider_response: Any | None = None,
     ) -> None:
         if tool_results:
             if any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results):
@@ -388,32 +395,17 @@ class AgentRuntime:
                 run_state.state = RunStatus.FAILED
                 run_state.termination_reason = "repeated build failure"
                 return
-
-        if provider_response is not None and getattr(provider_response, "tool_calls", ()) == () and not getattr(provider_response, "assistant_message", None):
-            return
-
-    def _fingerprint(
-        self,
-        run_state: RunState,
-        *,
-        tool_results: tuple[ToolResult, ...] = (),
-        build_result: BuildResult | None = None,
-        provider_response: Any | None = None,
-    ) -> str:
-        payload = {
-            "current_plan": run_state.current_plan,
-            "changed_files": list(run_state.changed_files),
-            "last_error": run_state.last_error,
-            "tool_results": [result.to_dict() for result in tool_results],
-            "build_result": build_result.to_dict() if build_result is not None else None,
-            "assistant_message": getattr(provider_response, "assistant_message", None),
-            "tool_calls": [call.to_dict() for call in getattr(provider_response, "tool_calls", ())],
-        }
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
     def _tool_signature(self, tool_results: tuple[ToolResult, ...]) -> str:
-        payload = [result.to_dict() for result in tool_results]
+        payload = [
+            {
+                "tool_name": result.tool_name,
+                "status": result.status.value,
+                "output": result.output,
+                "error": result.error,
+                "metadata": dict(result.metadata),
+            }
+            for result in tool_results
+        ]
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
