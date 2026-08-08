@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_package_imports() -> None:
     assert __version__ == "0.1.0"
     assert AppConfig().project_name == "PD Agent"
+    assert AppConfig().provider == "openai"
+    assert AppConfig().model is None
+    assert AppConfig().openai_api_key is None
+    assert AppConfig().execution_limits.max_build_attempts == 5
     assert callable(main)
     assert callable(build_parser)
 
@@ -26,12 +30,20 @@ def test_config_load_defaults_and_env() -> None:
 
     custom_config = load_config(
         {
+            "PD_AGENT_PROVIDER": "openai",
+            "PD_AGENT_MODEL": "gpt-test",
+            "OPENAI_API_KEY": "sk-test",
             "PD_AGENT_LOG_LEVEL": "debug",
             "PD_AGENT_RUNS_DIR": "custom-runs",
+            "PD_AGENT_MAX_BUILD_ATTEMPTS": "7",
         }
     )
+    assert custom_config.provider == "openai"
+    assert custom_config.model == "gpt-test"
+    assert custom_config.openai_api_key == "sk-test"
     assert custom_config.log_level == "DEBUG"
     assert custom_config.runs_dir == Path("custom-runs")
+    assert custom_config.execution_limits.max_build_attempts == 7
 
 
 def test_cli_help_prints_usage() -> None:

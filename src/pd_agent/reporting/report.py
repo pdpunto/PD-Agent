@@ -11,6 +11,8 @@ from typing import Any, Mapping
 from ..core import ArtifactResult, BuildResult, RunStatus
 from .redaction import Redactor, json_ready
 
+MINECRAFT_RUNTIME_VALIDATION_NOTE = "NOT PERFORMED (v0.1)"
+
 
 @dataclass(frozen=True, slots=True)
 class FinalReport:
@@ -29,6 +31,7 @@ class FinalReport:
     warnings: tuple[str, ...] = ()
     termination_reason: str | None = None
     evidence_refs: tuple[str, ...] = ()
+    minecraft_runtime_validation: str = MINECRAFT_RUNTIME_VALIDATION_NOTE
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self, redactor: Redactor | None = None) -> dict[str, Any]:
@@ -46,6 +49,7 @@ class FinalReport:
             "warnings": list(self.warnings),
             "termination_reason": self.termination_reason,
             "evidence_refs": list(self.evidence_refs),
+            "minecraft_runtime_validation": self.minecraft_runtime_validation,
             "generated_at": self.generated_at.isoformat(),
         }
         data = json_ready(data)
@@ -109,6 +113,13 @@ class FinalReport:
             lines.extend(f"- `{item}`" for item in evidence_refs)
         else:
             lines.append("- None")
+        lines.extend(
+            [
+                "",
+                "## Minecraft Runtime Validation",
+                f"- {data.get('minecraft_runtime_validation', MINECRAFT_RUNTIME_VALIDATION_NOTE)}",
+            ]
+        )
         if data.get("termination_reason"):
             lines.extend(["", f"Termination reason: {data['termination_reason']}"])
         return "\n".join(lines) + "\n"
@@ -143,6 +154,9 @@ class FinalReport:
             warnings=tuple(data.get("warnings", [])),
             termination_reason=data.get("termination_reason"),
             evidence_refs=tuple(data.get("evidence_refs", [])),
+            minecraft_runtime_validation=str(
+                data.get("minecraft_runtime_validation", MINECRAFT_RUNTIME_VALIDATION_NOTE)
+            ),
             generated_at=datetime.fromisoformat(
                 str(data.get("generated_at", datetime.now(timezone.utc).isoformat()))
             ),
