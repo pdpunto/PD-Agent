@@ -194,6 +194,9 @@ class RunState:
     def record_build_attempt(self) -> None:
         self.build_attempt_count += 1
 
+    def record_build_result(self, result: BuildResult) -> None:
+        self.build_results = (*self.build_results, result)
+
     def limit_violations(self, limits: ExecutionLimits) -> tuple[str, ...]:
         violations: list[str] = []
         if self.agent_step_count >= limits.max_agent_steps:

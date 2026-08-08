@@ -12,6 +12,9 @@ __pycache__/
 .coverage
 htmlcov/
 build/
+!src/pd_agent/build/
+src/pd_agent/build/**
+!src/pd_agent/build/*.py
 dist/
 *.egg-info/
 .venv/

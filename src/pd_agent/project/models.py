@@ -244,4 +244,3 @@ class ProjectSnapshot:
             "relevant_files": [str(path) for path in self.relevant_files],
             "metadata_errors": list(self.metadata_errors),
         }
-
