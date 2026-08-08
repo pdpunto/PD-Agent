@@ -1,0 +1,18 @@
+"""Make `src/` importable from repo root.
+
+This keeps the project usable before installation and helps local test runs.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+
+if SRC.exists():
+    src_text = str(SRC)
+    if src_text not in sys.path:
+        sys.path.insert(0, src_text)

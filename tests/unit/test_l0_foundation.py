@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from pd_agent import AppConfig, __version__, load_config
+from pd_agent.cli import build_parser, main
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_package_imports() -> None:
+    assert __version__ == "0.1.0"
+    assert AppConfig().project_name == "PD Agent"
+    assert callable(main)
+    assert callable(build_parser)
+
+
+def test_config_load_defaults_and_env() -> None:
+    default_config = load_config({})
+    assert default_config.log_level == "INFO"
+    assert default_config.runs_dir == Path("runs")
+
+    custom_config = load_config(
+        {
+            "PD_AGENT_LOG_LEVEL": "debug",
+            "PD_AGENT_RUNS_DIR": "custom-runs",
+        }
+    )
+    assert custom_config.log_level == "DEBUG"
+    assert custom_config.runs_dir == Path("custom-runs")
+
+
+def test_cli_help_prints_usage() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "pd_agent", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "usage:" in result.stdout.lower()
+    assert result.stderr == ""
+
+
+def test_local_pytest_runner_handles_empty_suite() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        empty_root = Path(temp_dir)
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", str(empty_root)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    assert result.returncode == 0
+    assert "no tests collected" in result.stdout.lower()
+    assert result.stderr == ""
+
