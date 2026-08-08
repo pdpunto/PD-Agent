@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+
+# OS / temp
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.temp
+*~
+.cache/
+tmp/
+temp/
+logs/
+
+# Secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+
+# Local PD Agent outputs
+output/
+outputs/
+artifacts/
+runs/
+reports/
+cache/
+*.zip
