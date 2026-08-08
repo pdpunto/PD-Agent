@@ -9,7 +9,9 @@ description = "PD Agent foundation package."
 readme = "README.md"
 requires-python = ">=3.13"
 license = {text = "Proprietary"}
-dependencies = []
+dependencies = [
+    "openai>=2,<3",
+]
 
 [project.optional-dependencies]
 test = [

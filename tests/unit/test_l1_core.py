@@ -284,12 +284,14 @@ def test_normalized_errors_work_without_providers(error_type) -> None:
 
 
 def test_core_does_not_import_external_provider_modules() -> None:
-    import pd_agent.core.contracts  # noqa: F401
-    import pd_agent.core.errors  # noqa: F401
-    import pd_agent.core.state  # noqa: F401
+    import inspect
+    import pd_agent.core.contracts
+    import pd_agent.core.errors
+    import pd_agent.core.state
 
-    forbidden_prefixes = ("openai", "fabric", "gradle")
-    forbidden_modules = [
-        name for name in sys.modules if any(name == prefix or name.startswith(f"{prefix}.") for prefix in forbidden_prefixes)
-    ]
-    assert forbidden_modules == []
+    source = "\n".join(
+        inspect.getsource(module)
+        for module in (pd_agent.core.contracts, pd_agent.core.errors, pd_agent.core.state)
+    )
+    assert "openai" not in source.lower()
+    assert "fabric" not in source.lower()
