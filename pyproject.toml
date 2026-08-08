@@ -1,7 +1,6 @@
 [build-system]
-requires = []
-build-backend = "pd_agent_build_backend"
-backend-path = ["."]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "pd-agent"
@@ -10,6 +9,12 @@ description = "PD Agent foundation package."
 readme = "README.md"
 requires-python = ">=3.13"
 license = {text = "Proprietary"}
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
 
 [project.scripts]
 pd-agent = "pd_agent.cli:main"
@@ -17,3 +22,8 @@ pd-agent = "pd_agent.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

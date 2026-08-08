@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -48,9 +47,14 @@ def test_cli_help_prints_usage() -> None:
     assert result.stderr == ""
 
 
-def test_local_pytest_runner_handles_empty_suite() -> None:
+def test_real_pytest_runs_passing_temp_suite() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         empty_root = Path(temp_dir)
+        test_file = empty_root / "test_sample.py"
+        test_file.write_text(
+            "def test_sample():\n    assert 1 + 1 == 2\n",
+            encoding="utf-8",
+        )
         result = subprocess.run(
             [sys.executable, "-m", "pytest", str(empty_root)],
             cwd=ROOT,
@@ -59,6 +63,5 @@ def test_local_pytest_runner_handles_empty_suite() -> None:
             check=False,
         )
     assert result.returncode == 0
-    assert "no tests collected" in result.stdout.lower()
+    assert "1 passed" in result.stdout.lower()
     assert result.stderr == ""
-
