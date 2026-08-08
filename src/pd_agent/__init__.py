@@ -11,6 +11,7 @@ from .config import AppConfig, load_config
 from .build import GradleBuildRunner
 from .logging import configure_logging
 from .project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
+from .runtime import AgentRuntime, RunController
 
 __all__ = [
     "__version__",
@@ -26,9 +27,11 @@ __all__ = [
     "ProjectInspector",
     "ProjectInspectionStatus",
     "ProjectSnapshot",
+    "AgentRuntime",
     "ProjectContextSource",
     "configure_logging",
     "load_config",
     "main",
+    "RunController",
     "RunContextSource",
 ]
