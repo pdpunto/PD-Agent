@@ -159,6 +159,15 @@ Además, los cambios y acciones deben quedar trazables.
 
 Esto será el PASS principal de PD Agent v0.1.
 
+Para que ese PASS operativo cuente en v0.1, deben cumplirse las tres
+condiciones juntas:
+
+- build final exitoso;
+- JAR válido generado;
+- informe final persistido y trazable.
+
+Esto no valida comportamiento dentro de Minecraft.
+
 ## 12. Qué NO demuestra un PASS
 
 Un build correcto no demuestra que el mod funciona correctamente dentro

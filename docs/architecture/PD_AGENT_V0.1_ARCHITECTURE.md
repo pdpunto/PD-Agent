@@ -441,7 +441,13 @@ pd-agent/
 │ └── cli/
 └── tests/
 
-Esta estructura es conceptual para el RFC. El IMP decidirá archivos y orden real de construcción después de la auditoría correspondiente.
+Esta estructura es conceptual para el RFC.
+
+La estructura definida en el RFC es la referencia técnica autoritativa
+para v0.1.
+
+El IMP puede ajustar nombres o rutas menores según el repo real sin
+cambiar boundaries.
 
 ## 19. Flujo completo
 
