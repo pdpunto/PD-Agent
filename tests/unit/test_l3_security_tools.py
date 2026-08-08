@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -278,7 +279,15 @@ def test_symlink_escape_rejected_when_supported(tmp_path: Path) -> None:
     try:
         link.symlink_to(outside_file)
     except (OSError, NotImplementedError, AttributeError):
-        pytest.skip("symlink creation unavailable in this environment")
+        try:
+            subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            pytest.skip("symlink or junction creation unavailable in this environment")
 
     executor, context, _storage, _run_id = _make_executor(root)
     result = executor.execute(
