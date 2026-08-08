@@ -260,5 +260,5 @@ class Tool(Protocol):
 class ContextSource(Protocol):
     """Context provider contract."""
 
-    def get(self, request: Any) -> tuple[str, ...]:
+    def get(self, request: Any) -> tuple[Any, ...]:
         """Return provider-ready context items."""

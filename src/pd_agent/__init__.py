@@ -6,6 +6,7 @@ __version__ = "0.1.0"
 
 from .cli import main
 from .artifacts import ArtifactClassification, ArtifactValidator
+from .context import ContextBundle, ContextItem, ContextManager, ContextRequest, ExternalContextSource, ProjectContextSource, RunContextSource
 from .config import AppConfig, load_config
 from .build import GradleBuildRunner
 from .logging import configure_logging
@@ -16,11 +17,18 @@ __all__ = [
     "AppConfig",
     "ArtifactClassification",
     "ArtifactValidator",
+    "ContextBundle",
+    "ContextItem",
+    "ContextManager",
+    "ContextRequest",
+    "ExternalContextSource",
     "GradleBuildRunner",
     "ProjectInspector",
     "ProjectInspectionStatus",
     "ProjectSnapshot",
+    "ProjectContextSource",
     "configure_logging",
     "load_config",
     "main",
+    "RunContextSource",
 ]
