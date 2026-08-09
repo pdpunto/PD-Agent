@@ -638,7 +638,19 @@ def _run_openai_live(summary: ValidationSummary, args: argparse.Namespace) -> Sc
 
 def _run_suite(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    result = _run_command(command, cwd=REPO_ROOT, timeout_seconds=args.pytest_timeout_seconds)
+    pytest_temp = summary.validation_root / "pytest-tmp"
+    pytest_temp.mkdir(parents=True, exist_ok=True)
+    result = _run_command(
+        command,
+        cwd=REPO_ROOT,
+        timeout_seconds=args.pytest_timeout_seconds,
+        extra_env={
+            "TMP": str(pytest_temp),
+            "TEMP": str(pytest_temp),
+            "TMPDIR": str(pytest_temp),
+            "PYTEST_ADDOPTS": "--basetemp=" + str(pytest_temp / "basetemp"),
+        },
+    )
     _write_command_evidence(summary, "pytest-suite", result)
     if result.timed_out:
         return _scenario_result(
