@@ -539,7 +539,7 @@ def _continuation_summary(calls: Sequence[RecordedGenerateContentCall]) -> dict[
                 request_records.append(record)
                 request_hashes.append(str(hash_value))
 
-    replay_success = bool(response_hashes and response_hashes == request_hashes[: len(response_hashes)])
+    replay_success = bool(request_hashes and response_hashes and request_hashes == response_hashes[: len(request_hashes)])
     return {
         "continuation_detected": bool(response_records),
         "provider": "gemini" if response_records else None,
