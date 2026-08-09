@@ -12,9 +12,8 @@ from pathlib import Path
 import shutil
 from typing import Any, Mapping, Sequence
 
-from openai import OpenAI
-
 import validate_v0_1 as base
+from pd_agent.providers import GeminiProvider
 
 
 REPO_ROOT = base.REPO_ROOT
@@ -90,20 +89,20 @@ class CommandResult:
 
 
 @dataclass(slots=True)
-class RecordedResponsesCall:
+class RecordedGenerateContentCall:
     request: dict[str, Any]
     response: dict[str, Any] | None
 
 
-class RecordingResponses:
-    def __init__(self, real: Any, calls: list[RecordedResponsesCall]) -> None:
+class RecordingGenerateContent:
+    def __init__(self, real: Any, calls: list[RecordedGenerateContentCall]) -> None:
         self._real = real
         self._calls = calls
 
-    def create(self, **kwargs: Any) -> Any:
-        response = self._real.create(**kwargs)
+    def generate_content(self, **kwargs: Any) -> Any:
+        response = self._real.generate_content(**kwargs)
         self._calls.append(
-            RecordedResponsesCall(
+            RecordedGenerateContentCall(
                 request=_sanitize_request(kwargs),
                 response=_sanitize_response(response),
             )
@@ -111,14 +110,11 @@ class RecordingResponses:
         return response
 
 
-class RecordingOpenAIClient:
-    def __init__(self, client: OpenAI) -> None:
+class RecordingGeminiClient:
+    def __init__(self, client: Any) -> None:
         self._client = client
-        self.calls: list[RecordedResponsesCall] = []
-        self.responses = RecordingResponses(client.responses, self.calls)
-
-    def with_options(self, **kwargs: Any) -> "RecordingOpenAIClient":
-        return self
+        self.calls: list[RecordedGenerateContentCall] = []
+        self.models = RecordingGenerateContent(client.models, self.calls)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -189,15 +185,19 @@ def _run_prechecks(summary: LiveSummary, args: argparse.Namespace) -> None:
     wrapper = candidate / "gradlew.bat"
     if not wrapper.exists():
         raise base.ScenarioBlocked(f"falta gradlew.bat en: {candidate}")
-    api_key = os.environ.get("OPENAI_API_KEY")
+    provider = os.environ.get("PD_AGENT_PROVIDER", "").strip().lower()
     model = os.environ.get("PD_AGENT_MODEL")
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if provider != "gemini":
+        raise base.ScenarioBlocked("PD_AGENT_PROVIDER must be gemini")
+    if model != "gemini-2.5-flash":
+        raise base.ScenarioBlocked("PD_AGENT_MODEL must be gemini-2.5-flash")
     if not api_key:
-        raise base.ScenarioBlocked("OPENAI_API_KEY missing")
-    if not model:
-        raise base.ScenarioBlocked("PD_AGENT_MODEL missing")
+        raise base.ScenarioBlocked("GEMINI_API_KEY missing")
     summary.notes.append("prechecks: ok")
+    summary.notes.append("provider: gemini")
     summary.notes.append(f"model: {model}")
-    summary.notes.append("OPENAI_API_KEY: present")
+    summary.notes.append("GEMINI_API_KEY: present")
 
 
 def _run_baseline_build(summary: LiveSummary, args: argparse.Namespace) -> base.ScenarioResult:
@@ -227,7 +227,6 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
     from pd_agent.config import ExecutionLimits
     from pd_agent.context import ContextManager
     from pd_agent.pass_policy import evaluate_pass
-    from pd_agent.providers import OpenAIProvider
     from pd_agent.reporting import RunStorage
     from pd_agent.runtime import RunController
 
@@ -244,11 +243,11 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
             changed=True,
             replacement=expected_final_text,
         )
-    api_key = os.environ["OPENAI_API_KEY"]
+    api_key = os.environ["GEMINI_API_KEY"]
     model = os.environ["PD_AGENT_MODEL"]
-    real_client = OpenAI(api_key=api_key, max_retries=0)
-    recording_client = RecordingOpenAIClient(real_client)
-    provider = OpenAIProvider(model=model, api_key=api_key, provider_retry_limit=0, client=recording_client)
+    provider = GeminiProvider(model=model, api_key=api_key, provider_retry_limit=0)
+    recording_client = RecordingGeminiClient(provider._client)  # noqa: SLF001
+    provider._client = recording_client  # noqa: SLF001
     storage = RunStorage(summary.evidence_root / "live-e2e")
     controller = RunController(
         provider=provider,
@@ -272,6 +271,7 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
     event_types = [event.event_type.value for event in storage.read_events(run_state.run_id)]
     live_details = {
         "run_id": run_state.run_id,
+        "provider": "gemini",
         "model": model,
         "source_path": str(edit.relative_path),
         "before_hash": edit.before_hash,
@@ -309,10 +309,11 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
         and not secret_found
     ):
         return _scenario_result(
-            "OpenAI live E2E",
+            "Gemini live E2E",
             "PASS",
             "completed",
             run_id=run_state.run_id,
+            provider="gemini",
             model=model,
             source_path=str(edit.relative_path),
             before_hash=edit.before_hash,
@@ -325,11 +326,12 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
     if secret_found:
         reason = "secret found in evidence"
     return _scenario_result(
-        "OpenAI live E2E",
+        "Gemini live E2E",
         "FAIL",
         reason,
         run_id=run_state.run_id,
         final_state=run_state.state.value,
+        provider="gemini",
         source_path=str(edit.relative_path),
         before_hash=edit.before_hash,
         after_hash=after_hash,
@@ -399,7 +401,7 @@ def _scenario_to_dict(scenario: base.ScenarioResult | None) -> dict[str, Any] | 
     }
 
 
-def _usage_summary(calls: Sequence[RecordedResponsesCall]) -> dict[str, Any] | None:
+def _usage_summary(calls: Sequence[RecordedGenerateContentCall]) -> dict[str, Any] | None:
     for call in calls:
         response = call.response or {}
         usage = response.get("usage")
@@ -409,47 +411,88 @@ def _usage_summary(calls: Sequence[RecordedResponsesCall]) -> dict[str, Any] | N
     return None
 
 
-def _tool_call_sequence(calls: Sequence[RecordedResponsesCall]) -> list[dict[str, Any]]:
+def _tool_call_sequence(calls: Sequence[RecordedGenerateContentCall]) -> list[dict[str, Any]]:
     sequence: list[dict[str, Any]] = []
     for call in calls:
-        for item in call.request.get("input", []):
+        for content_index, item in enumerate(call.request.get("contents", [])):
             if not isinstance(item, Mapping):
                 continue
-            item_type = item.get("type")
-            if item_type not in {"function_call", "function_call_output"}:
-                continue
-            entry = {"request_index": len(sequence), "type": item_type}
-            for key in ("call_id", "name", "arguments", "output"):
-                if key in item:
-                    entry[key] = item[key]
-            sequence.append(entry)
+            for part_index, part in enumerate(item.get("parts", []) or []):
+                if not isinstance(part, Mapping):
+                    continue
+                function_call = part.get("function_call")
+                function_response = part.get("function_response")
+                if function_call is None and function_response is None:
+                    continue
+                entry = {
+                    "request_index": len(sequence),
+                    "content_index": content_index,
+                    "part_index": part_index,
+                    "type": "function_call" if function_call is not None else "function_call_output",
+                }
+                payload = function_call if function_call is not None else function_response
+                if isinstance(payload, Mapping):
+                    for key in ("call_id", "name", "arguments", "output"):
+                        if key in payload:
+                            entry[key] = payload[key]
+                sequence.append(entry)
     return sequence
 
 
 def _sanitize_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "model": payload.get("model"),
-        "store": payload.get("store"),
-        "instructions": payload.get("instructions"),
-        "tool_count": len(payload.get("tools", []) or []),
-        "input": [_sanitize_input_item(item) for item in payload.get("input", []) or []],
+        "contents": [_sanitize_content_item(item) for item in payload.get("contents", []) or []],
+        "config": _sanitize_config(payload.get("config")),
     }
 
 
-def _sanitize_input_item(item: Any) -> dict[str, Any]:
-    if not isinstance(item, Mapping):
-        return {"type": type(item).__name__}
-    data: dict[str, Any] = {"type": item.get("type")}
-    for key in ("role", "call_id", "name", "status"):
-        if key in item:
-            data[key] = item.get(key)
-    if item.get("type") == "message":
-        data["content_type"] = type(item.get("content")).__name__
-    if item.get("type") == "function_call":
-        data["arguments"] = item.get("arguments")
-    if item.get("type") == "function_call_output":
-        data["output"] = item.get("output")
+def _sanitize_content_item(item: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "type": getattr(item, "type", None),
+        "role": _item_value(item, "role"),
+    }
+    parts = _item_value(item, "parts") or []
+    data["parts"] = [_sanitize_part_item(part) for part in parts if part is not None]
     return data
+
+
+def _sanitize_part_item(item: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {"type": _item_value(item, "type")}
+    text = _item_value(item, "text")
+    if text is not None:
+        data["text"] = text
+    function_call = _item_value(item, "function_call") or _item_value(item, "functionCall")
+    if function_call is not None:
+        data["function_call"] = {
+            key: value
+            for key, value in {
+                "call_id": _item_value(function_call, "id"),
+                "name": _item_value(function_call, "name"),
+                "arguments": _item_value(function_call, "args") if _item_value(function_call, "args") is not None else _item_value(function_call, "arguments"),
+            }.items()
+            if value is not None
+        }
+    function_response = _item_value(item, "function_response") or _item_value(item, "functionResponse")
+    if function_response is not None:
+        data["function_response"] = {
+            key: value
+            for key, value in {
+                "call_id": _item_value(function_response, "id"),
+                "name": _item_value(function_response, "name"),
+                "output": _item_value(function_response, "response"),
+            }.items()
+            if value is not None
+        }
+    return data
+
+
+def _sanitize_config(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    keys = ("system_instruction", "automatic_function_calling", "tools", "http_options", "temperature", "top_p", "max_output_tokens")
+    data = {key: _item_value(value, key) for key in keys}
+    return {key: val for key, val in data.items() if val is not None}
 
 
 def _sanitize_response(response: Any) -> dict[str, Any]:
@@ -457,17 +500,16 @@ def _sanitize_response(response: Any) -> dict[str, Any]:
         "id": getattr(response, "id", None),
         "model": getattr(response, "model", None),
         "status": getattr(response, "status", None),
-        "usage": _mapping_or_none(getattr(response, "usage", None)),
-        "output": [_sanitize_output_item(item) for item in (getattr(response, "output", None) or [])],
+        "usage": _mapping_or_none(getattr(response, "usage_metadata", None) or getattr(response, "usage", None)),
+        "output": [_sanitize_output_item(item) for item in (getattr(response, "candidates", None) or [])],
     }
 
 
 def _sanitize_output_item(item: Any) -> dict[str, Any]:
     data = {"type": getattr(item, "type", None)}
-    for key in ("call_id", "name", "status", "id"):
-        value = getattr(item, key, None)
-        if value is not None:
-            data[key] = value
+    content = getattr(item, "content", None)
+    if content is not None:
+        data["content"] = [_sanitize_part_item(part) for part in (getattr(content, "parts", None) or [])]
     return data
 
 
@@ -483,6 +525,24 @@ def _mapping_or_none(value: Any) -> dict[str, Any] | None:
     if hasattr(value, "__dict__"):
         return {key: item for key, item in value.__dict__.items() if not key.startswith("_")}
     return {"value": value}
+
+
+def _item_value(item: Any, key: str) -> Any:
+    if isinstance(item, Mapping):
+        if key in item:
+            return item[key]
+        camel = _snake_to_camel(key)
+        return item.get(camel)
+    value = getattr(item, key, None)
+    if value is not None:
+        return value
+    camel = _snake_to_camel(key)
+    return getattr(item, camel, None)
+
+
+def _snake_to_camel(value: str) -> str:
+    head, *tail = value.split("_")
+    return head + "".join(piece.title() for piece in tail)
 
 
 def _secret_scan(root: Path, api_key: str) -> tuple[bool, bool]:
@@ -521,7 +581,9 @@ def _write_validation_doc(summary: LiveSummary) -> None:
         "",
         f"- Fecha: {summary.started_at.isoformat()}",
         f"- Commit validado: {base.subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT, capture_output=True, text=True).stdout.strip()}",
+        f"- Provider usado: {summary.live_run.details.get('provider') if summary.live_run else 'missing'}",
         f"- Modelo usado: {os.environ.get('PD_AGENT_MODEL', 'missing')}",
+        f"- GEMINI_API_KEY: {'present' if os.environ.get('GEMINI_API_KEY') else 'missing'}",
         f"- Fixture: {summary.candidate_root}",
         f"- Run id: {summary.live_run.details.get('run_id') if summary.live_run else 'n/a'}",
         f"- Source hash before: {summary.live_run.details.get('before_hash') if summary.live_run else 'n/a'}",
@@ -570,7 +632,7 @@ def _print_summary(summary: LiveSummary) -> None:
     print("L11 v0.1.1 VALIDATION")
     print()
     print(f"Baseline Fabric build: {_scenario_status(summary.baseline_build)}")
-    print(f"OpenAI live E2E: {_scenario_status(summary.live_run)}")
+    print(f"Gemini live E2E: {_scenario_status(summary.live_run)}")
     print(f"Repair live: {_scenario_status(summary.repair)}")
     print(f"Suite PD Agent: {_scenario_status(summary.suite)}")
     print()

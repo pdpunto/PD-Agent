@@ -10,10 +10,10 @@ from types import SimpleNamespace
 import pytest
 
 
-def _load_runner():
+def _load_runner(script_name: str = "validate_v0_1.py"):
     root = Path(__file__).resolve().parents[2]
-    path = root / "scripts" / "validation" / "validate_v0_1.py"
-    spec = importlib.util.spec_from_file_location("validate_v0_1", path)
+    path = root / "scripts" / "validation" / script_name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -298,3 +298,102 @@ def test_cleanup_removes_working_and_gradle_homes() -> None:
         runner._cleanup(summary, keep_working_copy=False)
         assert not working.exists()
         assert not gradle_home.exists()
+
+
+def test_v011_prechecks_require_gemini_provider_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_1_1.py")
+    monkeypatch.setattr(runner.base, "_check_pd_agent_import", lambda: None)
+    monkeypatch.setattr(runner.base, "_check_git_clean", lambda root: None)
+    monkeypatch.setattr(runner.base, "_check_java", lambda: None)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        candidate = base / "candidate"
+        validation = base / "validation"
+        candidate.mkdir()
+        (candidate / "gradlew.bat").write_text("@echo off", encoding="utf-8")
+        summary = runner.LiveSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=candidate,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        args = SimpleNamespace(candidate_root=candidate)
+
+        monkeypatch.setenv("PD_AGENT_PROVIDER", "gemini")
+        monkeypatch.setenv("PD_AGENT_MODEL", "gemini-2.5-flash")
+        monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+        runner._run_prechecks(summary, args)
+
+        assert "provider: gemini" in summary.notes
+        assert "model: gemini-2.5-flash" in summary.notes
+        assert "GEMINI_API_KEY: present" in summary.notes
+
+
+def test_v011_tool_sequence_reads_gemini_function_calls() -> None:
+    runner = _load_runner("validate_v0_1_1.py")
+    call = runner.RecordedGenerateContentCall(
+        request={
+            "model": "gemini-2.5-flash",
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "type": "function_call",
+                            "function_call": {
+                                "call_id": "call_a",
+                                "name": "read_file",
+                                "arguments": {"path": "ExampleMod.java"},
+                            },
+                        },
+                        {
+                            "type": "function_call",
+                            "function_call": {
+                                "call_id": "call_b",
+                                "name": "write_file",
+                                "arguments": {"path": "ExampleMod.java", "text": "ok"},
+                            },
+                        },
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "type": "function_response",
+                            "function_response": {
+                                "call_id": "call_a",
+                                "name": "read_file",
+                                "output": {"status": "success"},
+                            },
+                        },
+                        {
+                            "type": "function_response",
+                            "function_response": {
+                                "call_id": "call_b",
+                                "name": "write_file",
+                                "output": {"status": "success"},
+                            },
+                        },
+                    ],
+                },
+            ],
+        },
+        response=None,
+    )
+
+    sequence = runner._tool_call_sequence([call])
+
+    assert [item["type"] for item in sequence] == [
+        "function_call",
+        "function_call",
+        "function_call_output",
+        "function_call_output",
+    ]
+    assert [item["call_id"] for item in sequence] == ["call_a", "call_b", "call_a", "call_b"]
+    assert sequence[0]["name"] == "read_file"
+    assert sequence[1]["arguments"] == {"path": "ExampleMod.java", "text": "ok"}
+    assert sequence[2]["output"] == {"status": "success"}
