@@ -21,6 +21,7 @@ from openai import (
 )
 
 from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ToolCall
+from pd_agent.core import ToolResult, ToolResultStatus
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.reporting.redaction import Redactor, json_ready
 
@@ -153,9 +154,11 @@ class OpenAIProvider(ModelProvider):
         return retry_limit
 
     def _build_request_payload(self, request: AgentRequest, *, model: str) -> dict[str, Any]:
+        input_items: list[dict[str, Any]] = [self._message_to_input(message) for message in request.messages]
+        input_items.extend(self._tool_result_to_input(result) for result in request.tool_results)
         payload: dict[str, Any] = {
             "model": model,
-            "input": [self._message_to_input(message) for message in request.messages],
+            "input": input_items,
         }
         tools = [self._tool_to_param(tool) for tool in request.tools]
         if tools:
@@ -198,6 +201,13 @@ class OpenAIProvider(ModelProvider):
             "name": name,
             "description": str(tool.get("description", "")),
             "parameters": json_ready(schema),
+        }
+
+    def _tool_result_to_input(self, result: ToolResult) -> dict[str, Any]:
+        return {
+            "type": "function_call_output",
+            "call_id": result.call_id,
+            "output": self.redactor.redact_text(self._tool_result_output(result)),
         }
 
     def _to_agent_response(self, response: Any, *, model: str) -> AgentResponse:
@@ -250,6 +260,17 @@ class OpenAIProvider(ModelProvider):
             tool_name=str(getattr(item, "name", "")),
             arguments=arguments,
         )
+
+    def _tool_result_output(self, result: ToolResult) -> str:
+        payload: dict[str, Any] = {
+            "call_id": result.call_id,
+            "tool_name": result.tool_name,
+            "status": result.status.value,
+            "output": json_ready(result.output),
+            "error": result.error,
+            "metadata": json_ready(dict(result.metadata)),
+        }
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     def _parse_tool_arguments(self, raw_arguments: Any) -> dict[str, Any]:
         if isinstance(raw_arguments, Mapping):

@@ -196,6 +196,14 @@ def test_serialization_round_trip() -> None:
     )
     request = AgentRequest(
         messages=(AgentMessage(role="user", content="hello"),),
+        tool_results=(
+            ToolResult(
+                call_id="tool-1",
+                tool_name="fake_tool",
+                status=ToolResultStatus.SUCCESS,
+                output={"ok": True},
+            ),
+        ),
         tools=(
             {
                 "name": "fake_tool",
@@ -239,6 +247,14 @@ def test_fake_provider_and_tool_are_compatible() -> None:
     context_source = FakeContextSource()
     request = AgentRequest(
         messages=(AgentMessage(role="user", content="hi"),),
+        tool_results=(
+            ToolResult(
+                call_id="abc",
+                tool_name=tool.name,
+                status=ToolResultStatus.SUCCESS,
+                output={"ok": True},
+            ),
+        ),
         tools=(
             {
                 "name": tool.name,

@@ -141,12 +141,14 @@ class AgentRequest:
     """Provider request."""
 
     messages: tuple[AgentMessage, ...] = ()
+    tool_results: tuple[ToolResult, ...] = ()
     tools: tuple[Mapping[str, Any], ...] = ()
     model_config: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "messages": [message.to_dict() for message in self.messages],
+            "tool_results": [result.to_dict() for result in self.tool_results],
             "tools": [dict(tool) for tool in self.tools],
             "model_config": dict(self.model_config),
         }
@@ -156,6 +158,9 @@ class AgentRequest:
         return cls(
             messages=tuple(
                 AgentMessage.from_dict(item) for item in data.get("messages", [])
+            ),
+            tool_results=tuple(
+                ToolResult.from_dict(item) for item in data.get("tool_results", [])
             ),
             tools=tuple(dict(tool) for tool in data.get("tools", [])),
             model_config=dict(data.get("model_config", {})),

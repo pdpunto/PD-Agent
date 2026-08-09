@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import pytest
 
 from pd_agent import ContextBundle, ContextItem
 from pd_agent.context import ContextManager
-from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ToolCall
+from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ToolCall, ToolResult, ToolResultStatus
 from pd_agent.core.errors import ProviderError
 from pd_agent.providers import OpenAIProvider
 from pd_agent.reporting import Redactor
@@ -205,6 +206,87 @@ def test_store_is_forced_false_even_if_requested_true() -> None:
     )
 
     assert client.responses.calls[0]["store"] is False
+
+
+def test_tool_result_continuation_serializes_function_call_output() -> None:
+    response = SimpleNamespace(
+        id="resp_tool",
+        model="gpt-test",
+        status="completed",
+        _request_id="req_tool",
+        usage=None,
+        output=[_Message(_Text("ok"))],
+    )
+    client = _FakeClient([response])
+    provider = _provider(client=client)
+    tool_result = ToolResult(
+        call_id="call_123",
+        tool_name="read_file",
+        status=ToolResultStatus.SUCCESS,
+        output={"content": "hello"},
+        metadata={"changed": False},
+    )
+
+    provider.execute(
+        AgentRequest(
+            messages=(AgentMessage(role="user", content="continue"),),
+            tool_results=(tool_result,),
+            model_config={"model": "gpt-test"},
+        )
+    )
+
+    input_items = client.responses.calls[0]["input"]
+    output_item = next(item for item in input_items if item.get("type") == "function_call_output")
+    assert output_item["call_id"] == "call_123"
+    payload = json.loads(output_item["output"])
+    assert payload["call_id"] == "call_123"
+    assert payload["tool_name"] == "read_file"
+    assert payload["status"] == "success"
+    assert payload["output"] == {"content": "hello"}
+
+
+def test_multiple_tool_results_serialized_in_order() -> None:
+    response = SimpleNamespace(
+        id="resp_multi",
+        model="gpt-test",
+        status="completed",
+        _request_id="req_multi",
+        usage=None,
+        output=[_Message(_Text("ok"))],
+    )
+    client = _FakeClient([response])
+    provider = _provider(client=client)
+
+    provider.execute(
+        AgentRequest(
+            messages=(AgentMessage(role="user", content="continue"),),
+            tool_results=(
+                ToolResult(
+                    call_id="call_a",
+                    tool_name="read_file",
+                    status=ToolResultStatus.SUCCESS,
+                    output="alpha",
+                ),
+                ToolResult(
+                    call_id="call_b",
+                    tool_name="write_file",
+                    status=ToolResultStatus.ERROR,
+                    error="boom",
+                ),
+            ),
+            model_config={"model": "gpt-test"},
+        )
+    )
+
+    input_items = client.responses.calls[0]["input"]
+    output_items = [item for item in input_items if item.get("type") == "function_call_output"]
+    assert [item["call_id"] for item in output_items] == ["call_a", "call_b"]
+    first = json.loads(output_items[0]["output"])
+    second = json.loads(output_items[1]["output"])
+    assert first["status"] == "success"
+    assert first["output"] == "alpha"
+    assert second["status"] == "error"
+    assert second["error"] == "boom"
 
 
 def test_tool_call_mapping_and_multiple_calls() -> None:
