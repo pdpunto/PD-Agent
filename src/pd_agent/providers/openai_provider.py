@@ -155,6 +155,7 @@ class OpenAIProvider(ModelProvider):
 
     def _build_request_payload(self, request: AgentRequest, *, model: str) -> dict[str, Any]:
         input_items: list[dict[str, Any]] = [self._message_to_input(message) for message in request.messages]
+        input_items.extend(self._tool_call_to_input(call) for call in request.tool_calls)
         input_items.extend(self._tool_result_to_input(result) for result in request.tool_results)
         payload: dict[str, Any] = {
             "model": model,
@@ -201,6 +202,14 @@ class OpenAIProvider(ModelProvider):
             "name": name,
             "description": str(tool.get("description", "")),
             "parameters": json_ready(schema),
+        }
+
+    def _tool_call_to_input(self, call: ToolCall) -> dict[str, Any]:
+        return {
+            "type": "function_call",
+            "call_id": call.call_id,
+            "name": call.tool_name,
+            "arguments": json.dumps(json_ready(call.arguments), ensure_ascii=False, sort_keys=True),
         }
 
     def _tool_result_to_input(self, result: ToolResult) -> dict[str, Any]:

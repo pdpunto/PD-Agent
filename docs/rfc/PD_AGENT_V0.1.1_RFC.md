@@ -21,6 +21,7 @@ fixture Fabric controlado.
 - core provider-neutral se mantiene;
 - OpenAI sigue siendo unico provider;
 - `store=false` salvo incompatibilidad demostrada;
+- turnos manuales reenviarán `tool_calls` + `tool_results` neutrales para continuar `function_call` + `function_call_output`;
 - API key nunca persiste;
 - Git y Gradle siguen con boundary existente;
 - Minecraft runtime sigue fuera.

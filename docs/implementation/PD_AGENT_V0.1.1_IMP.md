@@ -35,7 +35,8 @@ Archivos previstos:
 
 Objetivo:
 
-- continuar tool loop con `function_call_output` / `call_id`;
+- continuar tool loop con `tool_calls` + `tool_results` neutrales;
+- serializar en OpenAI como `function_call` + `function_call_output` por `call_id`;
 - conservar core provider-neutral.
 
 ## Lote C - Harness live E2E

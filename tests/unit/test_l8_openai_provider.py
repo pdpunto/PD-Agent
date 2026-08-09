@@ -208,7 +208,7 @@ def test_store_is_forced_false_even_if_requested_true() -> None:
     assert client.responses.calls[0]["store"] is False
 
 
-def test_tool_result_continuation_serializes_function_call_output() -> None:
+def test_tool_continuation_serializes_function_call_and_output() -> None:
     response = SimpleNamespace(
         id="resp_tool",
         model="gpt-test",
@@ -219,6 +219,7 @@ def test_tool_result_continuation_serializes_function_call_output() -> None:
     )
     client = _FakeClient([response])
     provider = _provider(client=client)
+    tool_call = ToolCall(call_id="call_123", tool_name="read_file", arguments={"path": "alpha.txt"})
     tool_result = ToolResult(
         call_id="call_123",
         tool_name="read_file",
@@ -230,13 +231,18 @@ def test_tool_result_continuation_serializes_function_call_output() -> None:
     provider.execute(
         AgentRequest(
             messages=(AgentMessage(role="user", content="continue"),),
+            tool_calls=(tool_call,),
             tool_results=(tool_result,),
             model_config={"model": "gpt-test"},
         )
     )
 
     input_items = client.responses.calls[0]["input"]
+    call_item = next(item for item in input_items if item.get("type") == "function_call")
     output_item = next(item for item in input_items if item.get("type") == "function_call_output")
+    assert call_item["call_id"] == "call_123"
+    assert call_item["name"] == "read_file"
+    assert json.loads(call_item["arguments"]) == {"path": "alpha.txt"}
     assert output_item["call_id"] == "call_123"
     payload = json.loads(output_item["output"])
     assert payload["call_id"] == "call_123"
@@ -256,10 +262,15 @@ def test_multiple_tool_results_serialized_in_order() -> None:
     )
     client = _FakeClient([response])
     provider = _provider(client=client)
+    tool_calls = (
+        ToolCall(call_id="call_a", tool_name="read_file", arguments={"path": "alpha.txt"}),
+        ToolCall(call_id="call_b", tool_name="write_file", arguments={"path": "beta.txt", "text": "ok"}),
+    )
 
     provider.execute(
         AgentRequest(
             messages=(AgentMessage(role="user", content="continue"),),
+            tool_calls=tool_calls,
             tool_results=(
                 ToolResult(
                     call_id="call_a",
@@ -279,7 +290,11 @@ def test_multiple_tool_results_serialized_in_order() -> None:
     )
 
     input_items = client.responses.calls[0]["input"]
+    call_items = [item for item in input_items if item.get("type") == "function_call"]
     output_items = [item for item in input_items if item.get("type") == "function_call_output"]
+    assert [item["call_id"] for item in call_items] == ["call_a", "call_b"]
+    assert json.loads(call_items[0]["arguments"]) == {"path": "alpha.txt"}
+    assert json.loads(call_items[1]["arguments"]) == {"path": "beta.txt", "text": "ok"}
     assert [item["call_id"] for item in output_items] == ["call_a", "call_b"]
     first = json.loads(output_items[0]["output"])
     second = json.loads(output_items[1]["output"])

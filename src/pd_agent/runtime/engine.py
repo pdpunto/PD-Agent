@@ -92,6 +92,7 @@ class AgentRuntime:
         self._mark_state(run_state, "inspect complete")
 
         history: list[AgentMessage] = [AgentMessage(role="user", content=task)]
+        pending_tool_calls: tuple[ToolCall, ...] = ()
         pending_tool_results: tuple[ToolResult, ...] = ()
         try:
             while not run_state.state.is_terminal():
@@ -104,8 +105,10 @@ class AgentRuntime:
                         limits=limits,
                         external_context=external_context,
                         history=history,
+                        tool_calls=pending_tool_calls,
                         tool_results=pending_tool_results,
                     )
+                    pending_tool_calls = ()
                     pending_tool_results = ()
                     run_state.record_agent_step()
                     self._persist_state(run_state)
@@ -150,6 +153,7 @@ class AgentRuntime:
                         run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
                         run_state.transition_to(RunStatus.BUILDING)
+                    pending_tool_calls = response.tool_calls
                     pending_tool_results = tool_results
                     self._persist_state(run_state)
                     continue
@@ -232,6 +236,7 @@ class AgentRuntime:
         limits: ExecutionLimits,
         external_context: tuple[Any, ...],
         history: list[AgentMessage],
+        tool_calls: tuple[ToolCall, ...],
         tool_results: tuple[ToolResult, ...],
     ) -> Any:
         bundle = self.context_manager.build_context(
@@ -243,6 +248,7 @@ class AgentRuntime:
         messages = bundle.to_messages() + tuple(history)
         request = AgentRequest(
             messages=messages,
+            tool_calls=tool_calls,
             tool_results=tool_results,
             tools=tuple(self._tool_specs()),
             model_config=self._model_config(run_state, limits),

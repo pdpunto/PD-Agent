@@ -196,6 +196,9 @@ def test_serialization_round_trip() -> None:
     )
     request = AgentRequest(
         messages=(AgentMessage(role="user", content="hello"),),
+        tool_calls=(
+            ToolCall(call_id="call-1", tool_name="fake_tool", arguments={"path": "a.txt"}),
+        ),
         tool_results=(
             ToolResult(
                 call_id="tool-1",
@@ -247,6 +250,9 @@ def test_fake_provider_and_tool_are_compatible() -> None:
     context_source = FakeContextSource()
     request = AgentRequest(
         messages=(AgentMessage(role="user", content="hi"),),
+        tool_calls=(
+            ToolCall(call_id="abc", tool_name=tool.name, arguments={"path": "file.txt"}),
+        ),
         tool_results=(
             ToolResult(
                 call_id="abc",

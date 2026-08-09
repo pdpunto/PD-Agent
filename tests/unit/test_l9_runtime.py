@@ -211,8 +211,9 @@ def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
     assert report.final_state.value == "COMPLETED"
     assert run_state.build_attempt_count == 2
     assert len(provider.requests) == 3
+    assert provider.requests[1].tool_calls == ()
     assert provider.requests[1].tool_results == ()
-    assert provider.requests[2].tool_results
+    assert [call.call_id for call in provider.requests[2].tool_calls] == ["2"]
     assert [result.call_id for result in provider.requests[2].tool_results] == ["2"]
     assert storage.paths_for(run_state.run_id).final_report_md.exists()
 
@@ -412,6 +413,8 @@ def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) ->
     assert run_state.state.value == "COMPLETED"
     assert report.final_state.value == "COMPLETED"
     assert len(provider.requests) == 3
+    assert [call.call_id for call in provider.requests[1].tool_calls] == ["1", "2"]
     assert [result.call_id for result in provider.requests[1].tool_results] == ["1", "2"]
     assert all(result.status.value == "success" for result in provider.requests[1].tool_results)
+    assert [call.call_id for call in provider.requests[2].tool_calls] == ["3"]
     assert [result.call_id for result in provider.requests[2].tool_results] == ["3"]
