@@ -637,9 +637,18 @@ def _run_openai_live(summary: ValidationSummary, args: argparse.Namespace) -> Sc
 
 
 def _run_suite(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
-    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     pytest_temp = summary.validation_root / "pytest-tmp"
     pytest_temp.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "--basetemp",
+        str((pytest_temp / "basetemp").resolve()),
+    ]
     result = _run_command(
         command,
         cwd=REPO_ROOT,
@@ -648,7 +657,6 @@ def _run_suite(summary: ValidationSummary, args: argparse.Namespace) -> Scenario
             "TMP": str(pytest_temp),
             "TEMP": str(pytest_temp),
             "TMPDIR": str(pytest_temp),
-            "PYTEST_ADDOPTS": "--basetemp=" + str(pytest_temp / "basetemp"),
         },
     )
     _write_command_evidence(summary, "pytest-suite", result)
