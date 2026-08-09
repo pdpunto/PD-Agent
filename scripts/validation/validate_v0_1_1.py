@@ -308,7 +308,7 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
         "final_report_json_exists": paths.final_report_json.exists(),
         "final_report_md_exists": paths.final_report_md.exists(),
         "events_jsonl_exists": paths.events_jsonl.exists(),
-        "artifact_path": str(report.final_build.path) if report.final_build and report.final_build.path else None,
+        "artifact_path": str(report.artifact.path) if report.artifact and report.artifact.path else None,
         "final_state": run_state.state.value,
         "termination_reason": run_state.termination_reason,
         "evaluation_passed": evaluation.passed,
@@ -343,7 +343,7 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
             source_path=str(edit.relative_path),
             before_hash=edit.before_hash,
             after_hash=after_hash,
-            artifact=str(report.final_build.path) if report.final_build and report.final_build.path else None,
+            artifact=str(report.artifact.path) if report.artifact and report.artifact.path else None,
             usage=usage_summary,
             secret_found=secret_found,
         )
