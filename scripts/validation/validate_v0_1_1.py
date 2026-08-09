@@ -23,9 +23,11 @@ DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PYTEST_TIMEOUT_SECONDS = 1800
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TASK = (
-    "Abre y lee primero `src/main/java/dev/pdpunto/l11/ExampleMod.java`. "
-    "Luego cambia solo el string existente de acceptance en ExampleMod.message() "
-    "de \"\" a \"PD Agent Gemini 3 v0.1.1 live acceptance\" usando write_file sobre el mismo archivo. "
+    "Objetivo: modifica una sola linea en el fixture Fabric real. "
+    "Archivo exacto: `src/main/java/dev/pdpunto/l11/ExampleMod.java`. "
+    "Primero usa `read_file` si necesitas confirmar el contenido, pero no uses `list_directory`. "
+    "Luego usa `write_file` sobre ese mismo archivo para cambiar solo `return \"\";` "
+    "a `return \"PD Agent Gemini 3 v0.1.1 live acceptance\";`. "
     "No cambies Gradle ni la arquitectura. "
     "Despues compila y valida el artefacto."
 )
@@ -259,6 +261,25 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
         )
     api_key = os.environ["GEMINI_API_KEY"]
     model = DEFAULT_GEMINI_MODEL
+    source_context = (
+        {
+            "source": "l13",
+            "priority": 1,
+            "label": "target-source-edit",
+            "content": (
+                f"Target source file: {edit.relative_path}\n"
+                f"Initial content:\n{edit.before_text}\n"
+                f"Required final replacement:\n{expected_final_text}\n"
+                "Use PD tools only. Do not use list_directory unless absolutely necessary. "
+                "Make the source change with write_file."
+            ),
+            "metadata": {
+                "path": str(edit.relative_path),
+                "before_hash": edit.before_hash,
+                "after_hash": edit.after_hash,
+            },
+        },
+    )
     provider = GeminiProvider(model=model, api_key=api_key, provider_retry_limit=0)
     recording_client = RecordingGeminiClient(provider._client)  # noqa: SLF001
     provider._client = recording_client  # noqa: SLF001
@@ -275,7 +296,7 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
     gradle_home = summary.validation_root / "gradle-home-live-e2e"
     _seed_gradle_home(work_root, gradle_home)
     with base._temp_env(GRADLE_USER_HOME=str(gradle_home)):
-        run_state, report = controller.run(work_root, args.task)
+        run_state, report = controller.run(work_root, args.task, external_context=source_context)
     evaluation = evaluate_pass(storage, run_state.run_id)
     paths = storage.paths_for(run_state.run_id)
     after_text = edit.path.read_text(encoding="utf-8")
