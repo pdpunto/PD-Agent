@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import importlib.util
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
+
+import pytest
 
 
 def _load_runner():
@@ -58,6 +62,141 @@ def test_prepare_working_copy_ignores_generated_dirs() -> None:
         assert (copied / "src" / "file.txt").exists()
         assert not (copied / "build").exists()
         assert not (copied / ".git").exists()
+
+
+def test_prepare_source_edit_uses_java_or_kt_not_markdown() -> None:
+    runner = _load_runner()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / "README.md").write_text("markdown", encoding="utf-8")
+        source = root / "src" / "main" / "java" / "dev" / "pdpunto" / "sample" / "Sample.java"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            """package dev.pdpunto.sample;
+
+public final class Sample {
+    public String message() {
+        return "";
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        edit = runner._prepare_source_edit(root)
+
+        assert edit.relative_path.suffix == ".java"
+        assert edit.relative_path.name != "README.md"
+        assert edit.before_hash != edit.after_hash
+        assert edit.before_text != edit.after_text
+        assert edit.after_text == source.read_text(encoding="utf-8").replace('return "";', 'return "PD Agent L11 acceptance";')
+
+
+def test_security_scenario_records_outside_absence_and_tool_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+    import pd_agent
+    import pd_agent.config as config_module
+    import pd_agent.context as context_module
+    import pd_agent.runtime as runtime_module
+
+    class FakeLimits:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeRunner:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeInspector:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeValidator:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeContextManager:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    class FakeStateValue:
+        value = "FAILED"
+
+    class FakeRunState:
+        def __init__(self) -> None:
+            self.run_id = "run-1"
+            self.state = FakeStateValue()
+            self.termination_reason = "tool rejected"
+
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "run_id": self.run_id,
+                "state": self.state.value,
+                "termination_reason": self.termination_reason,
+            }
+
+    class FakeReport:
+        def to_dict(self) -> dict[str, object]:
+            return {"final_state": "FAILED"}
+
+    class FakeController:
+        def __init__(self, *, storage: object, **kwargs: object) -> None:
+            self.storage = storage
+
+        def run(self, work_root: Path, task: str) -> tuple[FakeRunState, FakeReport]:
+            from pd_agent.reporting import RunEvent, RunEventType
+
+            self.storage.append_event(
+                RunEvent(
+                    run_id="run-1",
+                    event_type=RunEventType.TOOL_REJECTED,
+                    payload={"path": r"..\outside.txt"},
+                )
+            )
+            return FakeRunState(), FakeReport()
+
+    monkeypatch.setattr(pd_agent, "ArtifactValidator", FakeValidator)
+    monkeypatch.setattr(pd_agent, "GradleBuildRunner", FakeRunner)
+    monkeypatch.setattr(pd_agent, "ProjectInspector", FakeInspector)
+    monkeypatch.setattr(context_module, "ContextManager", FakeContextManager)
+    monkeypatch.setattr(config_module, "ExecutionLimits", FakeLimits)
+    monkeypatch.setattr(runtime_module, "RunController", FakeController)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        candidate = base / "candidate"
+        validation = base / "validation"
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=candidate,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        source = candidate / "src" / "main" / "java" / "dev" / "pdpunto" / "sample" / "Sample.java"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            """package dev.pdpunto.sample;
+
+public final class Sample {
+    public String message() {
+        return "";
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        result = runner._run_security_scenario(summary, SimpleNamespace())
+        evaluation_path = summary.evidence_root / "security" / "evaluation.json"
+        evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+        outside_path = Path(evaluation["outside_path"])
+
+        assert result.status == "PASS"
+        assert result.details["outside_exists"] is False
+        assert result.details["tool_rejected_seen"] is True
+        assert outside_path.exists() is False
+        assert "TOOL_REJECTED" in evaluation["event_types"]
 
 
 def test_cleanup_removes_working_and_gradle_homes() -> None:

@@ -10,6 +10,7 @@ import argparse
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,6 +45,14 @@ IGNORED_COPY_DIRS = {
     "validation_runs",
 }
 
+_SOURCE_EDIT_CANDIDATES: tuple[tuple[str, str], ...] = (
+    (
+        'System.out.println("[.Core] Fabric bootstrap ready");',
+        'System.out.println("[.Core] Fabric bootstrap ready - PD Agent L11 acceptance");',
+    ),
+    ('return "";', 'return "PD Agent L11 acceptance";'),
+)
+
 
 @dataclass(slots=True)
 class CommandResult:
@@ -66,6 +75,18 @@ class ScenarioResult:
     status: str
     reason: str
     details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SourceEditResult:
+    path: Path
+    relative_path: Path
+    before_hash: str
+    after_hash: str
+    before_text: str
+    after_text: str
+    changed: bool
+    replacement: str
 
 
 @dataclass(slots=True)
@@ -317,17 +338,14 @@ def _run_baseline_build(summary: ValidationSummary, args: argparse.Namespace) ->
 
 def _run_acceptance_main(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
     work_root = _prepare_working_copy(summary, suffix="acceptance")
-    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector, RunStorage
+    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector
     from pd_agent.config import ExecutionLimits
     from pd_agent.context import ContextManager
-    from pd_agent.core import AgentMessage, AgentRequest
     from pd_agent.pass_policy import evaluate_pass
-    from pd_agent.reporting import FinalReport
     from pd_agent.runtime import RunController
+    from pd_agent.reporting import RunStorage
 
-    target = _pick_markdown_target(work_root)
-    original = target.read_text(encoding="utf-8")
-    modified = _append_marker(original, "Validation note: external L11 runner.")
+    edit = _prepare_source_edit(work_root)
     provider = ScriptedProvider(
         [
             _agent_response(
@@ -336,7 +354,10 @@ def _run_acceptance_main(summary: ValidationSummary, args: argparse.Namespace) -
                     _tool_call(
                         "call-1",
                         "write_file",
-                        {"path": str(target.relative_to(work_root)), "content": modified},
+                        {
+                            "path": str(edit.relative_path),
+                            "content": edit.after_text,
+                        },
                     )
                 ],
             )
@@ -355,6 +376,9 @@ def _run_acceptance_main(summary: ValidationSummary, args: argparse.Namespace) -
     with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-acceptance")):
         run_state, report = controller.run(work_root, args.task)
     evaluation = evaluate_pass(storage, run_state.run_id)
+    after_text = edit.path.read_text(encoding="utf-8")
+    after_hash = _sha256_text(after_text)
+    source_changed = edit.before_hash != after_hash and after_text == edit.after_text
     _write_json(summary.evidence_root / "acceptance-main" / "evaluation.json", {
         "run_state": run_state.to_dict(),
         "report": report.to_dict(),
@@ -362,21 +386,35 @@ def _run_acceptance_main(summary: ValidationSummary, args: argparse.Namespace) -
             "passed": evaluation.passed,
             "reason": evaluation.reason,
         },
+        "source_edit": {
+            "path": str(edit.relative_path),
+            "before_hash": edit.before_hash,
+            "after_hash": after_hash,
+            "changed": source_changed,
+            "replacement": edit.replacement,
+        },
     })
-    if evaluation.passed and report.final_state.value == "COMPLETED":
+    if evaluation.passed and report.final_state.value == "COMPLETED" and source_changed:
         return _scenario_result(
             "Fake provider + real Gradle",
             "PASS",
             "completed",
             run_id=run_state.run_id,
             report=str(storage.paths_for(run_state.run_id).final_report_json),
+            source_path=str(edit.relative_path),
+            before_hash=edit.before_hash,
+            after_hash=after_hash,
         )
     return _scenario_result(
         "Fake provider + real Gradle",
         "FAIL",
-        evaluation.reason,
+        evaluation.reason if source_changed else "source edit not verified",
         run_id=run_state.run_id,
         final_state=run_state.state.value,
+        source_path=str(edit.relative_path),
+        before_hash=edit.before_hash,
+        after_hash=after_hash,
+        source_changed=source_changed,
     )
 
 
@@ -410,11 +448,12 @@ def _run_repair_scenario(summary: ValidationSummary, args: argparse.Namespace) -
             _agent_response("Termino sin mas herramientas.", ()),
         ]
     )
-    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector, RunStorage
+    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector
     from pd_agent.config import ExecutionLimits
     from pd_agent.context import ContextManager
     from pd_agent.pass_policy import evaluate_pass
     from pd_agent.runtime import RunController
+    from pd_agent.reporting import RunStorage
 
     storage = RunStorage(summary.evidence_root / "repair")
     controller = RunController(
@@ -469,10 +508,11 @@ def _run_security_scenario(summary: ValidationSummary, args: argparse.Namespace)
             )
         ]
     )
-    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector, RunStorage
+    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector
     from pd_agent.config import ExecutionLimits
     from pd_agent.context import ContextManager
     from pd_agent.runtime import RunController
+    from pd_agent.reporting import RunStorage
 
     storage = RunStorage(summary.evidence_root / "security")
     controller = RunController(
@@ -486,16 +526,32 @@ def _run_security_scenario(summary: ValidationSummary, args: argparse.Namespace)
     )
     with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-security")):
         run_state, report = controller.run(work_root, "Security boundary check")
+    outside_path = (work_root.parent / "outside.txt").resolve()
+    outside_exists = outside_path.exists()
+    event_types = [event.event_type.value for event in storage.read_events(run_state.run_id)]
+    tool_rejected_seen = "TOOL_REJECTED" in event_types
     _write_json(summary.evidence_root / "security" / "evaluation.json", {
         "run_state": run_state.to_dict(),
         "report": report.to_dict(),
+        "outside_path": str(outside_path),
+        "outside_exists": outside_exists,
+        "tool_rejected_seen": tool_rejected_seen,
+        "event_types": event_types,
     })
-    if run_state.state.value == "FAILED" and run_state.termination_reason == "tool rejected":
+    if (
+        run_state.state.value == "FAILED"
+        and run_state.termination_reason == "tool rejected"
+        and not outside_exists
+        and tool_rejected_seen
+    ):
         return _scenario_result(
             "Security scenario",
             "PASS",
             "outside write rejected",
             run_id=run_state.run_id,
+            outside_path=str(outside_path),
+            outside_exists=outside_exists,
+            tool_rejected_seen=tool_rejected_seen,
         )
     return _scenario_result(
         "Security scenario",
@@ -503,15 +559,19 @@ def _run_security_scenario(summary: ValidationSummary, args: argparse.Namespace)
         "boundary not enforced",
         run_id=run_state.run_id,
         final_state=run_state.state.value,
+        outside_path=str(outside_path),
+        outside_exists=outside_exists,
+        tool_rejected_seen=tool_rejected_seen,
     )
 
 
 def _run_negative_artifact(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
     work_root = _prepare_working_copy(summary, suffix="negative-artifact")
-    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector, RunStorage
+    from pd_agent import ArtifactValidator, GradleBuildRunner, ProjectInspector
     from pd_agent.config import ExecutionLimits
     from pd_agent.core import RunState
     from pd_agent.context import ContextManager
+    from pd_agent.reporting import RunStorage
 
     storage = RunStorage(summary.evidence_root / "negative-artifact")
     inspector = ProjectInspector()
@@ -612,13 +672,62 @@ def _pick_markdown_target(root: Path) -> Path:
 
 
 def _pick_source_target(root: Path) -> Path:
-    for pattern in ("*.java", "*.kt", "*.kts"):
-        for path in root.rglob(pattern):
+    for path in _iter_source_files(root):
+        return path
+    raise ScenarioBlocked("no source target found")
+
+
+def _prepare_source_edit(root: Path) -> SourceEditResult:
+    for path in _iter_source_files(root):
+        before_text = path.read_text(encoding="utf-8")
+        for needle, replacement in _SOURCE_EDIT_CANDIDATES:
+            if needle not in before_text:
+                continue
+            after_text = before_text.replace(needle, replacement, 1)
+            if after_text == before_text:
+                continue
+            relative_path = path.relative_to(root)
+            before_hash = _sha256_text(before_text)
+            after_hash = _sha256_text(after_text)
+            return SourceEditResult(
+                path=path,
+                relative_path=relative_path,
+                before_hash=before_hash,
+                after_hash=after_hash,
+                before_text=before_text,
+                after_text=after_text,
+                changed=True,
+                replacement=replacement,
+            )
+    raise ScenarioBlocked("no editable source literal found")
+
+
+def _iter_source_files(root: Path) -> Iterator[Path]:
+    for pattern in ("*.java", "*.kt"):
+        for path in sorted(root.rglob(pattern), key=lambda item: item.relative_to(root).as_posix()):
             if any(part in IGNORED_COPY_DIRS for part in path.parts):
                 continue
-            if path.is_file():
-                return path
-    raise ScenarioBlocked("no source target found")
+            if not path.is_file():
+                continue
+            if not _is_real_source_file(root, path):
+                continue
+            yield path
+
+
+def _is_real_source_file(root: Path, path: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    parts = relative.parts
+    for index, part in enumerate(parts[:-2]):
+        if part == "src" and parts[index + 2] in {"java", "kotlin"}:
+            return True
+    return False
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _append_marker(text: str, marker: str) -> str:
