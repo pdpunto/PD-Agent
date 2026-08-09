@@ -147,6 +147,19 @@ class AgentRuntime:
                         run_state.termination_reason = "tool rejected"
                         break
 
+                    pending_tool_calls = response.tool_calls
+                    pending_tool_results = tool_results
+                    pending_provider_continuations = response.provider_continuations
+
+                    if (
+                        run_state.state == RunStatus.PLANNING
+                        and tool_results
+                        and self._tool_results_are_inspection_only(tool_results)
+                        and not self._tool_results_have_change(tool_results)
+                    ):
+                        self._persist_state(run_state)
+                        continue
+
                     if run_state.state == RunStatus.PLANNING:
                         run_state.transition_to(RunStatus.EDITING)
                     elif run_state.state == RunStatus.DIAGNOSING:
@@ -157,9 +170,6 @@ class AgentRuntime:
                         run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
                         run_state.transition_to(RunStatus.BUILDING)
-                    pending_tool_calls = response.tool_calls
-                    pending_tool_results = tool_results
-                    pending_provider_continuations = response.provider_continuations
                     self._persist_state(run_state)
                     continue
 
@@ -355,6 +365,13 @@ class AgentRuntime:
 
     def _tool_results_have_rejection(self, tool_results: tuple[ToolResult, ...]) -> bool:
         return any(result.status == ToolResultStatus.REJECTED for result in tool_results)
+
+    def _tool_results_have_change(self, tool_results: tuple[ToolResult, ...]) -> bool:
+        return any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results)
+
+    def _tool_results_are_inspection_only(self, tool_results: tuple[ToolResult, ...]) -> bool:
+        inspection_tools = {"read_file", "list_directory", "search_text"}
+        return all(result.tool_name in inspection_tools for result in tool_results)
 
     def _summary(self, run_state: RunState) -> str:
         return f"state={run_state.state.value} steps={run_state.agent_step_count} tools={run_state.tool_call_count} builds={run_state.build_attempt_count}"

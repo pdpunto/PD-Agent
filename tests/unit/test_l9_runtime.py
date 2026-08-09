@@ -218,6 +218,36 @@ def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
     assert storage.paths_for(run_state.run_id).final_report_md.exists()
 
 
+def test_planning_read_then_write_continues_to_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "plan-read-write", build_state="fail")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="edit",
+                tool_calls=(
+                    ToolCall(call_id="2", tool_name="write_file", arguments={"path": "build-state.txt", "content": "pass\n"}),
+                ),
+            ),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "read then write")
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 2
+    assert provider.requests[0].tool_results == ()
+    assert [result.call_id for result in provider.requests[1].tool_results] == ["1"]
+    assert [call.call_id for call in provider.requests[1].tool_calls] == ["1"]
+
+
 def test_invalid_tool_call_fails(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "bad-tool", build_state="pass")
     provider = ScriptedProvider(
@@ -431,10 +461,8 @@ def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) ->
 
     assert run_state.state.value == "COMPLETED"
     assert report.final_state.value == "COMPLETED"
-    assert len(provider.requests) == 3
+    assert len(provider.requests) == 2
     assert [call.call_id for call in provider.requests[1].tool_calls] == ["1", "2"]
     assert [result.call_id for result in provider.requests[1].tool_results] == ["1", "2"]
     assert provider.requests[1].provider_continuations == continuations
     assert all(result.status.value == "success" for result in provider.requests[1].tool_results)
-    assert [call.call_id for call in provider.requests[2].tool_calls] == ["3"]
-    assert [result.call_id for result in provider.requests[2].tool_results] == ["3"]
