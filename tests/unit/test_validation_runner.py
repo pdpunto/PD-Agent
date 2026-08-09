@@ -64,6 +64,83 @@ def test_prepare_working_copy_ignores_generated_dirs() -> None:
         assert not (copied / ".git").exists()
 
 
+def test_l11_fixture_is_recognized_by_project_inspector() -> None:
+    from pd_agent.project import ProjectInspectionStatus, ProjectInspector
+
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
+    snapshot = ProjectInspector().inspect(fixture)
+
+    assert snapshot.status == ProjectInspectionStatus.READY
+    assert snapshot.wrapper.present is True
+    assert snapshot.target_subproject == fixture
+    assert any(path.as_posix().endswith("src/main/java") for path in snapshot.source_roots)
+    assert any(path.name == "fabric.mod.json" for path in snapshot.relevant_files)
+
+
+def test_pick_source_target_stays_in_source_root() -> None:
+    runner = _load_runner()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        noisy = root / ".local-backups" / "bad"
+        noisy.mkdir(parents=True)
+        (noisy / "Bad.java").write_text('class Bad { String x = "no"; }', encoding="utf-8")
+        good = root / "src" / "main" / "java" / "dev" / "pdpunto" / "sample"
+        good.mkdir(parents=True)
+        (good / "Good.java").write_text(
+            'package dev.pdpunto.sample; public class Good { String x = "ok"; }',
+            encoding="utf-8",
+        )
+        (root / "README.md").write_text("readme", encoding="utf-8")
+
+        picked = runner._pick_source_target(root)
+
+        assert picked == good / "Good.java"
+        assert ".local-backups" not in picked.as_posix()
+        assert picked.suffix == ".java"
+
+
+def test_main_fails_fast_on_baseline_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+    calls: list[str] = []
+
+    monkeypatch.setattr(runner, "_run_prechecks", lambda summary, args: calls.append("prechecks"))
+    monkeypatch.setattr(
+        runner,
+        "_run_baseline_build",
+        lambda summary, args: runner._scenario_result("Baseline Fabric build", "FAIL", "build failed"),
+    )
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("later scenario should not run")
+
+    monkeypatch.setattr(runner, "_run_acceptance_main", _boom)
+    monkeypatch.setattr(runner, "_run_repair_scenario", _boom)
+    monkeypatch.setattr(runner, "_run_security_scenario", _boom)
+    monkeypatch.setattr(runner, "_run_negative_artifact", _boom)
+    monkeypatch.setattr(runner, "_run_openai_live", _boom)
+    monkeypatch.setattr(runner, "_run_suite", _boom)
+    monkeypatch.setattr(runner, "_finalize", lambda summary: None)
+    monkeypatch.setattr(runner, "_write_artifacts", lambda summary: None)
+    monkeypatch.setattr(runner, "_print_summary", lambda summary: None)
+    monkeypatch.setattr(runner, "_cleanup", lambda summary, keep_working_copy=False: None)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        candidate = Path(temp_dir) / "candidate"
+        candidate.mkdir()
+        code = runner.main(
+            [
+                "--candidate-root",
+                str(candidate),
+                "--validation-root",
+                str(validation),
+            ]
+        )
+
+    assert code == 2
+    assert calls == ["prechecks"]
+
+
 def test_prepare_source_edit_uses_java_or_kt_not_markdown() -> None:
     runner = _load_runner()
     with tempfile.TemporaryDirectory() as temp_dir:

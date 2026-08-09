@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "pdagentl11",
+  "version": "1.0.0",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "dev.pdpunto.l11.ExampleMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.0.0",
+    "minecraft": "~1.21.11"
+  }
+}

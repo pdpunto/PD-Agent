@@ -23,7 +23,7 @@ from typing import Any, Iterator, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CANDIDATE_ROOT = Path(r"C:\dev\proyectos\PD-Ecosystem")
+DEFAULT_CANDIDATE_ROOT = REPO_ROOT / "tests" / "fixtures" / "l11_fabric_fixture"
 DEFAULT_VALIDATION_ROOT = Path(tempfile.gettempdir()) / "pd-agent-v0.1-validation"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PYTEST_TIMEOUT_SECONDS = 1800
@@ -250,6 +250,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         _run_prechecks(summary, args)
         summary.baseline_build = _run_baseline_build(summary, args)
+        if summary.baseline_build.status != "PASS":
+            raise ScenarioBlocked(f"baseline failed: {summary.baseline_build.reason}")
         summary.acceptance_main = _run_acceptance_main(summary, args)
         summary.repair = _run_repair_scenario(summary, args)
         summary.security = _run_security_scenario(summary, args)
@@ -320,7 +322,9 @@ def _check_git_clean(root: Path) -> None:
 def _run_baseline_build(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
     work_root = _prepare_working_copy(summary, suffix="baseline")
     command = _gradle_build_command(work_root, ["build", "--no-daemon"])
-    result = _run_command(command, cwd=work_root, timeout_seconds=args.timeout_seconds)
+    gradle_home = summary.validation_root / "gradle-home-baseline"
+    _seed_gradle_home(work_root, gradle_home)
+    result = _run_command(command, cwd=work_root, timeout_seconds=args.timeout_seconds, extra_env={"GRADLE_USER_HOME": str(gradle_home)})
     _write_command_evidence(summary, "baseline-build", result)
     if result.timed_out:
         return _scenario_result("Baseline Fabric build", "BLOCKED", "timeout", command=" ".join(command))
@@ -373,7 +377,9 @@ def _run_acceptance_main(summary: ValidationSummary, args: argparse.Namespace) -
         limits=ExecutionLimits(),
         project_inspector=ProjectInspector(),
     )
-    with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-acceptance")):
+    gradle_home = summary.validation_root / "gradle-home-acceptance"
+    _seed_gradle_home(work_root, gradle_home)
+    with _temp_env(GRADLE_USER_HOME=str(gradle_home)):
         run_state, report = controller.run(work_root, args.task)
     evaluation = evaluate_pass(storage, run_state.run_id)
     after_text = edit.path.read_text(encoding="utf-8")
@@ -465,7 +471,9 @@ def _run_repair_scenario(summary: ValidationSummary, args: argparse.Namespace) -
         limits=ExecutionLimits(),
         project_inspector=ProjectInspector(),
     )
-    with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-repair")):
+    gradle_home = summary.validation_root / "gradle-home-repair"
+    _seed_gradle_home(work_root, gradle_home)
+    with _temp_env(GRADLE_USER_HOME=str(gradle_home)):
         run_state, report = controller.run(work_root, "Repair controlled compile break")
     evaluation = evaluate_pass(storage, run_state.run_id)
     _write_json(summary.evidence_root / "repair" / "evaluation.json", {
@@ -524,7 +532,9 @@ def _run_security_scenario(summary: ValidationSummary, args: argparse.Namespace)
         limits=ExecutionLimits(max_build_attempts=1),
         project_inspector=ProjectInspector(),
     )
-    with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-security")):
+    gradle_home = summary.validation_root / "gradle-home-security"
+    _seed_gradle_home(work_root, gradle_home)
+    with _temp_env(GRADLE_USER_HOME=str(gradle_home)):
         run_state, report = controller.run(work_root, "Security boundary check")
     outside_path = (work_root.parent / "outside.txt").resolve()
     outside_exists = outside_path.exists()
@@ -577,7 +587,9 @@ def _run_negative_artifact(summary: ValidationSummary, args: argparse.Namespace)
     inspector = ProjectInspector()
     snapshot = inspector.inspect(work_root)
     state = RunState(project_root=work_root, task="Negative artifact check")
-    with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home-negative")):
+    gradle_home = summary.validation_root / "gradle-home-negative"
+    _seed_gradle_home(work_root, gradle_home)
+    with _temp_env(GRADLE_USER_HOME=str(gradle_home)):
         build = GradleBuildRunner(reporting=storage).run(snapshot, state, ExecutionLimits())
     jars = tuple((work_root / "build" / "libs").glob("*.jar"))
     for jar in jars:
@@ -661,6 +673,33 @@ def _prepare_working_copy(summary: ValidationSummary, *, suffix: str) -> Path:
         shutil.rmtree(work_root)
     shutil.copytree(candidate, work_root, ignore=shutil.ignore_patterns(*IGNORED_COPY_DIRS))
     return work_root
+
+
+def _seed_gradle_home(project_root: Path, gradle_home: Path) -> None:
+    wrapper_properties = project_root / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    if not wrapper_properties.exists():
+        return
+    distribution_name = _gradle_distribution_name(wrapper_properties.read_text(encoding="utf-8"))
+    source_root = Path.home() / ".gradle" / "wrapper" / "dists" / distribution_name
+    if not source_root.exists():
+        return
+    destination_root = gradle_home / "wrapper" / "dists" / distribution_name
+    if destination_root.exists():
+        return
+    destination_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_root, destination_root, ignore=shutil.ignore_patterns("*.lck"))
+
+
+def _gradle_distribution_name(wrapper_properties_text: str) -> str:
+    for line in wrapper_properties_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("distributionUrl="):
+            value = stripped.split("=", 1)[1].replace("\\:", ":")
+            name = Path(value).name
+            if name.endswith(".zip"):
+                return name[:-4]
+            return Path(name).stem
+    raise ScenarioBlocked("gradle distributionUrl missing")
 
 
 def _pick_markdown_target(root: Path) -> Path:
