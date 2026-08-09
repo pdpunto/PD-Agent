@@ -57,7 +57,7 @@ class GeminiProvider(ModelProvider):
         try:
             response = self._client.models.generate_content(
                 model=model,
-                contents=contents,
+                contents=list(contents),
                 config=config,
             )
         except Exception as exc:  # pragma: no cover - normalized boundary

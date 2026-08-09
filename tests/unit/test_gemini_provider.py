@@ -118,7 +118,7 @@ def _request(
 
 def _first_content(call: dict[str, object]) -> types.Content:
     contents = call["contents"]
-    assert isinstance(contents, tuple)
+    assert isinstance(contents, (list, tuple))
     return contents[0]
 
 
