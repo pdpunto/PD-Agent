@@ -73,6 +73,9 @@ def test_l11_fixture_is_recognized_by_project_inspector() -> None:
     assert snapshot.status == ProjectInspectionStatus.READY
     assert snapshot.wrapper.present is True
     assert snapshot.target_subproject == fixture
+    assert snapshot.detected_versions["minecraft"].value == "1.21.11"
+    assert snapshot.detected_versions["loader"].value == "0.19.3"
+    assert snapshot.detected_versions["loom"].value == "1.13.3"
     assert any(path.as_posix().endswith("src/main/java") for path in snapshot.source_roots)
     assert any(path.name == "fabric.mod.json" for path in snapshot.relevant_files)
 
