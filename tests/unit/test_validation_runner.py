@@ -303,8 +303,8 @@ def test_cleanup_removes_working_and_gradle_homes() -> None:
 def test_v011_prechecks_require_gemini_provider_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = _load_runner("validate_v0_1_1.py")
     monkeypatch.setattr(runner.base, "_check_pd_agent_import", lambda: None)
-    monkeypatch.setattr(runner.base, "_check_git_clean", lambda root: None)
     monkeypatch.setattr(runner.base, "_check_java", lambda: None)
+    monkeypatch.setattr(runner, "_check_git_clean", lambda summary, root: None)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         base = Path(temp_dir)
@@ -328,7 +328,8 @@ def test_v011_prechecks_require_gemini_provider_and_model(monkeypatch: pytest.Mo
         runner._run_prechecks(summary, args)
 
         assert "provider: gemini" in summary.notes
-        assert "model: gemini-2.5-flash" in summary.notes
+        assert "PD_AGENT_MODEL env: gemini-2.5-flash" in summary.notes
+        assert "selected model: gemini-3.5-flash" in summary.notes
         assert "GEMINI_API_KEY: present" in summary.notes
 
 
@@ -397,3 +398,58 @@ def test_v011_tool_sequence_reads_gemini_function_calls() -> None:
     assert sequence[0]["name"] == "read_file"
     assert sequence[1]["arguments"] == {"path": "ExampleMod.java", "text": "ok"}
     assert sequence[2]["output"] == {"status": "success"}
+
+
+def test_v011_continuation_summary_hides_raw_signature() -> None:
+    runner = _load_runner("validate_v0_1_1.py")
+    call = runner.RecordedGenerateContentCall(
+        request={
+            "model": "gemini-3.5-flash",
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "type": "function_call",
+                            "function_call": {
+                                "call_id": "call_a",
+                                "name": "read_file",
+                                "arguments": {"path": "ExampleMod.java"},
+                            },
+                            "thought_signature_present": True,
+                            "thought_signature_sha256": "hash-a",
+                            "thought_signature_position": 0,
+                        }
+                    ],
+                }
+            ],
+        },
+        response={
+            "output": [
+                {
+                    "content": [
+                        {
+                            "type": "function_call",
+                            "function_call": {
+                                "call_id": "call_a",
+                                "name": "read_file",
+                                "arguments": {"path": "ExampleMod.java"},
+                            },
+                            "thought_signature_present": True,
+                            "thought_signature_sha256": "hash-a",
+                            "thought_signature_position": 0,
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+
+    summary = runner._continuation_summary([call])
+
+    assert summary["continuation_detected"] is True
+    assert summary["provider"] == "gemini"
+    assert summary["payload_present"] is True
+    assert summary["replay_success"] is True
+    assert summary["response_records"][0]["payload_sha256"] == "hash-a"
+    assert summary["request_records"][0]["payload_sha256"] == "hash-a"

@@ -21,6 +21,7 @@ DEFAULT_CANDIDATE_ROOT = base.DEFAULT_CANDIDATE_ROOT
 DEFAULT_VALIDATION_ROOT = Path(base.tempfile.gettempdir()) / "pd-agent-v0.1.1-validation"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PYTEST_TIMEOUT_SECONDS = 1800
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_TASK = (
     "Inspecciona el archivo Java indicado. "
     "Lee primero el source. "
@@ -177,7 +178,7 @@ def _run_prechecks(summary: LiveSummary, args: argparse.Namespace) -> None:
     if base.sys.version_info < (3, 13):
         raise base.ScenarioBlocked("Python >= 3.13 requerido")
     base._check_pd_agent_import()
-    base._check_git_clean(REPO_ROOT)
+    _check_git_clean(summary, REPO_ROOT)
     base._check_java()
     candidate = args.candidate_root.resolve()
     if not candidate.exists():
@@ -186,18 +187,32 @@ def _run_prechecks(summary: LiveSummary, args: argparse.Namespace) -> None:
     if not wrapper.exists():
         raise base.ScenarioBlocked(f"falta gradlew.bat en: {candidate}")
     provider = os.environ.get("PD_AGENT_PROVIDER", "").strip().lower()
-    model = os.environ.get("PD_AGENT_MODEL")
+    env_model = os.environ.get("PD_AGENT_MODEL")
     api_key = os.environ.get("GEMINI_API_KEY")
     if provider != "gemini":
         raise base.ScenarioBlocked("PD_AGENT_PROVIDER must be gemini")
-    if model != "gemini-2.5-flash":
-        raise base.ScenarioBlocked("PD_AGENT_MODEL must be gemini-2.5-flash")
     if not api_key:
         raise base.ScenarioBlocked("GEMINI_API_KEY missing")
     summary.notes.append("prechecks: ok")
     summary.notes.append("provider: gemini")
-    summary.notes.append(f"model: {model}")
+    summary.notes.append(f"PD_AGENT_MODEL env: {env_model if env_model else 'missing'}")
+    summary.notes.append(f"selected model: {DEFAULT_GEMINI_MODEL}")
     summary.notes.append("GEMINI_API_KEY: present")
+
+
+def _check_git_clean(summary: LiveSummary, root: Path) -> None:
+    result = base._run_command(["git", "status", "--short"], cwd=root, timeout_seconds=30)
+    if result.timed_out:
+        raise base.ScenarioBlocked("git status timeout")
+    if result.exit_code != 0:
+        raise base.ScenarioBlocked("git status fallo")
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    allowed = {"?? docs/validation/PD_AGENT_V0.1.1_VALIDATION.md"}
+    unexpected = [line for line in lines if line not in allowed]
+    if unexpected:
+        raise base.ScenarioBlocked(f"working tree sucio: {unexpected[0]}")
+    if any(line in allowed for line in lines):
+        summary.notes.append("untracked preexisting: docs/validation/PD_AGENT_V0.1.1_VALIDATION.md")
 
 
 def _run_baseline_build(summary: LiveSummary, args: argparse.Namespace) -> base.ScenarioResult:
@@ -244,7 +259,7 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
             replacement=expected_final_text,
         )
     api_key = os.environ["GEMINI_API_KEY"]
-    model = os.environ["PD_AGENT_MODEL"]
+    model = DEFAULT_GEMINI_MODEL
     provider = GeminiProvider(model=model, api_key=api_key, provider_retry_limit=0)
     recording_client = RecordingGeminiClient(provider._client)  # noqa: SLF001
     provider._client = recording_client  # noqa: SLF001
@@ -269,16 +284,22 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
     source_changed = edit.before_hash != after_hash and expected_final_text in after_text
     usage_summary = _usage_summary(recording_client.calls)
     event_types = [event.event_type.value for event in storage.read_events(run_state.run_id)]
+    continuation_summary = _continuation_summary(recording_client.calls)
+    tool_call_count = sum(1 for item in _tool_call_sequence(recording_client.calls) if item["type"] == "function_call")
     live_details = {
         "run_id": run_state.run_id,
         "provider": "gemini",
         "model": model,
+        "selected_model": DEFAULT_GEMINI_MODEL,
+        "env_model": os.environ.get("PD_AGENT_MODEL"),
         "source_path": str(edit.relative_path),
         "before_hash": edit.before_hash,
         "after_hash": after_hash,
         "source_changed": source_changed,
         "expected_final_text": expected_final_text,
         "tool_calls": _tool_call_sequence(recording_client.calls),
+        "tool_call_count": tool_call_count,
+        "continuation": continuation_summary,
         "usage": usage_summary,
         "event_types": event_types,
         "final_report_json": str(paths.final_report_json),
@@ -306,6 +327,8 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
         and report.artifact is not None
         and report.artifact.classification == "VALID"
         and source_changed
+        and continuation_summary["replay_success"]
+        and tool_call_count > 0
         and not secret_found
     ):
         return _scenario_result(
@@ -315,6 +338,8 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
             run_id=run_state.run_id,
             provider="gemini",
             model=model,
+            continuation_replay_success=continuation_summary["replay_success"],
+            tool_call_count=tool_call_count,
             source_path=str(edit.relative_path),
             before_hash=edit.before_hash,
             after_hash=after_hash,
@@ -336,6 +361,8 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
         before_hash=edit.before_hash,
         after_hash=after_hash,
         source_changed=source_changed,
+        continuation_replay_success=continuation_summary["replay_success"],
+        tool_call_count=tool_call_count,
         usage=usage_summary,
         secret_found=secret_found,
     )
@@ -439,6 +466,67 @@ def _tool_call_sequence(calls: Sequence[RecordedGenerateContentCall]) -> list[di
     return sequence
 
 
+def _continuation_summary(calls: Sequence[RecordedGenerateContentCall]) -> dict[str, Any]:
+    response_hashes: list[str] = []
+    request_hashes: list[str] = []
+    response_records: list[dict[str, Any]] = []
+    request_records: list[dict[str, Any]] = []
+
+    for call_index, call in enumerate(calls):
+        for content_index, item in enumerate(call.response.get("output", []) if call.response else []):
+            parts = item.get("content", []) if isinstance(item, Mapping) else []
+            for part_index, part in enumerate(parts):
+                if not isinstance(part, Mapping):
+                    continue
+                hash_value = part.get("thought_signature_sha256")
+                if not hash_value:
+                    continue
+                record = {
+                    "call_index": call_index,
+                    "content_index": content_index,
+                    "part_index": part_index,
+                    "provider": "gemini",
+                    "target": part.get("function_call", {}).get("call_id") if isinstance(part.get("function_call"), Mapping) else None,
+                    "position": part.get("thought_signature_position"),
+                    "payload_present": True,
+                    "payload_sha256": hash_value,
+                }
+                response_records.append(record)
+                response_hashes.append(str(hash_value))
+
+        for content_index, item in enumerate(call.request.get("contents", [])):
+            if not isinstance(item, Mapping):
+                continue
+            for part_index, part in enumerate(item.get("parts", []) or []):
+                if not isinstance(part, Mapping):
+                    continue
+                hash_value = part.get("thought_signature_sha256")
+                if not hash_value:
+                    continue
+                record = {
+                    "call_index": call_index,
+                    "content_index": content_index,
+                    "part_index": part_index,
+                    "provider": "gemini",
+                    "target": part.get("function_call", {}).get("call_id") if isinstance(part.get("function_call"), Mapping) else None,
+                    "position": part.get("thought_signature_position"),
+                    "payload_present": True,
+                    "payload_sha256": hash_value,
+                }
+                request_records.append(record)
+                request_hashes.append(str(hash_value))
+
+    replay_success = bool(response_hashes and response_hashes == request_hashes[: len(response_hashes)])
+    return {
+        "continuation_detected": bool(response_records),
+        "provider": "gemini" if response_records else None,
+        "response_records": response_records,
+        "request_records": request_records,
+        "payload_present": bool(response_records),
+        "replay_success": replay_success,
+    }
+
+
 def _sanitize_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "model": payload.get("model"),
@@ -453,11 +541,11 @@ def _sanitize_content_item(item: Any) -> dict[str, Any]:
         "role": _item_value(item, "role"),
     }
     parts = _item_value(item, "parts") or []
-    data["parts"] = [_sanitize_part_item(part) for part in parts if part is not None]
+    data["parts"] = [_sanitize_part_item(part, position=index) for index, part in enumerate(parts) if part is not None]
     return data
 
 
-def _sanitize_part_item(item: Any) -> dict[str, Any]:
+def _sanitize_part_item(item: Any, *, position: int | None = None) -> dict[str, Any]:
     data: dict[str, Any] = {"type": _item_value(item, "type")}
     text = _item_value(item, "text")
     if text is not None:
@@ -473,6 +561,11 @@ def _sanitize_part_item(item: Any) -> dict[str, Any]:
             }.items()
             if value is not None
         }
+        thought_signature = _item_value(item, "thought_signature") or _item_value(item, "thoughtSignature")
+        if thought_signature is not None:
+            data["thought_signature_present"] = True
+            data["thought_signature_sha256"] = _sha256_bytes(_coerce_signature_bytes(thought_signature))
+            data["thought_signature_position"] = position
     function_response = _item_value(item, "function_response") or _item_value(item, "functionResponse")
     if function_response is not None:
         data["function_response"] = {
@@ -509,8 +602,20 @@ def _sanitize_output_item(item: Any) -> dict[str, Any]:
     data = {"type": getattr(item, "type", None)}
     content = getattr(item, "content", None)
     if content is not None:
-        data["content"] = [_sanitize_part_item(part) for part in (getattr(content, "parts", None) or [])]
+        data["content"] = [_sanitize_part_item(part, position=index) for index, part in enumerate(getattr(content, "parts", None) or [])]
     return data
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _coerce_signature_bytes(value: Any) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
 
 
 def _mapping_or_none(value: Any) -> dict[str, Any] | None:
@@ -582,18 +687,24 @@ def _write_validation_doc(summary: LiveSummary) -> None:
         f"- Fecha: {summary.started_at.isoformat()}",
         f"- Commit validado: {base.subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=REPO_ROOT, capture_output=True, text=True).stdout.strip()}",
         f"- Provider usado: {summary.live_run.details.get('provider') if summary.live_run else 'missing'}",
-        f"- Modelo usado: {os.environ.get('PD_AGENT_MODEL', 'missing')}",
+        f"- Modelo usado: {summary.live_run.details.get('selected_model') if summary.live_run else 'missing'}",
+        f"- PD_AGENT_MODEL env: {summary.live_run.details.get('env_model') if summary.live_run else 'missing'}",
         f"- GEMINI_API_KEY: {'present' if os.environ.get('GEMINI_API_KEY') else 'missing'}",
         f"- Fixture: {summary.candidate_root}",
         f"- Run id: {summary.live_run.details.get('run_id') if summary.live_run else 'n/a'}",
         f"- Source hash before: {summary.live_run.details.get('before_hash') if summary.live_run else 'n/a'}",
         f"- Source hash after: {summary.live_run.details.get('after_hash') if summary.live_run else 'n/a'}",
-        f"- Gradle result: {summary.baseline_build.status if summary.baseline_build else 'n/a'} / {summary.live_run.reason if summary.live_run else 'n/a'}",
+        f"- Source changed: {summary.live_run.details.get('source_changed') if summary.live_run else 'n/a'}",
+        f"- Tool call count: {summary.live_run.details.get('tool_call_count') if summary.live_run else 'n/a'}",
+        f"- Continuation detected: {summary.live_run.details.get('continuation', {}).get('continuation_detected') if summary.live_run else 'n/a'}",
+        f"- Continuation replay: {summary.live_run.details.get('continuation', {}).get('replay_success') if summary.live_run else 'n/a'}",
+        f"- Gradle result: {summary.live_run.reason if summary.live_run else 'n/a'}",
         f"- Artifact result: {summary.live_run.details.get('artifact') if summary.live_run else 'n/a'}",
         f"- Final state: {summary.live_run.details.get('final_state') if summary.live_run else 'n/a'}",
         f"- PASS evaluation: {summary.live_run.details.get('evaluation_passed') if summary.live_run else 'n/a'}",
         f"- Secret scan: {summary.live_run.details.get('secret_found') if summary.live_run else 'n/a'}",
         f"- Usage: {json.dumps(summary.live_run.details.get('usage'), ensure_ascii=False) if summary.live_run else 'n/a'}",
+        "- OpenAI live: NOT RUN (blocked by billing)",
         "- Repair live: NOT RUN",
         "- Minecraft runtime: NOT VALIDATED",
         "",
