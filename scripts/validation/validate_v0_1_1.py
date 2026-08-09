@@ -21,7 +21,7 @@ DEFAULT_CANDIDATE_ROOT = base.DEFAULT_CANDIDATE_ROOT
 DEFAULT_VALIDATION_ROOT = Path(base.tempfile.gettempdir()) / "pd-agent-v0.1.1-validation"
 DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PYTEST_TIMEOUT_SECONDS = 1800
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TASK = (
     "Inspecciona el archivo Java indicado. "
     "Lee primero el source. "
