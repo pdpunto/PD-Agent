@@ -3,6 +3,9 @@
 **Estado:** Auditoria previa  
 **Base:** `b96dae19524f8a520292702e3d8e880f39a72bfd`
 
+> Alineacion actual: OpenAI v0.1.1 ya quedo validado hasta su bloqueo externo.
+> Este plan conserva A/B/C historicos y define el restante camino Gemini.
+
 ## Lote A - Configuracion y secretos
 
 Archivos previstos:
@@ -58,3 +61,74 @@ Objetivo:
 - suite de regresion;
 - validacion final;
 - docs cerradas.
+
+## Lote G1 - Adapter/config/security
+
+Archivos previstos:
+
+- `pyproject.toml`
+- `src/pd_agent/config.py`
+- `src/pd_agent/bootstrap.py`
+- `src/pd_agent/providers/gemini_provider.py`
+- `src/pd_agent/reporting/redaction.py`
+- tests unitarios de config/provider.
+
+Objetivo:
+
+- dependencia `google-genai`;
+- `GeminiProvider`;
+- `GEMINI_API_KEY`;
+- provider selection/bootstrap;
+- secret redaction;
+- timeout/retry configuration;
+- tests unitarios.
+
+## Lote G2 - Tool protocol
+
+Archivos previstos:
+
+- `src/pd_agent/providers/gemini_provider.py`;
+- `src/pd_agent/core/contracts.py` solo si un ajuste neutral minimo es inevitable;
+- `src/pd_agent/runtime/engine.py` solo si un ajuste neutral minimo es inevitable;
+- tests provider/runtime.
+
+Objetivo:
+
+- tool declarations;
+- `functionCall -> ToolCall`;
+- `ToolResult -> functionResponse`;
+- multi-turn;
+- múltiples tool calls si API/modelo lo soporta;
+- usage;
+- provider neutrality.
+
+## Lote G3 - Gemini live E2E
+
+Archivos previstos:
+
+- `scripts/validation/validate_v0_1_1.py`
+- `tests/fixtures/l11_fabric_fixture` como copia temporal
+- `docs/validation/PD_AGENT_V0.1.1_VALIDATION.md`
+
+Objetivo:
+
+- Gemini real;
+- tool real;
+- modificacion real;
+- Gradle real;
+- ArtifactValidator;
+- JAR;
+- COMPLETED;
+- PASS.
+
+## Lote G4 - Cierre
+
+Objetivo:
+
+- suite completa;
+- OpenAI regression;
+- secret scan;
+- evidence;
+- validation doc;
+- commit/push;
+- cierre v0.1.1.
