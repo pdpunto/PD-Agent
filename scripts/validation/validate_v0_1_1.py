@@ -25,8 +25,10 @@ DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TASK = (
     "Objetivo: modifica una sola linea en el fixture Fabric real. "
     "Archivo exacto: `src/main/java/dev/pdpunto/l11/ExampleMod.java`. "
-    "Primero usa `read_file` si necesitas confirmar el contenido, pero no uses `list_directory`. "
-    "Luego usa `write_file` sobre ese mismo archivo para cambiar solo `return \"\";` "
+    "No uses `list_directory`. "
+    "Si necesitas inspeccionar, usa `read_file` y `write_file` en la misma respuesta; "
+    "no te detengas tras `read_file`. "
+    "Mejor aun, usa `write_file` directamente sobre ese mismo archivo para cambiar solo `return \"\";` "
     "a `return \"PD Agent Gemini 3 v0.1.1 live acceptance\";`. "
     "No cambies Gradle ni la arquitectura. "
     "Despues compila y valida el artefacto."
@@ -270,8 +272,9 @@ def _run_live_e2e(summary: LiveSummary, args: argparse.Namespace) -> base.Scenar
                 f"Target source file: {edit.relative_path}\n"
                 f"Initial content:\n{edit.before_text}\n"
                 f"Required final replacement:\n{expected_final_text}\n"
-                "Use PD tools only. Do not use list_directory unless absolutely necessary. "
-                "Make the source change with write_file."
+                "Use PD tools only. Do not use list_directory. "
+                "If you inspect, do it with read_file and then write_file in the same response. "
+                "Do not stop after read_file. Make the source change with write_file."
             ),
             "metadata": {
                 "path": str(edit.relative_path),
