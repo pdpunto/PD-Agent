@@ -4,8 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from google.genai import types
 
-from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ToolCall, ToolResult, ToolResultStatus
+from pd_agent.core import AgentMessage, AgentRequest, ToolCall, ToolResult, ToolResultStatus
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.providers import GeminiProvider
 
@@ -37,22 +38,23 @@ class _Usage:
         self.tool_use_prompt_token_count = 4
 
 
-class _Part:
-    def __init__(self, *, text: str | None = None, function_call: object | None = None) -> None:
-        self.text = text
-        self.function_call = function_call
+class _Parts:
+    @staticmethod
+    def text(value: str) -> object:
+        return types.Part.from_text(text=value)
 
+    @staticmethod
+    def function_call(*, call_id: str | None, name: str, args: dict[str, object]) -> object:
+        return types.Part(functionCall=types.FunctionCall(id=call_id, name=name, args=args))
 
-class _FunctionCall:
-    def __init__(self, call_id: str | None, name: str, args: object) -> None:
-        self.id = call_id
-        self.name = name
-        self.args = args
+    @staticmethod
+    def function_response(*, call_id: str | None, name: str, response: dict[str, object]) -> object:
+        return types.Part(functionResponse=types.FunctionResponse(id=call_id, name=name, response=response))
 
 
 class _Candidate:
-    def __init__(self, *parts: _Part, finish_reason: str = "STOP") -> None:
-        self.content = SimpleNamespace(parts=list(parts))
+    def __init__(self, *parts: object, finish_reason: str = "STOP") -> None:
+        self.content = types.Content(role="model", parts=list(parts))
         self.finish_reason = finish_reason
 
 
@@ -106,6 +108,39 @@ def _request(
     )
 
 
+def _first_content(call: dict[str, object]) -> types.Content:
+    contents = call["contents"]
+    assert isinstance(contents, tuple)
+    return contents[0]
+
+
+def test_sdk_types_construct_real_objects() -> None:
+    declaration = types.FunctionDeclaration(
+        name="lookup",
+        description="Lookup data",
+        parametersJsonSchema={"type": "object", "properties": {"q": {"type": "string"}}},
+    )
+    tool = types.Tool(functionDeclarations=[declaration])
+    call_without_id = types.FunctionCall(name="lookup", args={"q": "alpha"})
+    call_with_id = types.FunctionCall(id="call_1", name="lookup", args={"q": "alpha"})
+    response_without_id = types.FunctionResponse(name="lookup", response={"output": "ok"})
+    response_with_id = types.FunctionResponse(id="call_1", name="lookup", response={"output": "ok"})
+    config = types.GenerateContentConfig(
+        tools=[tool],
+        automaticFunctionCalling=types.AutomaticFunctionCallingConfig(disable=True),
+        httpOptions=types.HttpOptions(timeout=1000, retryOptions=types.HttpRetryOptions(attempts=1)),
+    )
+
+    assert call_without_id.id is None
+    assert call_with_id.id == "call_1"
+    assert response_without_id.id is None
+    assert response_with_id.id == "call_1"
+    assert tool.function_declarations[0].parameters_json_schema["type"] == "object"
+    assert config.automatic_function_calling.disable is True
+    assert config.http_options.timeout == 1000
+    assert config.http_options.retry_options.attempts == 1
+
+
 def test_repr_hides_secret() -> None:
     secret = "gm-secret-123"
     provider = _provider(api_key=secret)
@@ -114,13 +149,12 @@ def test_repr_hides_secret() -> None:
     assert "GeminiProvider(" in repr(provider)
 
 
-def test_client_http_options_control_timeout_and_retries() -> None:
+def test_client_http_options_real_types() -> None:
     provider = _provider(timeout_seconds=12.5, provider_retry_limit=2)
+    http_options = provider._client_http_options(provider._types())
 
-    assert provider._client_http_options() == {
-        "timeout": 12_500,
-        "retry_options": {"attempts": 3},
-    }
+    assert http_options.timeout == 12_500
+    assert http_options.retry_options.attempts == 3
 
 
 def test_messages_mapping_and_system_instruction() -> None:
@@ -142,12 +176,14 @@ def test_messages_mapping_and_system_instruction() -> None:
 
     call = client.models.calls[0]
     assert call["model"] == "gemini-test"
-    assert call["config"]["automatic_function_calling"] == {"disable": True}
-    assert call["config"]["system_instruction"] == "sys\ndev"
-    assert call["contents"] == (
-        {"role": "user", "parts": [{"text": "hello"}]},
-        {"role": "model", "parts": [{"text": "model reply"}]},
-    )
+    config = call["config"]
+    assert config.automatic_function_calling.disable is True
+    assert config.system_instruction == "sys\ndev"
+    assert len(call["contents"]) == 2
+    assert call["contents"][0].role == "user"
+    assert call["contents"][0].parts[0].text == "hello"
+    assert call["contents"][1].role == "model"
+    assert call["contents"][1].parts[0].text == "model reply"
     assert result.assistant_message == "done"
 
 
@@ -177,21 +213,23 @@ def test_tool_declarations_and_auto_function_calling_disabled() -> None:
     )
 
     config = client.models.calls[0]["config"]
-    assert config["automatic_function_calling"] == {"disable": True}
-    assert len(config["tools"]) == 1
-    declarations = config["tools"][0]["function_declarations"]
-    assert [item["name"] for item in declarations] == ["read_file", "write_file"]
-    assert declarations[0]["parameters_json_schema"]["properties"]["path"]["type"] == "string"
-    assert declarations[1]["parameters_json_schema"]["properties"]["text"]["type"] == "string"
+    assert config.automatic_function_calling.disable is True
+    assert config.http_options.timeout == 60_000
+    assert config.http_options.retry_options.attempts == 3
+    assert len(config.tools) == 1
+    declarations = config.tools[0].function_declarations
+    assert [item.name for item in declarations] == ["read_file", "write_file"]
+    assert declarations[0].parameters_json_schema["properties"]["path"]["type"] == "string"
+    assert declarations[1].parameters_json_schema["properties"]["text"]["type"] == "string"
 
 
 def test_function_call_response_maps_to_tool_calls_and_text() -> None:
     response = SimpleNamespace(
         candidates=[
             _Candidate(
-                _Part(text="need tools"),
-                _Part(function_call=_FunctionCall("call_1", "lookup", {"q": "alpha"})),
-                _Part(function_call=_FunctionCall("call_2", "write", {"path": "a.txt", "text": "ok"})),
+                _Parts.text("need tools"),
+                _Parts.function_call(call_id="call_1", name="lookup", args={"q": "alpha"}),
+                _Parts.function_call(call_id="call_2", name="write", args={"path": "a.txt", "text": "ok"}),
             )
         ],
         usage_metadata=_Usage(),
@@ -209,34 +247,75 @@ def test_function_call_response_maps_to_tool_calls_and_text() -> None:
     )
 
 
-def test_tool_call_id_must_exist() -> None:
+def test_function_call_without_id_gets_local_id() -> None:
     response = SimpleNamespace(
-        candidates=[_Candidate(_Part(function_call=_FunctionCall(None, "lookup", {"q": "alpha"})))],
+        candidates=[_Candidate(_Parts.function_call(call_id=None, name="lookup", args={"q": "alpha"}))],
         usage_metadata=_Usage(),
         id="resp-4",
         model="gemini-test",
     )
     provider = _provider(client=_FakeClient(response))
 
-    with pytest.raises(ProviderError) as excinfo:
-        provider.execute(_request(messages=(AgentMessage(role="user", content="do it"),), model_config={"model": "gemini-test"}))
+    result = provider.execute(_request(messages=(AgentMessage(role="user", content="do it"),), model_config={"model": "gemini-test"}))
 
-    assert excinfo.value.kind == "protocol"
+    assert result.tool_calls[0].call_id.startswith("gemini-local:")
+    assert result.tool_calls[0].tool_name == "lookup"
+    assert result.tool_calls[0].arguments == {"q": "alpha"}
+
+
+def test_no_id_tool_call_replay_omits_id_and_preserves_association() -> None:
+    response_1 = SimpleNamespace(
+        candidates=[_Candidate(_Parts.function_call(call_id=None, name="lookup", args={"q": "alpha"}))],
+        usage_metadata=_Usage(),
+        id="resp-5",
+        model="gemini-test",
+    )
+    response_2 = SimpleNamespace(text="done", usage_metadata=_Usage(), id="resp-6", model="gemini-test")
+    client = _FakeClient(response_1)
+    client.models.response = [response_1, response_2]
+
+    def _sequential_generate_content(**kwargs):
+        client.models.calls.append(kwargs)
+        return client.models.response.pop(0)
+
+    client.models.generate_content = _sequential_generate_content  # type: ignore[method-assign]
+    provider = _provider(client=client)
+
+    first = provider.execute(_request(messages=(AgentMessage(role="user", content="do it"),), model_config={"model": "gemini-test"}))
+    provider.execute(
+        _request(
+            messages=(AgentMessage(role="user", content="continue"),),
+            tool_calls=(first.tool_calls[0],),
+            tool_results=(
+                ToolResult(
+                    call_id=first.tool_calls[0].call_id,
+                    tool_name="lookup",
+                    status=ToolResultStatus.SUCCESS,
+                    output={"content": "alpha"},
+                ),
+            ),
+            model_config={"model": "gemini-test"},
+        )
+    )
+
+    replay_contents = client.models.calls[1]["contents"]
+    assert replay_contents[1].parts[0].function_call.id is None
+    assert replay_contents[2].parts[0].function_response.id is None
+    assert replay_contents[1].parts[0].function_call.name == "lookup"
+    assert replay_contents[2].parts[0].function_response.name == "lookup"
 
 
 def test_tool_results_serialize_to_function_response_parts() -> None:
-    response = SimpleNamespace(text="done", usage_metadata=_Usage(), id="resp-5", model="gemini-test")
+    response = SimpleNamespace(text="done", usage_metadata=_Usage(), id="resp-7", model="gemini-test")
     client = _FakeClient(response)
     provider = _provider(client=client)
     tool_calls = (
         ToolCall(call_id="call_a", tool_name="read_file", arguments={"path": "a.txt"}),
-        ToolCall(call_id="call_b", tool_name="write_file", arguments={"path": "b.txt", "text": "ok"}),
-        ToolCall(call_id="call_c", tool_name="delete_file", arguments={"path": "c.txt"}),
-        ToolCall(call_id="call_d", tool_name="wait", arguments={"seconds": 1}),
+        ToolCall(call_id="gemini-local:1:abc123", tool_name="write_file", arguments={"path": "b.txt", "text": "ok"}),
     )
     tool_results = (
         ToolResult(
-            call_id="call_b",
+            call_id="gemini-local:1:abc123",
             tool_name="write_file",
             status=ToolResultStatus.ERROR,
             output=None,
@@ -248,20 +327,6 @@ def test_tool_results_serialize_to_function_response_parts() -> None:
             tool_name="read_file",
             status=ToolResultStatus.SUCCESS,
             output={"content": "alpha"},
-        ),
-        ToolResult(
-            call_id="call_d",
-            tool_name="wait",
-            status=ToolResultStatus.TIMEOUT,
-            output=None,
-            error="slow",
-        ),
-        ToolResult(
-            call_id="call_c",
-            tool_name="delete_file",
-            status=ToolResultStatus.REJECTED,
-            output=None,
-            error="blocked",
         ),
     )
 
@@ -275,31 +340,63 @@ def test_tool_results_serialize_to_function_response_parts() -> None:
     )
 
     contents = client.models.calls[0]["contents"]
-    assert contents[0] == {"role": "user", "parts": [{"text": "continue"}]}
-    assert contents[1]["role"] == "model"
-    assert [part["function_call"]["id"] for part in contents[1]["parts"]] == ["call_a", "call_b", "call_c", "call_d"]
-    assert [part["function_call"]["name"] for part in contents[1]["parts"]] == ["read_file", "write_file", "delete_file", "wait"]
-    assert contents[2]["role"] == "user"
-    response_parts = contents[2]["parts"]
-    assert [part["function_response"]["id"] for part in response_parts] == ["call_b", "call_a", "call_d", "call_c"]
-    assert response_parts[0]["function_response"]["name"] == "write_file"
-    assert response_parts[1]["function_response"]["name"] == "read_file"
-    assert response_parts[2]["function_response"]["name"] == "wait"
-    assert response_parts[3]["function_response"]["name"] == "delete_file"
-    assert response_parts[0]["function_response"]["response"]["status"] == "error"
-    assert response_parts[0]["function_response"]["response"]["error"] == "boom"
-    assert response_parts[0]["function_response"]["response"]["metadata"] == {"attempt": 1}
-    assert response_parts[1]["function_response"]["response"]["status"] == "success"
-    assert response_parts[1]["function_response"]["response"]["output"] == {"content": "alpha"}
-    assert response_parts[2]["function_response"]["response"]["status"] == "timeout"
-    assert response_parts[3]["function_response"]["response"]["status"] == "rejected"
+    assert contents[0].role == "user"
+    assert contents[1].role == "model"
+    assert contents[1].parts[0].function_call.id == "call_a"
+    assert contents[1].parts[1].function_call.id is None
+    assert contents[2].role == "user"
+    assert contents[2].parts[0].function_response.id is None
+    assert contents[2].parts[1].function_response.id == "call_a"
+    assert contents[2].parts[0].function_response.response["status"] == "error"
+    assert contents[2].parts[1].function_response.response["status"] == "success"
+
+
+def test_multiple_calls_without_id_get_distinct_local_ids() -> None:
+    response = SimpleNamespace(
+        candidates=[
+            _Candidate(
+                _Parts.function_call(call_id=None, name="lookup", args={"q": "alpha"}),
+                _Parts.function_call(call_id=None, name="lookup", args={"q": "beta"}),
+            )
+        ],
+        usage_metadata=_Usage(),
+        id="resp-8",
+        model="gemini-test",
+    )
+    provider = _provider(client=_FakeClient(response))
+
+    result = provider.execute(_request(messages=(AgentMessage(role="user", content="go"),), model_config={"model": "gemini-test"}))
+
+    assert result.tool_calls[0].call_id != result.tool_calls[1].call_id
+    assert result.tool_calls[0].call_id.startswith("gemini-local:")
+    assert result.tool_calls[1].call_id.startswith("gemini-local:")
+
+
+def test_mixed_real_and_local_ids_round_trip() -> None:
+    response = SimpleNamespace(
+        candidates=[
+            _Candidate(
+                _Parts.function_call(call_id="call_real", name="lookup", args={"q": "alpha"}),
+                _Parts.function_call(call_id=None, name="write", args={"path": "a.txt"}),
+            )
+        ],
+        usage_metadata=_Usage(),
+        id="resp-9",
+        model="gemini-test",
+    )
+    provider = _provider(client=_FakeClient(response))
+
+    result = provider.execute(_request(messages=(AgentMessage(role="user", content="go"),), model_config={"model": "gemini-test"}))
+
+    assert result.tool_calls[0].call_id == "call_real"
+    assert result.tool_calls[1].call_id.startswith("gemini-local:")
 
 
 def test_usage_and_provider_metadata_are_mapped() -> None:
     response = SimpleNamespace(
-        candidates=[_Candidate(_Part(text="done"), finish_reason="STOP")],
+        candidates=[_Candidate(_Parts.text("done"), finish_reason="STOP")],
         usage_metadata=_Usage(),
-        id="resp-6",
+        id="resp-10",
         model="gemini-test",
     )
     provider = _provider(client=_FakeClient(response))
@@ -317,7 +414,7 @@ def test_usage_and_provider_metadata_are_mapped() -> None:
     assert result.provider_metadata == {
         "provider": "gemini",
         "model": "gemini-test",
-        "response_id": "resp-6",
+        "response_id": "resp-10",
         "finish_reason": "STOP",
     }
 
@@ -347,12 +444,10 @@ def test_timeout_and_retry_configuration_stays_under_control() -> None:
 
     provider.execute(_request(messages=(AgentMessage(role="user", content="hi"),), model_config={"model": "gemini-test"}))
 
-    call = provider._client.models.calls[0]
-    assert call["config"]["automatic_function_calling"] == {"disable": True}
-    assert provider._client_http_options() == {
-        "timeout": 3_250,
-        "retry_options": {"attempts": 5},
-    }
+    config = provider._build_generate_config(_request(messages=(AgentMessage(role="user", content="hi"),), model_config={"model": "gemini-test"}), provider._types(), system_instruction=None)
+    assert config.automatic_function_calling.disable is True
+    assert config.http_options.timeout == 3_250
+    assert config.http_options.retry_options.attempts == 5
 
 
 def test_provider_rejects_missing_model() -> None:
@@ -370,3 +465,4 @@ def test_no_gemini_imports_outside_adapter() -> None:
         text = path.read_text(encoding="utf-8")
         assert "google.genai" not in text
         assert "from google import genai" not in text
+

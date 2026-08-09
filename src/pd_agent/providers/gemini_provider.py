@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Mapping
 
 from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ToolCall, ToolResult
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.reporting.redaction import Redactor, json_ready
+
+
+_LOCAL_CALL_PREFIX = "gemini-local:"
 
 
 class GeminiProvider(ModelProvider):
@@ -46,11 +50,9 @@ class GeminiProvider(ModelProvider):
 
     def execute(self, request: AgentRequest) -> AgentResponse:
         model = self._effective_model(request)
-        system_instruction, contents = self._build_contents(request)
-        config = self._build_generate_config(
-            tools=self._build_tools(request.tools),
-            system_instruction=system_instruction,
-        )
+        types = self._types()
+        system_instruction, contents = self._build_contents(request, types)
+        config = self._build_generate_config(request, types, system_instruction=system_instruction)
         try:
             response = self._client.models.generate_content(
                 model=model,
@@ -70,30 +72,36 @@ class GeminiProvider(ModelProvider):
 
         return genai.Client(
             api_key=self.api_key,
-            http_options=types.HttpOptions(**self._client_http_options()),
+            http_options=self._client_http_options(types),
         )
 
-    def _client_http_options(self) -> dict[str, Any]:
-        return {
-            "timeout": int(self.timeout_seconds * 1000),
-            "retry_options": {"attempts": self.provider_retry_limit + 1},
-        }
+    def _types(self) -> Any:
+        try:
+            from google.genai import types
+        except ModuleNotFoundError as exc:  # pragma: no cover - dependency path
+            raise ConfigurationError("google-genai is required for GeminiProvider") from exc
+        return types
 
-    def _build_generate_config(self, *, tools: list[dict[str, Any]], system_instruction: str | None) -> dict[str, Any]:
-        config: dict[str, Any] = {
-            "automatic_function_calling": {"disable": True},
-        }
-        if tools:
-            config["tools"] = tools
-        if system_instruction:
-            config["system_instruction"] = system_instruction
-        return config
+    def _client_http_options(self, types: Any) -> Any:
+        return types.HttpOptions(
+            timeout=int(self.timeout_seconds * 1000),
+            retryOptions=types.HttpRetryOptions(attempts=self.provider_retry_limit + 1),
+        )
 
-    def _build_tools(self, tools: tuple[Mapping[str, Any], ...]) -> list[dict[str, Any]]:
-        declarations = [self._tool_declaration(tool) for tool in tools]
-        return [{"function_declarations": declarations}] if declarations else []
+    def _build_generate_config(self, request: AgentRequest, types: Any, *, system_instruction: str | None) -> Any:
+        tools = self._build_tools(request.tools, types)
+        return types.GenerateContentConfig(
+            automaticFunctionCalling=types.AutomaticFunctionCallingConfig(disable=True),
+            systemInstruction=system_instruction,
+            tools=tools or None,
+            httpOptions=self._client_http_options(types),
+        )
 
-    def _tool_declaration(self, tool: Mapping[str, Any]) -> dict[str, Any]:
+    def _build_tools(self, tools: tuple[Mapping[str, Any], ...], types: Any) -> list[Any]:
+        declarations = [self._tool_declaration(tool, types) for tool in tools]
+        return [types.Tool(functionDeclarations=declarations)] if declarations else []
+
+    def _tool_declaration(self, tool: Mapping[str, Any], types: Any) -> Any:
         name = str(tool.get("name", "")).strip()
         if not name:
             raise ProviderError(
@@ -102,11 +110,11 @@ class GeminiProvider(ModelProvider):
                 provider="gemini",
             )
         schema = tool.get("input_schema", tool.get("parameters", {"type": "object"}))
-        return {
-            "name": name,
-            "description": str(tool.get("description", "")),
-            "parameters_json_schema": json_ready(schema),
-        }
+        return types.FunctionDeclaration(
+            name=name,
+            description=str(tool.get("description", "")),
+            parametersJsonSchema=json_ready(schema),
+        )
 
     def _effective_model(self, request: AgentRequest) -> str:
         config_model = request.model_config.get("model")
@@ -115,9 +123,9 @@ class GeminiProvider(ModelProvider):
             raise ConfigurationError("GeminiProvider requires a model")
         return str(model)
 
-    def _build_contents(self, request: AgentRequest) -> tuple[str | None, tuple[dict[str, Any], ...]]:
+    def _build_contents(self, request: AgentRequest, types: Any) -> tuple[str | None, tuple[Any, ...]]:
         system_parts: list[str] = []
-        contents: list[dict[str, Any]] = []
+        contents: list[Any] = []
 
         for message in request.messages:
             normalized_role = message.role.strip().lower()
@@ -133,47 +141,46 @@ class GeminiProvider(ModelProvider):
                     details={"role": message.role},
                 )
             contents.append(
-                {
-                    "role": "model" if normalized_role in {"assistant", "model"} else "user",
-                    "parts": [{"text": message.content}],
-                }
+                types.Content(
+                    role="model" if normalized_role in {"assistant", "model"} else "user",
+                    parts=[types.Part.from_text(text=message.content)],
+                )
             )
 
         if request.tool_calls:
             contents.append(
-                {
-                    "role": "model",
-                    "parts": [self._function_call_part(call) for call in request.tool_calls],
-                }
+                types.Content(
+                    role="model",
+                    parts=[self._function_call_part(call, types) for call in request.tool_calls],
+                )
             )
 
         if request.tool_results:
             tool_name_by_call_id = {call.call_id: call.tool_name for call in request.tool_calls}
             contents.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        self._function_response_part(result, tool_name_by_call_id.get(result.call_id, result.tool_name))
+                types.Content(
+                    role="user",
+                    parts=[
+                        self._function_response_part(result, tool_name_by_call_id.get(result.call_id, result.tool_name), types)
                         for result in request.tool_results
                     ],
-                }
+                )
             )
 
         system_instruction = "\n".join(system_parts) if system_parts else None
         return system_instruction, tuple(contents)
 
-    def _function_call_part(self, call: ToolCall) -> dict[str, Any]:
-        call_id = self._require_call_id(call.call_id)
-        return {
-            "function_call": {
-                "id": call_id,
-                "name": call.tool_name,
-                "args": json_ready(call.arguments),
-            }
-        }
+    def _function_call_part(self, call: ToolCall, types: Any) -> Any:
+        call_id = call.call_id.strip()
+        function_call = types.FunctionCall(
+            id=None if self._is_local_call_id(call_id) else call_id,
+            name=call.tool_name,
+            args=json_ready(call.arguments),
+        )
+        return types.Part(functionCall=function_call)
 
-    def _function_response_part(self, result: ToolResult, tool_name: str) -> dict[str, Any]:
-        call_id = self._require_call_id(result.call_id)
+    def _function_response_part(self, result: ToolResult, tool_name: str, types: Any) -> Any:
+        call_id = result.call_id.strip()
         response_payload: dict[str, Any] = {
             "output": json_ready(result.output),
             "status": result.status.value,
@@ -183,24 +190,20 @@ class GeminiProvider(ModelProvider):
         metadata = json_ready(dict(result.metadata))
         if metadata:
             response_payload["metadata"] = metadata
-        return {
-            "function_response": {
-                "id": call_id,
-                "name": tool_name,
-                "response": response_payload,
-            }
-        }
+        function_response = types.FunctionResponse(
+            id=None if self._is_local_call_id(call_id) else call_id,
+            name=tool_name,
+            response=response_payload,
+        )
+        return types.Part(functionResponse=function_response)
 
-    def _require_call_id(self, call_id: str) -> str:
-        value = call_id.strip()
-        if not value:
-            raise ProviderError(
-                "Gemini function call id is required",
-                kind="protocol",
-                provider="gemini",
-                details={"error": "missing_call_id"},
-            )
-        return value
+    def _is_local_call_id(self, call_id: str) -> bool:
+        return call_id.startswith(_LOCAL_CALL_PREFIX)
+
+    def _local_call_id(self, *, index: int, name: str, args: Any) -> str:
+        payload = json.dumps({"index": index, "name": name, "args": json_ready(args)}, sort_keys=True, ensure_ascii=False)
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+        return f"{_LOCAL_CALL_PREFIX}{index}:{digest}"
 
     def _to_agent_response(self, response: Any, *, model: str) -> AgentResponse:
         assistant_texts: list[str] = []
@@ -210,7 +213,7 @@ class GeminiProvider(ModelProvider):
             text = self._part_text(part)
             if text:
                 assistant_texts.append(text)
-            function_call = self._part_function_call(part)
+            function_call = self._part_function_call(part, index=len(tool_calls))
             if function_call is not None:
                 tool_calls.append(function_call)
 
@@ -231,42 +234,29 @@ class GeminiProvider(ModelProvider):
     def _response_parts(self, response: Any) -> tuple[Any, ...]:
         candidates = getattr(response, "candidates", None) or ()
         parts: list[Any] = []
-        candidate_has_function_call = False
         for candidate in candidates:
             content = getattr(candidate, "content", None)
             candidate_parts = getattr(content, "parts", None) if content is not None else None
             if candidate_parts:
                 parts.extend(candidate_parts)
-                if any(self._part_function_call(part) is not None for part in candidate_parts):
-                    candidate_has_function_call = True
-
-        if not candidate_has_function_call:
-            function_calls = getattr(response, "function_calls", None)
-            if function_calls:
-                parts.extend(function_calls)
-        return tuple(parts)
+        if parts:
+            return tuple(parts)
+        function_calls = getattr(response, "function_calls", None)
+        return tuple(function_calls or ())
 
     def _part_text(self, part: Any) -> str | None:
         value = self._part_value(part, "text")
-        if value:
-            return str(value)
-        return None
+        return str(value) if value else None
 
-    def _part_function_call(self, part: Any) -> ToolCall | None:
+    def _part_function_call(self, part: Any, *, index: int) -> ToolCall | None:
         function_call = self._part_value(part, "function_call")
         if function_call is None:
             function_call = self._part_value(part, "functionCall")
+        if function_call is None and self._looks_like_function_call(part):
+            function_call = part
         if function_call is None:
             return None
 
-        call_id = self._call_value(function_call, "id")
-        if not call_id:
-            raise ProviderError(
-                "Gemini function_call missing id",
-                kind="protocol",
-                provider="gemini",
-                details={"error": "missing_function_call_id"},
-            )
         name = self._call_value(function_call, "name")
         if not name:
             raise ProviderError(
@@ -278,11 +268,17 @@ class GeminiProvider(ModelProvider):
         args = self._call_value(function_call, "args")
         if args is None:
             args = self._call_value(function_call, "arguments")
+        call_id = self._call_value(function_call, "id")
+        if not call_id:
+            call_id = self._local_call_id(index=index, name=str(name), args=args)
         return ToolCall(
             call_id=str(call_id),
             tool_name=str(name),
             arguments=self._parse_arguments(args),
         )
+
+    def _looks_like_function_call(self, value: Any) -> bool:
+        return hasattr(value, "name") and (hasattr(value, "args") or hasattr(value, "arguments"))
 
     def _parse_arguments(self, raw_arguments: Any) -> dict[str, Any]:
         if raw_arguments is None:
@@ -351,15 +347,19 @@ class GeminiProvider(ModelProvider):
             "response_id": getattr(response, "id", None),
         }
         finish_reason = self._first_present(
-            self._coerce_mapping(getattr(response, "candidates", [{}])[0] if getattr(response, "candidates", None) else {}),
+            self._candidate_mapping(response),
             "finish_reason",
             "finishReason",
         )
-        if finish_reason is None:
-            finish_reason = getattr(response, "finish_reason", None) or getattr(response, "finishReason", None)
         if finish_reason is not None:
             metadata["finish_reason"] = finish_reason
         return {key: value for key, value in metadata.items() if value is not None}
+
+    def _candidate_mapping(self, response: Any) -> dict[str, Any]:
+        candidates = getattr(response, "candidates", None) or ()
+        if not candidates:
+            return {}
+        return self._coerce_mapping(candidates[0])
 
     def _coerce_mapping(self, value: Any) -> dict[str, Any]:
         if isinstance(value, Mapping):
@@ -383,12 +383,7 @@ class GeminiProvider(ModelProvider):
     def _normalize_error(self, exc: Exception, *, model: str) -> ProviderError:
         name = exc.__class__.__name__
         lowered_name = name.lower()
-        status_code = self._first_present(
-            self._coerce_mapping(exc),
-            "status_code",
-            "status",
-            "code",
-        )
+        status_code = self._first_present(self._coerce_mapping(exc), "status_code", "status", "code")
         if status_code is None:
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
 
@@ -416,11 +411,7 @@ class GeminiProvider(ModelProvider):
             kind = "rate_limit"
             retryable = True
 
-        request_id = self._first_present(
-            self._coerce_mapping(exc),
-            "request_id",
-            "_request_id",
-        )
+        request_id = self._first_present(self._coerce_mapping(exc), "request_id", "_request_id")
         message = self.redactor.redact_text(str(exc).strip() or f"Gemini provider {kind} error")
         details = {
             "exception_type": name,
