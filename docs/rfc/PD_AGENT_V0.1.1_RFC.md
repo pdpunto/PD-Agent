@@ -1,75 +1,112 @@
 # PD Agent v0.1.1 - RFC tecnico
 
-**Estado:** Borrador de auditoria  
-**Base:** `b96dae19524f8a520292702e3d8e880f39a72bfd`
+**Estado:** Auditoria y alineacion documental  
+**Base:** `8c5af965def541fe160b420b4e7d7bc076090e2c`
 
 ## 1. Propósito
 
-Definir el endurecimiento minimo para validar un provider real sobre fixture
-Fabric controlado, manteniendo core provider-neutral.
+Definir la minima extension neutral necesaria para transportar metadata de
+continuation del provider, sin meter conceptos Gemini en el core.
 
-## 2. Contratos a revisar
+## 2. Contrato neutral
 
-- carga de configuracion desde entorno/secret store;
-- redaccion de secretos en artefactos persistidos;
-- continuation de tool calls con Responses API;
-- harness live E2E sobre runtime real;
-- evidencias y PASS trazable.
+Se propone `ProviderContinuation`.
 
-## 3. Principios
+Campos:
 
-- core provider-neutral se mantiene;
-- OpenAIProvider permanece disponible;
-- Gemini queda seleccionado como provider real para cerrar v0.1.1;
-- `PD_AGENT_PROVIDER=gemini` y `PD_AGENT_MODEL=gemini-2.5-flash` son la
-  configuracion objetivo;
-- `GEMINI_API_KEY` se integra en el mismo circuito de redaccion de secretos;
-- `store=false` sigue siendo la postura por defecto donde aplique;
-- turnos manuales reenviarán `tool_calls` + `tool_results` neutrales para
-  continuar `functionCall` + `functionResponse` cuando el SDK lo requiera;
-- API key nunca persiste;
-- Git y Gradle siguen con boundary existente;
-- Minecraft runtime sigue fuera.
+- `provider`: identificador del adapter propietario
+- `kind`: tipo semanticamente opaco, por ejemplo `thought_signature`
+- `target_type`: tipo del elemento destino, por ejemplo `content_part`
+- `target_id`: id estable del elemento destino si existe
+- `payload`: mapa JSON-safe, opaco para core/runtime
+- `position`: referencia positional opcional cuando el protocolo depende del
+  orden real de parts
 
-## 4. Cambios minimos esperados
+Reglas:
 
-Lote A:
+- el core transporta;
+- el adapter produce e interpreta;
+- el runtime no interpreta;
+- el payload debe ser serializable;
+- si no lo es, el provider falla antes de persistirlo;
+- no se aceptan diccionarios ad-hoc como contrato publico;
+- no se almacenan tipos del SDK en el core.
 
-- corregir carga BYOK/env;
-- propagar secretos al reporting;
-- fijar `store=false`.
+## 3. Gemini 3 mapping
 
-Lote B:
+Gemini 3 expone `thought_signature` en `Part` de respuesta.
+La documentacion oficial indica:
 
-- continuar tool calls con el protocolo real de Responses API.
+- para function calling, la firma va en el primer `functionCall` de la step
+  actual;
+- en calls paralelas, solo el primer `functionCall` lleva signature;
+- en steps secuenciales, cada step nuevo vuelve a requerir la firma del
+  primer `functionCall`;
+- el orden exacto de `Content.parts` importa;
+- si la signature falta o se reordena, Gemini devuelve 4xx.
 
-Gemini boundary:
+Implicacion:
 
-- `google-genai` solo dentro de `src/pd_agent/providers/gemini_provider.py`;
-- `ModelProvider` y `AgentRuntime` siguen neutrales;
-- `AgentRequest.messages` mapea a `contents`/history;
-- `AgentRequest.tools` mapea a function declarations;
-- `AgentRequest.tool_calls` conserva contexto previo de function calls;
-- `AgentRequest.tool_results` mapea a function responses;
-- `ToolCall.call_id` y `ToolResult.call_id` se preservan usando el `id` real
-  del function call/function response del SDK;
-- automatic function calling debe quedar desactivado o limitado para que PD
-  Agent ejecute siempre las tools;
-- timeout y retries deben mapearse a los controles del SDK sin crear un
-  sistema paralelo;
-- usage debe salir de `usage_metadata` del SDK a `AgentResponse.usage`.
+- `target_id` solo no basta;
+- se necesita asociacion exacta al `Part` original;
+- el adapter puede usar `position` o equivalente interno para reenviar la
+  metadata en el mismo sitio;
+- el core no decide nada sobre la estructura interna del payload.
 
-Lote C:
+## 4. Lifecycle
 
-- harness live E2E real.
+1. GeminiProvider recibe una respuesta.
+2. Extrae continuations opacas desde los `Part` relevantes.
+3. Las expone en `AgentResponse.provider_continuations`.
+4. AgentRuntime las transporta al siguiente `AgentRequest`.
+5. GeminiProvider reconstruye el historial Gemini exacto.
+6. OpenAIProvider ignora el campo si no lo usa.
 
-## 5. Aceptacion
+Las continuations solo deben vivir mientras duren los turnos que las necesitan.
+No hace falta guardarlas en historico largo si el provider no las consume.
 
-No hay PASS de v0.1.1 sin:
+## 5. Error model
 
-- Gemini API real;
-- tool calls reales;
-- build real sobre fixture controlado;
-- JAR valido;
-- evidence segura;
-- final-report trazable.
+Fallo explicito, normalizado, antes que reconstruccion inventada.
+
+Casos:
+
+- continuation ausente cuando Gemini la necesita -> `ProviderError(kind=protocol)`
+- provider incorrecto -> `ProviderError(kind=protocol)`
+- target inexistente -> `ProviderError(kind=protocol)`
+- payload corrupto -> `ProviderError(kind=protocol)`
+- payload no serializable -> `ProviderError(kind=protocol)`
+- duplicados conflictivos -> `ProviderError(kind=protocol)`
+- Gemini rechaza replay -> `ProviderError(kind=protocol)`
+
+## 6. Security y reporting
+
+La evidence no debe volcar payload opaco completo por defecto.
+Se recomienda persistir solo:
+
+- provider
+- kind
+- target_type
+- target_id o position
+- presencia/ausencia
+- hash seguro opcional
+
+Si el payload tiene contenido sensible, el redactor debe tratarlo como parte
+de la superficie secreta del provider.
+
+## 7. OpenAI compatibility
+
+OpenAIProvider no cambia de semantica.
+Si el campo llega vacio, se ignora.
+Si en algun momento OpenAI necesitara metadata opaca, se maneja con el mismo
+contrato neutral, no con tipos OpenAI dentro del core.
+
+## 8. Acceptance
+
+La extension se considera pequena si:
+
+- no cambia el rol del runtime;
+- no mete tipos Gemini en core;
+- no toca SecurityPolicy ni ToolExecutor;
+- no obliga a un framework universal;
+- solo anade transporte neutral y mapping de adapter.

@@ -1,134 +1,92 @@
 # PD Agent v0.1.1 - Implementation Plan
 
-**Estado:** Auditoria previa  
-**Base:** `b96dae19524f8a520292702e3d8e880f39a72bfd`
+**Estado:** Auditoria y alineacion documental  
+**Base:** `8c5af965def541fe160b420b4e7d7bc076090e2c`
 
-> Alineacion actual: OpenAI v0.1.1 ya quedo validado hasta su bloqueo externo.
-> Este plan conserva A/B/C historicos y define el restante camino Gemini.
-
-## Lote A - Configuracion y secretos
-
-Archivos previstos:
-
-- `src/pd_agent/config.py`
-- `src/pd_agent/cli.py`
-- `src/pd_agent/bootstrap.py`
-- `src/pd_agent/reporting/store.py`
+## L12 - Provider continuation metadata
 
 Objetivo:
 
-- leer BYOK/entorno real desde CLI;
-- propagar secretos a redaccion de persistencia;
-- fijar `store=false` en el provider.
-
-Tests reutilizables:
-
-- `tests/unit/test_l0_foundation.py`
-- `tests/unit/test_l2_reporting.py`
-- `tests/unit/test_l10_cli.py`
-- `tests/unit/test_l8_openai_provider.py`
-
-## Lote B - Responses continuation
+- introducir `ProviderContinuation` como contrato neutral minimo;
+- transportar continuations entre `AgentResponse` y `AgentRequest`;
+- permitir que `GeminiProvider` reemita `thought_signature` en el `Part`
+  correcto;
+- no tocar el comportamiento actual de `OpenAIProvider`;
+- no cambiar `AgentRuntime` a provider-aware.
 
 Archivos previstos:
 
+- `src/pd_agent/core/contracts.py`
 - `src/pd_agent/runtime/engine.py`
-- `src/pd_agent/providers/openai_provider.py`
-- tests de runtime/provider.
-
-Objetivo:
-
-- continuar tool loop con `tool_calls` + `tool_results` neutrales;
-- serializar en OpenAI como `function_call` + `function_call_output` por `call_id`;
-- conservar core provider-neutral.
-
-## Lote C - Harness live E2E
-
-Archivos previstos:
-
-- `scripts/validation/validate_v0_1.py`
-- `docs/validation/PD_AGENT_V0.1.1_VALIDATION.md`
-- fixtures de prueba si hacen falta.
-
-Objetivo:
-
-- demostrar runtime real + OpenAI real + tools + build + JAR + report.
-
-## Lote D - Regresion y cierre
-
-Objetivo:
-
-- suite de regresion;
-- validacion final;
-- docs cerradas.
-
-## Lote G1 - Adapter/config/security
-
-Archivos previstos:
-
-- `pyproject.toml`
-- `src/pd_agent/config.py`
-- `src/pd_agent/bootstrap.py`
 - `src/pd_agent/providers/gemini_provider.py`
-- `src/pd_agent/reporting/redaction.py`
-- tests unitarios de config/provider.
+- `src/pd_agent/providers/openai_provider.py` solo si hace falta para
+  compatibilidad vacia
+- tests unitarios de core/runtime/provider
 
-Objetivo:
+## Diseno de implementacion
 
-- dependencia `google-genai`;
-- `GeminiProvider`;
-- `GEMINI_API_KEY`;
-- provider selection/bootstrap;
-- secret redaction;
-- timeout/retry configuration;
-- tests unitarios.
+1. Crear un modelo neutral pequeno.
+2. Añadirlo a `AgentResponse`.
+3. Pasarlo por `AgentRuntime` sin interpretar.
+4. Añadirlo a `AgentRequest`.
+5. Usarlo solo dentro de `GeminiProvider`.
+6. Mantener `OpenAIProvider` igual o con ignorado vacio.
 
-## Lote G2 - Tool protocol
+## Reglas de construccion
 
-Archivos previstos:
+- el payload debe ser JSON-safe;
+- la asociacion debe ser inequívoca;
+- el orden debe preservarse cuando el protocolo dependa de ello;
+- si falta o esta corrupto, error explicito;
+- no almacenar objetos SDK;
+- no meter `thought_signature` en core;
+- no redisenar `AgentMessage` ni `ToolExecutor`.
 
-- `src/pd_agent/providers/gemini_provider.py`;
-- `src/pd_agent/core/contracts.py` solo si un ajuste neutral minimo es inevitable;
-- `src/pd_agent/runtime/engine.py` solo si un ajuste neutral minimo es inevitable;
-- tests provider/runtime.
+## Tests requeridos
 
-Objetivo:
+CORE:
 
-- tool declarations;
-- `functionCall -> ToolCall`;
-- `ToolResult -> functionResponse`;
-- multi-turn;
-- múltiples tool calls si API/modelo lo soporta;
-- usage;
-- provider neutrality.
+- construccion del nuevo contrato;
+- serializacion JSON-safe;
+- round-trip;
+- payload invalido;
+- compatibilidad con runs antiguos sin continuations.
 
-## Lote G3 - Gemini live E2E
+RUNTIME:
 
-Archivos previstos:
+- `AgentResponse -> AgentRuntime -> AgentRequest`;
+- una continuation;
+- multiples continuations;
+- orden preservado;
+- transport only.
 
-- `scripts/validation/validate_v0_1_1.py`
-- `tests/fixtures/l11_fabric_fixture` como copia temporal
-- `docs/validation/PD_AGENT_V0.1.1_VALIDATION.md`
+GEMINI:
 
-Objetivo:
+- una function call con signature;
+- multiple function calls;
+- calls paralelas;
+- texto + calls;
+- `FunctionCall.id` presente;
+- `FunctionCall.id` ausente;
+- replay exacto;
+- falta signature;
+- metadata corrupta.
 
-- Gemini real;
-- tool real;
-- modificacion real;
-- Gradle real;
-- ArtifactValidator;
-- JAR;
-- COMPLETED;
-- PASS.
+OPENAI:
 
-## Lote G4 - Cierre
+- regresion de comportamiento actual;
+- campo vacio no rompe nada.
 
-Objetivo:
+## Validacion
 
-- suite completa;
-- OpenAI regression;
-- secret scan;
-- evidence;
-- validation doc;
-- commit/push;
-- cierre v0.1.1.
+Cuando exista implementacion:
+
+- ejecutar suite focalizada;
+- ejecutar suite completa;
+- revisar evidence y redaccion;
+- dejar listo el lote Gemini live siguiente.
+
+## Cierre
+
+Si la implementacion confirma este alcance pequeno, se puede cerrar en un
+solo lote. Si aparece necesidad de framework mayor, parar y re-auditar.

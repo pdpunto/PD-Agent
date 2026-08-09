@@ -1,73 +1,74 @@
-# PD Agent v0.1.1 - Real Provider Validation
+# PD Agent v0.1.1 - Provider Continuation Metadata
 
-**Estado:** Borrador de auditoria  
-**Base:** `b96dae19524f8a520292702e3d8e880f39a72bfd`
+**Estado:** Auditoria y alineacion documental  
+**Base:** `8c5af965def541fe160b420b4e7d7bc076090e2c`
 
 ## 1. Objetivo
 
-Demostrar al menos un provider real E2E sin mocks, sin romper el core
-provider-neutral.
+PD Agent sigue siendo un runtime pequeno, single-agent y provider-neutral.
+La nueva necesidad es soportar Gemini 3 sin meter `thought_signature` en el
+core.
 
-## 2. Alcance
+## 2. Causa concreta
 
-v0.1.1 solo endurece:
+Gemini 2.5 ya no es viable para esta key en Free Tier. Gemini 3 si responde,
+pero su function calling exige conservar metadata de continuation opaca,
+incluida la thought signature, en el `Part` correcto y en el orden correcto.
 
-- carga segura de configuracion BYOK/entorno;
-- redaccion de secretos en persistencia;
-- continuation real de tool calls Responses API;
-- harness live E2E controlado.
+## 3. Decision de diseno
 
-Decision de validacion:
+La solucion aprobada es una continuation opaca y neutral, transportada por el
+core y entendida solo por el adapter correspondiente.
 
-- provider real seleccionado: `GeminiProvider`;
-- modelo: `gemini-2.5-flash`;
-- SDK oficial: `google-genai`;
-- auth: `GEMINI_API_KEY`;
-- Free Tier: solo fixture controlado/no confidencial durante v0.1.1.
+Principios:
 
-OpenAIProvider permanece disponible. El live OpenAI adicional quedo bloqueado
-por billing y ya no es el unico requisito de PASS.
+- `ModelProvider` sigue provider-neutral;
+- `AgentRuntime` sigue provider-neutral;
+- el core no interpreta metadata del provider;
+- el runtime solo transporta metadata;
+- solo `GeminiProvider` interpreta la continuation;
+- `OpenAIProvider` conserva su comportamiento actual;
+- no se crea un tipo Gemini en el core;
+- no se introduce un framework universal de protocolos;
+- no se modela `thought_signature` como concepto de producto.
 
-No introduce router, RAG, multi-agent ni Minecraft runtime. Codex queda
-descartado como ModelProvider para v0.1.1.
+## 4. Forma conceptual
 
-## 3. PASS esperado
+Se introduce un contrato neutral pequeno, llamado `ProviderContinuation`,
+para transportar metadata opaca asociada a un elemento concreto de la
+respuesta del provider.
 
-PASS de v0.1.1 requiere:
+Campos conceptuales:
 
-- runtime real sobre fixture Fabric controlado;
-- Gemini API real;
-- tool calls reales;
-- modificacion real de codigo;
-- Gradle Wrapper real;
-- build y JAR validos;
-- final-report y evidencia persistidos.
+- `provider`
+- `kind`
+- `target_type`
+- `target_id`
+- `payload` JSON-safe
 
-No valida comportamiento dentro de Minecraft.
+La identidad real no depende solo de `target_id` cuando el protocolo usa
+posicion u orden. El adapter puede necesitar una referencia positional
+adicional, pero el core sigue sin interpretar nada.
 
-## 4. Hallazgos de auditoria
+## 5. Reglas de semantica
 
-La auditoria del checkout real marco como puntos a corregir:
+- la continuation pertenece al provider que la genero;
+- el payload es opaco para el core;
+- el payload debe ser serializable;
+- si falta o esta corrupto, el provider debe fallar de forma explicita;
+- si no hace falta, el provider puede devolver lista vacia;
+- OpenAI no necesita cambio funcional;
+- la evidence no debe exponer el payload opaco completo salvo necesidad
+  estricta.
 
-- `load_config()` no lee `os.environ` cuando la CLI lo llama sin mapping;
-- `RunStorage` no recibe secretos desde `build_runtime_bundle()`;
-- `AgentRuntime` reinyecta resultados de tools como texto y no como
-  continuation nativa de Responses API;
-- el smoke live actual no demuestra E2E real.
+## 6. Alcance de v0.1.1
 
-La lectura del repo confirma que:
+v0.1.1 queda reducido a la alineacion documental de este contrato y a su
+posterior implementacion en un lote pequeno.
+No cambia el alcance del producto ni introduce nuevos providers.
 
-- `ModelProvider` y `AgentRuntime` siguen provider-neutral;
-- `AppConfig` ya tiene campo `provider`, pero el bootstrap actual solo crea
-  `OpenAIProvider`;
-- `RunStorage`/`Redactor` ya aceptan secrets configurables;
-- `tool_calls` y `tool_results` neutrales sirven como base tambien para
-  Gemini;
-- no hay soporte Gemini aun en bootstrap/CLI;
-- no hay cambio de core necesario para documentar la direccion, pero
-  `GeminiProvider` quedara en G1.
+## 7. Cierre
 
-## 5. Cierre de fase
-
-Esta fase termina cuando RFC, IMP y tests del lote A/B/C reflejen esos
-ajustes sin alterar el core provider-neutral.
+Este diseno confirma que la continuidad opaca es una extension pequena y
+evolutiva del modelo actual. Si la implementacion confirma lo mismo, puede
+entrar en un unico lote posterior.
