@@ -329,7 +329,7 @@ def test_v011_prechecks_require_gemini_provider_and_model(monkeypatch: pytest.Mo
 
         assert "provider: gemini" in summary.notes
         assert "PD_AGENT_MODEL env: gemini-2.5-flash" in summary.notes
-        assert "selected model: gemini-3.5-flash" in summary.notes
+        assert "selected model: gemini-3.5-flash-lite" in summary.notes
         assert "GEMINI_API_KEY: present" in summary.notes
 
 
