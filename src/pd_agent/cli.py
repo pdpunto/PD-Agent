@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--provider",
         default=None,
-        help="Provider name. v0.1 uses openai.",
+        help="Provider name. v0.1 supports openai or gemini.",
     )
     run_parser.add_argument(
         "--model",

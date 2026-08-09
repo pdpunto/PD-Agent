@@ -22,6 +22,7 @@ class AppConfig:
     provider: str = "openai"
     model: str | None = None
     openai_api_key: str | None = None
+    gemini_api_key: str | None = None
     log_level: str = "INFO"
     runs_dir: Path = Path("runs")
     execution_limits: ExecutionLimits = field(default_factory=ExecutionLimits)
@@ -44,6 +45,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     provider = source.get("PD_AGENT_PROVIDER", "openai")
     model = source.get("PD_AGENT_MODEL")
     api_key = source.get("OPENAI_API_KEY")
+    gemini_api_key = source.get("GEMINI_API_KEY")
     runs_dir = Path(source.get("PD_AGENT_RUNS_DIR", "runs"))
     log_level = source.get("PD_AGENT_LOG_LEVEL", "INFO")
     execution_limits = ExecutionLimits.from_dict(
@@ -61,6 +63,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         provider=provider,
         model=model,
         openai_api_key=api_key,
+        gemini_api_key=gemini_api_key,
         log_level=log_level,
         runs_dir=runs_dir,
         execution_limits=execution_limits,

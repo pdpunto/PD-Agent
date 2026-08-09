@@ -5,10 +5,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from pd_agent import AppConfig, __version__, load_config
-from pd_agent.bootstrap import build_runtime_bundle
+from pd_agent.bootstrap import build_runtime_bundle, create_provider
+from pd_agent.core.errors import ConfigurationError
 from pd_agent.reporting import RunStorage
 from pd_agent.cli import build_parser, main
+from pd_agent.providers import GeminiProvider, OpenAIProvider
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +24,7 @@ def test_package_imports() -> None:
     assert AppConfig().provider == "openai"
     assert AppConfig().model is None
     assert AppConfig().openai_api_key is None
+    assert AppConfig().gemini_api_key is None
     assert AppConfig().execution_limits.max_build_attempts == 5
     assert callable(main)
     assert callable(build_parser)
@@ -35,6 +40,7 @@ def test_config_load_defaults_and_env() -> None:
             "PD_AGENT_PROVIDER": "openai",
             "PD_AGENT_MODEL": "gpt-test",
             "OPENAI_API_KEY": "sk-test",
+            "GEMINI_API_KEY": "gm-test",
             "PD_AGENT_LOG_LEVEL": "debug",
             "PD_AGENT_RUNS_DIR": "custom-runs",
             "PD_AGENT_MAX_BUILD_ATTEMPTS": "7",
@@ -43,6 +49,7 @@ def test_config_load_defaults_and_env() -> None:
     assert custom_config.provider == "openai"
     assert custom_config.model == "gpt-test"
     assert custom_config.openai_api_key == "sk-test"
+    assert custom_config.gemini_api_key == "gm-test"
     assert custom_config.log_level == "DEBUG"
     assert custom_config.runs_dir == Path("custom-runs")
     assert custom_config.execution_limits.max_build_attempts == 7
@@ -52,6 +59,7 @@ def test_config_loads_real_environment_when_env_is_none(monkeypatch: pytest.Monk
     monkeypatch.setenv("PD_AGENT_PROVIDER", "openai")
     monkeypatch.setenv("PD_AGENT_MODEL", "gpt-env")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-env")
     monkeypatch.setenv("PD_AGENT_LOG_LEVEL", "debug")
     monkeypatch.setenv("PD_AGENT_RUNS_DIR", "env-runs")
     monkeypatch.setenv("PD_AGENT_MAX_AGENT_STEPS", "41")
@@ -67,6 +75,7 @@ def test_config_loads_real_environment_when_env_is_none(monkeypatch: pytest.Monk
     assert config.provider == "openai"
     assert config.model == "gpt-env"
     assert config.openai_api_key == "sk-env"
+    assert config.gemini_api_key == "gm-env"
     assert config.log_level == "DEBUG"
     assert config.runs_dir == Path("env-runs")
     assert config.execution_limits.max_agent_steps == 41
@@ -82,12 +91,37 @@ def test_config_empty_mapping_stays_deterministic(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("PD_AGENT_PROVIDER", "openai")
     monkeypatch.setenv("PD_AGENT_MODEL", "gpt-env")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+    monkeypatch.setenv("GEMINI_API_KEY", "gm-env")
 
     config = load_config({})
 
     assert config.provider == "openai"
     assert config.model is None
     assert config.openai_api_key is None
+    assert config.gemini_api_key is None
+
+
+def test_bootstrap_selects_provider_and_validates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pd_agent.providers.gemini_provider.GeminiProvider._build_client", lambda self: object())
+
+    openai_provider = create_provider(AppConfig(provider="openai", model="gpt-test", openai_api_key="sk-openai"))
+    gemini_provider = create_provider(AppConfig(provider="gemini", model="gemini-test", gemini_api_key="gm-test"))
+
+    assert isinstance(openai_provider, OpenAIProvider)
+    assert isinstance(gemini_provider, GeminiProvider)
+
+    with pytest.raises(ConfigurationError):
+        create_provider(AppConfig(provider="other", model="gpt-test"))
+
+
+def test_bootstrap_validates_gemini_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pd_agent.providers.gemini_provider.GeminiProvider._build_client", lambda self: object())
+
+    with pytest.raises(ConfigurationError, match="Gemini model is required"):
+        create_provider(AppConfig(provider="gemini", gemini_api_key="gm-test"))
+
+    with pytest.raises(ConfigurationError, match="GEMINI_API_KEY is required"):
+        create_provider(AppConfig(provider="gemini", model="gemini-test"))
 
 
 def test_cli_help_prints_usage() -> None:
@@ -203,12 +237,17 @@ def test_cli_reads_environment_configuration(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_bootstrap_preserves_injected_storage_and_adds_secret_redaction() -> None:
-    secret = "sk-test-pd-agent-v011-redaction"
+    openai_secret = "sk-test-pd-agent-v011-redaction"
+    gemini_secret = "gm-test-pd-agent-v011-redaction"
     with tempfile.TemporaryDirectory() as temp_dir:
         injected_storage = RunStorage(Path(temp_dir))
 
         bundle = build_runtime_bundle(
-            AppConfig(model="gpt-test", openai_api_key=secret),
+            AppConfig(
+                model="gpt-test",
+                openai_api_key=openai_secret,
+                gemini_api_key=gemini_secret,
+            ),
             provider_factory=lambda config: object(),
             storage=injected_storage,
             controller_factory=lambda **kwargs: type(
@@ -219,7 +258,18 @@ def test_bootstrap_preserves_injected_storage_and_adds_secret_redaction() -> Non
         )
 
         assert bundle.storage is injected_storage
-        assert secret in bundle.storage.redactor.secrets
+        assert openai_secret in bundle.storage.redactor.secrets
+        assert gemini_secret in bundle.storage.redactor.secrets
+
+
+def test_source_tree_keeps_google_genai_outside_gemini_provider() -> None:
+    src_root = ROOT / "src" / "pd_agent"
+    files = [path for path in src_root.rglob("*.py") if path.name != "gemini_provider.py"]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert "google.genai" not in text
+        assert "from google import genai" not in text
+        assert "import google.genai" not in text
 
 
 def test_real_pytest_runs_passing_temp_suite() -> None:

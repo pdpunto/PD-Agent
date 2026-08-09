@@ -10,7 +10,7 @@ from pd_agent.build import GradleBuildRunner
 from pd_agent.config import AppConfig
 from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
-from pd_agent.providers import OpenAIProvider
+from pd_agent.providers import GeminiProvider, OpenAIProvider
 from pd_agent.reporting import RunStorage
 from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
@@ -27,7 +27,7 @@ class RuntimeBundle:
 
 
 def create_openai_provider(config: AppConfig) -> OpenAIProvider:
-    """Create the only v0.1 provider adapter."""
+    """Create the OpenAI provider adapter."""
 
     if config.provider != "openai":
         raise ConfigurationError(f"unsupported provider: {config.provider}")
@@ -42,10 +42,37 @@ def create_openai_provider(config: AppConfig) -> OpenAIProvider:
     )
 
 
+def create_gemini_provider(config: AppConfig) -> GeminiProvider:
+    """Create the Gemini provider adapter."""
+
+    if config.provider != "gemini":
+        raise ConfigurationError(f"unsupported provider: {config.provider}")
+    if not config.model:
+        raise ConfigurationError("Gemini model is required")
+    if not config.gemini_api_key:
+        raise ConfigurationError("GEMINI_API_KEY is required")
+    return GeminiProvider(
+        model=config.model,
+        api_key=config.gemini_api_key,
+        timeout_seconds=float(config.execution_limits.process_timeout_seconds),
+        provider_retry_limit=config.execution_limits.provider_retry_limit,
+    )
+
+
+def create_provider(config: AppConfig) -> Any:
+    """Create the configured provider adapter."""
+
+    if config.provider == "openai":
+        return create_openai_provider(config)
+    if config.provider == "gemini":
+        return create_gemini_provider(config)
+    raise ConfigurationError(f"unsupported provider: {config.provider}")
+
+
 def build_runtime_bundle(
     config: AppConfig,
     *,
-    provider_factory: Callable[[AppConfig], Any] = create_openai_provider,
+    provider_factory: Callable[[AppConfig], Any] = create_provider,
     storage: RunStorage | None = None,
     build_runner: GradleBuildRunner | None = None,
     artifact_validator: ArtifactValidator | None = None,
@@ -54,7 +81,12 @@ def build_runtime_bundle(
 ) -> RuntimeBundle:
     """Compose the runtime graph outside the core runtime."""
 
-    storage = _configure_storage(storage, config.openai_api_key, config.runs_dir)
+    storage = _configure_storage(
+        storage,
+        config.openai_api_key,
+        config.gemini_api_key,
+        config.runs_dir,
+    )
     provider = provider_factory(config)
     controller = controller_factory(
         provider=provider,
@@ -68,11 +100,16 @@ def build_runtime_bundle(
     return RuntimeBundle(config=config, storage=storage, controller=controller, provider=provider)
 
 
-def _configure_storage(storage: RunStorage | None, api_key: str | None, runs_dir: Path) -> RunStorage:
+def _configure_storage(
+    storage: RunStorage | None,
+    openai_api_key: str | None,
+    gemini_api_key: str | None,
+    runs_dir: Path,
+) -> RunStorage:
+    secrets = tuple(secret for secret in (openai_api_key, gemini_api_key) if secret)
     if storage is None:
-        secrets = (api_key,) if api_key else ()
         return RunStorage(runs_dir, secrets=secrets)
-    if api_key:
+    if secrets:
         existing = getattr(storage.redactor, "secrets", ())
-        storage.redactor = Redactor((*existing, api_key))
+        storage.redactor = Redactor((*existing, *secrets))
     return storage
