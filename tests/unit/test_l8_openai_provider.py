@@ -106,8 +106,14 @@ def _provider(
     )
 
 
-def _request(*, messages: tuple[AgentMessage, ...] = (), tools=(), model_config=None) -> AgentRequest:
-    return AgentRequest(messages=messages, tools=tools, model_config=model_config or {})
+def _request(
+    *,
+    messages: tuple[AgentMessage, ...] = (),
+    tools=(),
+    provider_continuations=(),
+    model_config=None,
+) -> AgentRequest:
+    return AgentRequest(messages=messages, tools=tools, provider_continuations=provider_continuations, model_config=model_config or {})
 
 
 def test_request_mapping_and_response_mapping() -> None:
@@ -206,6 +212,29 @@ def test_store_is_forced_false_even_if_requested_true() -> None:
     )
 
     assert client.responses.calls[0]["store"] is False
+
+
+def test_empty_provider_continuations_are_ignored() -> None:
+    response = SimpleNamespace(
+        id="resp_empty",
+        model="gpt-test",
+        status="completed",
+        _request_id="req_empty",
+        usage=None,
+        output=[_Message(_Text("ok"))],
+    )
+    client = _FakeClient([response])
+    provider = _provider(client=client)
+
+    provider.execute(
+        _request(
+            messages=(AgentMessage(role="user", content="hi"),),
+            provider_continuations=(),
+            model_config={"model": "gpt-test"},
+        )
+    )
+
+    assert "provider_continuations" not in client.responses.calls[0]
 
 
 def test_tool_continuation_serializes_function_call_and_output() -> None:

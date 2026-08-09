@@ -10,6 +10,7 @@ from .contracts import (
     BuildResult,
     ContextSource,
     ModelProvider,
+    ProviderContinuation,
     Tool,
     ToolCall,
     ToolResult,
@@ -47,6 +48,7 @@ __all__ = [
     "PDAgentError",
     "ProjectInspectionError",
     "ProviderError",
+    "ProviderContinuation",
     "RunState",
     "RunStateError",
     "RunStatus",
@@ -60,4 +62,3 @@ __all__ = [
     "ToolValidationError",
     "generate_run_id",
 ]
-

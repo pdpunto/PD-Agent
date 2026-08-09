@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from typing import Any, Mapping
 
-from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ToolCall, ToolResult
+from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ProviderContinuation, ToolCall, ToolResult
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.reporting.redaction import Redactor, json_ready
 
@@ -148,10 +149,18 @@ class GeminiProvider(ModelProvider):
             )
 
         if request.tool_calls:
+            continuation_by_call_id = self._continuations_by_call_id(request.provider_continuations)
             contents.append(
                 types.Content(
                     role="model",
-                    parts=[self._function_call_part(call, types) for call in request.tool_calls],
+                    parts=[
+                        self._function_call_part(
+                            call,
+                            continuation=continuation_by_call_id.get(call.call_id),
+                            types=types,
+                        )
+                        for call in request.tool_calls
+                    ],
                 )
             )
 
@@ -170,14 +179,17 @@ class GeminiProvider(ModelProvider):
         system_instruction = "\n".join(system_parts) if system_parts else None
         return system_instruction, tuple(contents)
 
-    def _function_call_part(self, call: ToolCall, types: Any) -> Any:
+    def _function_call_part(self, call: ToolCall, *, continuation: ProviderContinuation | None, types: Any) -> Any:
         call_id = call.call_id.strip()
         function_call = types.FunctionCall(
             id=None if self._is_local_call_id(call_id) else call_id,
             name=call.tool_name,
             args=json_ready(call.arguments),
         )
-        return types.Part(functionCall=function_call)
+        kwargs = {"functionCall": function_call}
+        if continuation is not None:
+            kwargs["thoughtSignature"] = self._continuation_signature(continuation)
+        return types.Part(**kwargs)
 
     def _function_response_part(self, result: ToolResult, tool_name: str, types: Any) -> Any:
         call_id = result.call_id.strip()
@@ -208,14 +220,18 @@ class GeminiProvider(ModelProvider):
     def _to_agent_response(self, response: Any, *, model: str) -> AgentResponse:
         assistant_texts: list[str] = []
         tool_calls: list[ToolCall] = []
+        provider_continuations: list[ProviderContinuation] = []
 
-        for part in self._response_parts(response):
+        for index, part in enumerate(self._response_parts(response)):
             text = self._part_text(part)
             if text:
                 assistant_texts.append(text)
             function_call = self._part_function_call(part, index=len(tool_calls))
             if function_call is not None:
                 tool_calls.append(function_call)
+                continuation = self._part_provider_continuation(part, call=function_call, index=index)
+                if continuation is not None:
+                    provider_continuations.append(continuation)
 
         if not assistant_texts:
             response_text = getattr(response, "text", None)
@@ -227,6 +243,7 @@ class GeminiProvider(ModelProvider):
         return AgentResponse(
             assistant_message="\n".join(assistant_texts) if assistant_texts else None,
             tool_calls=tuple(tool_calls),
+            provider_continuations=tuple(provider_continuations),
             usage=usage,
             provider_metadata=provider_metadata,
         )
@@ -276,6 +293,66 @@ class GeminiProvider(ModelProvider):
             tool_name=str(name),
             arguments=self._parse_arguments(args),
         )
+
+    def _part_provider_continuation(self, part: Any, *, call: ToolCall, index: int) -> ProviderContinuation | None:
+        signature = self._part_value(part, "thought_signature")
+        if signature is None:
+            signature = self._part_value(part, "thoughtSignature")
+        if signature is None:
+            return None
+        if isinstance(signature, str):
+            encoded = signature
+        else:
+            encoded = base64.b64encode(bytes(signature)).decode("ascii")
+        return ProviderContinuation(
+            provider="gemini",
+            kind="thought_signature",
+            target_type="function_call",
+            target_id=call.call_id,
+            position=index,
+            payload={"thought_signature_b64": encoded},
+        )
+
+    def _continuations_by_call_id(self, continuations: tuple[ProviderContinuation, ...]) -> dict[str, ProviderContinuation]:
+        result: dict[str, ProviderContinuation] = {}
+        for continuation in continuations:
+            if continuation.provider != "gemini":
+                continue
+            if continuation.kind != "thought_signature":
+                continue
+            if continuation.target_type != "function_call":
+                continue
+            result[continuation.target_id] = continuation
+        return result
+
+    def _continuation_signature(self, continuation: ProviderContinuation) -> bytes:
+        payload = continuation.payload
+        encoded = payload.get("thought_signature_b64")
+        if not encoded:
+            raise ProviderError(
+                "Gemini continuation missing thought signature",
+                kind="protocol",
+                provider="gemini",
+                details={"error": "missing_thought_signature"},
+            )
+        if isinstance(encoded, bytes):
+            encoded = encoded.decode("ascii")
+        if not isinstance(encoded, str):
+            raise ProviderError(
+                "Gemini continuation thought signature must be string",
+                kind="protocol",
+                provider="gemini",
+                details={"error": "invalid_thought_signature_type"},
+            )
+        try:
+            return base64.b64decode(encoded.encode("ascii"), validate=True)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise ProviderError(
+                "Gemini continuation thought signature is invalid",
+                kind="protocol",
+                provider="gemini",
+                details={"error": "invalid_thought_signature"},
+            ) from exc
 
     def _looks_like_function_call(self, value: Any) -> bool:
         return hasattr(value, "name") and (hasattr(value, "args") or hasattr(value, "arguments"))

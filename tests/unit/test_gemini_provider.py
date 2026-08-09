@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,8 +45,13 @@ class _Parts:
         return types.Part.from_text(text=value)
 
     @staticmethod
-    def function_call(*, call_id: str | None, name: str, args: dict[str, object]) -> object:
-        return types.Part(functionCall=types.FunctionCall(id=call_id, name=name, args=args))
+    def function_call(*, call_id: str | None, name: str, args: dict[str, object], thought_signature: bytes | None = None) -> object:
+        kwargs: dict[str, object] = {
+            "functionCall": types.FunctionCall(id=call_id, name=name, args=args),
+        }
+        if thought_signature is not None:
+            kwargs["thoughtSignature"] = thought_signature
+        return types.Part(**kwargs)
 
     @staticmethod
     def function_response(*, call_id: str | None, name: str, response: dict[str, object]) -> object:
@@ -97,6 +103,7 @@ def _request(
     tools=(),
     tool_calls=(),
     tool_results=(),
+    provider_continuations=(),
     model_config=None,
 ) -> AgentRequest:
     return AgentRequest(
@@ -104,6 +111,7 @@ def _request(
         tools=tools,
         tool_calls=tool_calls,
         tool_results=tool_results,
+        provider_continuations=provider_continuations,
         model_config=model_config or {},
     )
 
@@ -245,6 +253,60 @@ def test_function_call_response_maps_to_tool_calls_and_text() -> None:
         ToolCall(call_id="call_1", tool_name="lookup", arguments={"q": "alpha"}),
         ToolCall(call_id="call_2", tool_name="write", arguments={"path": "a.txt", "text": "ok"}),
     )
+
+
+def test_thought_signature_continuation_round_trip_and_replay() -> None:
+    response_1 = SimpleNamespace(
+        candidates=[
+            _Candidate(
+                _Parts.function_call(call_id="call_1", name="lookup", args={"q": "alpha"}, thought_signature=b"sig-1"),
+                _Parts.function_call(call_id="call_2", name="write", args={"path": "a.txt"}, thought_signature=b"sig-2"),
+            )
+        ],
+        usage_metadata=_Usage(),
+        id="resp-3a",
+        model="gemini-3.5-flash",
+    )
+    response_2 = SimpleNamespace(text="done", usage_metadata=_Usage(), id="resp-3b", model="gemini-3.5-flash")
+    client = _FakeClient(response_1)
+    client.models.response = [response_1, response_2]
+
+    def _sequential_generate_content(**kwargs):
+        client.models.calls.append(kwargs)
+        return client.models.response.pop(0)
+
+    client.models.generate_content = _sequential_generate_content  # type: ignore[method-assign]
+    provider = _provider(client=client, model="gemini-3.5-flash")
+
+    first = provider.execute(_request(messages=(AgentMessage(role="user", content="do it"),), model_config={"model": "gemini-3.5-flash"}))
+
+    assert [item.target_id for item in first.provider_continuations] == ["call_1", "call_2"]
+    assert [item.position for item in first.provider_continuations] == [0, 1]
+    assert base64.b64decode(first.provider_continuations[0].payload["thought_signature_b64"]) == b"sig-1"
+    assert base64.b64decode(first.provider_continuations[1].payload["thought_signature_b64"]) == b"sig-2"
+
+    provider.execute(
+        _request(
+            messages=(AgentMessage(role="user", content="continue"),),
+            tool_calls=first.tool_calls,
+            tool_results=(
+                ToolResult(call_id="call_1", tool_name="lookup", status=ToolResultStatus.SUCCESS, output={"content": "alpha"}),
+                ToolResult(call_id="call_2", tool_name="write", status=ToolResultStatus.SUCCESS, output={"changed": True}),
+            ),
+            provider_continuations=first.provider_continuations,
+            model_config={"model": "gemini-3.5-flash"},
+        )
+    )
+
+    replay_contents = client.models.calls[1]["contents"]
+    replay_parts = replay_contents[1].parts
+    assert replay_parts[0].function_call.id == "call_1"
+    assert replay_parts[0].function_call.name == "lookup"
+    assert replay_parts[0].thought_signature == b"sig-1"
+    assert replay_parts[1].function_call.id == "call_2"
+    assert replay_parts[1].function_call.name == "write"
+    assert replay_parts[1].thought_signature == b"sig-2"
+    assert [part.function_response.id for part in replay_contents[2].parts] == ["call_1", "call_2"]
 
 
 def test_function_call_without_id_gets_local_id() -> None:
@@ -465,4 +527,3 @@ def test_no_gemini_imports_outside_adapter() -> None:
         text = path.read_text(encoding="utf-8")
         assert "google.genai" not in text
         assert "from google import genai" not in text
-

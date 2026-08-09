@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from datetime import datetime
-from enum import StrEnum
+from datetime import date, datetime
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Mapping, Protocol, runtime_checkable
+
+
+MAX_PROVIDER_CONTINUATION_BYTES = 8_192
+
+
+def _json_ready(value: Any) -> Any:
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return _json_ready(value.to_dict())
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Mapping):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, set):
+        return [_json_ready(item) for item in sorted(value, key=repr)]
+    return value
 
 
 class ToolResultStatus(StrEnum):
@@ -100,11 +124,83 @@ class ToolResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderContinuation:
+    """Opaque provider continuation metadata."""
+
+    provider: str
+    kind: str
+    target_type: str
+    target_id: str
+    position: int | None = None
+    payload: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        provider = str(self.provider).strip()
+        kind = str(self.kind).strip()
+        target_type = str(self.target_type).strip()
+        target_id = str(self.target_id).strip()
+        if not provider:
+            raise ValueError("provider cannot be empty")
+        if not kind:
+            raise ValueError("kind cannot be empty")
+        if not target_type:
+            raise ValueError("target_type cannot be empty")
+        if not target_id:
+            raise ValueError("target_id cannot be empty")
+        if self.position is not None and int(self.position) < 0:
+            raise ValueError("position must be non-negative")
+        payload = self._validate_payload(self.payload)
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "target_type", target_type)
+        object.__setattr__(self, "target_id", target_id)
+        object.__setattr__(self, "position", int(self.position) if self.position is not None else None)
+        object.__setattr__(self, "payload", payload)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {
+            "provider": self.provider,
+            "kind": self.kind,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "position": self.position,
+            "payload": _json_ready(self.payload),
+        }
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ProviderContinuation":
+        return cls(
+            provider=str(data["provider"]),
+            kind=str(data["kind"]),
+            target_type=str(data["target_type"]),
+            target_id=str(data["target_id"]),
+            position=(int(data["position"]) if data.get("position") is not None else None),
+            payload=dict(data.get("payload", {})),
+        )
+
+    def _validate_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, Mapping):
+            raise TypeError("payload must be mapping")
+        data = _json_ready(dict(payload))
+        try:
+            encoded = json.dumps(data, ensure_ascii=False, sort_keys=True)
+        except TypeError as exc:
+            raise TypeError("payload must be JSON-safe") from exc
+        if len(encoded.encode("utf-8")) > MAX_PROVIDER_CONTINUATION_BYTES:
+            raise ValueError("payload exceeds provider continuation limit")
+        if not isinstance(data, Mapping):
+            raise TypeError("payload must serialize to mapping")
+        return dict(data)
+
+
+@dataclass(frozen=True, slots=True)
 class AgentResponse:
     """Provider response."""
 
     assistant_message: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
+    provider_continuations: tuple[ProviderContinuation, ...] = ()
     usage: Mapping[str, Any] | None = None
     provider_metadata: Mapping[str, Any] | None = None
 
@@ -112,6 +208,7 @@ class AgentResponse:
         return {
             "assistant_message": self.assistant_message,
             "tool_calls": [call.to_dict() for call in self.tool_calls],
+            "provider_continuations": [item.to_dict() for item in self.provider_continuations],
             "usage": dict(self.usage) if self.usage is not None else None,
             "provider_metadata": (
                 dict(self.provider_metadata)
@@ -126,6 +223,10 @@ class AgentResponse:
             assistant_message=data.get("assistant_message"),
             tool_calls=tuple(
                 ToolCall.from_dict(item) for item in data.get("tool_calls", [])
+            ),
+            provider_continuations=tuple(
+                ProviderContinuation.from_dict(item)
+                for item in data.get("provider_continuations", [])
             ),
             usage=dict(data["usage"]) if data.get("usage") is not None else None,
             provider_metadata=(
@@ -143,6 +244,7 @@ class AgentRequest:
     messages: tuple[AgentMessage, ...] = ()
     tool_calls: tuple[ToolCall, ...] = ()
     tool_results: tuple[ToolResult, ...] = ()
+    provider_continuations: tuple[ProviderContinuation, ...] = ()
     tools: tuple[Mapping[str, Any], ...] = ()
     model_config: Mapping[str, Any] = field(default_factory=dict)
 
@@ -151,6 +253,7 @@ class AgentRequest:
             "messages": [message.to_dict() for message in self.messages],
             "tool_calls": [call.to_dict() for call in self.tool_calls],
             "tool_results": [result.to_dict() for result in self.tool_results],
+            "provider_continuations": [item.to_dict() for item in self.provider_continuations],
             "tools": [dict(tool) for tool in self.tools],
             "model_config": dict(self.model_config),
         }
@@ -166,6 +269,10 @@ class AgentRequest:
             ),
             tool_results=tuple(
                 ToolResult.from_dict(item) for item in data.get("tool_results", [])
+            ),
+            provider_continuations=tuple(
+                ProviderContinuation.from_dict(item)
+                for item in data.get("provider_continuations", [])
             ),
             tools=tuple(dict(tool) for tool in data.get("tools", [])),
             model_config=dict(data.get("model_config", {})),

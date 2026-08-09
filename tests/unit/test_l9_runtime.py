@@ -12,7 +12,7 @@ import pytest
 
 from pd_agent import AgentRuntime, ContextManager, RunController
 from pd_agent.build import GradleBuildRunner
-from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ExecutionLimits, ToolCall
+from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ExecutionLimits, ProviderContinuation, ToolCall
 from pd_agent.core.errors import ProviderError
 from pd_agent.project import ProjectInspectionStatus
 from pd_agent.reporting import FinalReport, RunEventType, RunStorage
@@ -384,6 +384,24 @@ def test_runtime_source_has_no_openai_imports() -> None:
 
 def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "multi-tool", build_state="fail")
+    continuations = (
+        ProviderContinuation(
+            provider="gemini",
+            kind="thought_signature",
+            target_type="function_call",
+            target_id="1",
+            position=0,
+            payload={"thought_signature_b64": "c2lnLWE="},
+        ),
+        ProviderContinuation(
+            provider="gemini",
+            kind="thought_signature",
+            target_type="function_call",
+            target_id="2",
+            position=1,
+            payload={"thought_signature_b64": "c2lnLWI="},
+        ),
+    )
     provider = ScriptedProvider(
         [
             AgentResponse(
@@ -392,6 +410,7 @@ def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) ->
                     ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),
                     ToolCall(call_id="2", tool_name="list_directory", arguments={"path": "."}),
                 ),
+                provider_continuations=continuations,
             ),
             AgentResponse(
                 assistant_message="diagnose",
@@ -415,6 +434,7 @@ def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) ->
     assert len(provider.requests) == 3
     assert [call.call_id for call in provider.requests[1].tool_calls] == ["1", "2"]
     assert [result.call_id for result in provider.requests[1].tool_results] == ["1", "2"]
+    assert provider.requests[1].provider_continuations == continuations
     assert all(result.status.value == "success" for result in provider.requests[1].tool_results)
     assert [call.call_id for call in provider.requests[2].tool_calls] == ["3"]
     assert [result.call_id for result in provider.requests[2].tool_results] == ["3"]

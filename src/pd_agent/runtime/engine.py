@@ -19,6 +19,7 @@ from pd_agent.core import (
     ExecutionLimits,
     ModelProvider,
     ProviderError,
+    ProviderContinuation,
     RunState,
     RunStatus,
     ToolCall,
@@ -94,6 +95,7 @@ class AgentRuntime:
         history: list[AgentMessage] = [AgentMessage(role="user", content=task)]
         pending_tool_calls: tuple[ToolCall, ...] = ()
         pending_tool_results: tuple[ToolResult, ...] = ()
+        pending_provider_continuations: tuple[ProviderContinuation, ...] = ()
         try:
             while not run_state.state.is_terminal():
                 self._check_limits(run_state, limits)
@@ -107,9 +109,11 @@ class AgentRuntime:
                         history=history,
                         tool_calls=pending_tool_calls,
                         tool_results=pending_tool_results,
+                        provider_continuations=pending_provider_continuations,
                     )
                     pending_tool_calls = ()
                     pending_tool_results = ()
+                    pending_provider_continuations = ()
                     run_state.record_agent_step()
                     self._persist_state(run_state)
                     self._emit(
@@ -155,6 +159,7 @@ class AgentRuntime:
                         run_state.transition_to(RunStatus.BUILDING)
                     pending_tool_calls = response.tool_calls
                     pending_tool_results = tool_results
+                    pending_provider_continuations = response.provider_continuations
                     self._persist_state(run_state)
                     continue
 
@@ -238,6 +243,7 @@ class AgentRuntime:
         history: list[AgentMessage],
         tool_calls: tuple[ToolCall, ...],
         tool_results: tuple[ToolResult, ...],
+        provider_continuations: tuple[ProviderContinuation, ...],
     ) -> Any:
         bundle = self.context_manager.build_context(
             project_snapshot=project_snapshot,
@@ -250,6 +256,7 @@ class AgentRuntime:
             messages=messages,
             tool_calls=tool_calls,
             tool_results=tool_results,
+            provider_continuations=provider_continuations,
             tools=tuple(self._tool_specs()),
             model_config=self._model_config(run_state, limits),
         )

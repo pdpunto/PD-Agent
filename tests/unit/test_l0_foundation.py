@@ -9,6 +9,7 @@ import pytest
 
 from pd_agent import AppConfig, __version__, load_config
 from pd_agent.bootstrap import build_runtime_bundle, create_provider
+from pd_agent.core import ProviderContinuation
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.reporting import RunStorage
 from pd_agent.cli import build_parser, main
@@ -290,3 +291,21 @@ def test_real_pytest_runs_passing_temp_suite() -> None:
     assert result.returncode == 0
     assert "1 passed" in result.stdout.lower()
     assert result.stderr == ""
+
+
+def test_provider_continuation_round_trip() -> None:
+    item = ProviderContinuation(
+        provider="gemini",
+        kind="thought_signature",
+        target_type="function_call",
+        target_id="call_1",
+        position=0,
+        payload={"thought_signature_b64": "YWJj"},
+    )
+
+    data = item.to_dict()
+    rebuilt = ProviderContinuation.from_dict(data)
+
+    assert data["provider"] == "gemini"
+    assert data["payload"] == {"thought_signature_b64": "YWJj"}
+    assert rebuilt == item
