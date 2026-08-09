@@ -23,14 +23,13 @@ DEFAULT_TIMEOUT_SECONDS = 300
 DEFAULT_PYTEST_TIMEOUT_SECONDS = 1800
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_TASK = (
-    "Inspecciona el archivo Java indicado. "
-    "Lee primero el source. "
-    "Cambia solo el string existente de acceptance en ExampleMod.message() "
-    "de \"\" a \"PD Agent v0.1.1 acceptance\". "
+    "Abre y lee primero `src/main/java/dev/pdpunto/l11/ExampleMod.java`. "
+    "Luego cambia solo el string existente de acceptance en ExampleMod.message() "
+    "de \"\" a \"PD Agent Gemini 3 v0.1.1 live acceptance\" usando write_file sobre el mismo archivo. "
     "No cambies Gradle ni la arquitectura. "
     "Despues compila y valida el artefacto."
 )
-DEFAULT_EXPECTED_FINAL_TEXT = 'return "PD Agent v0.1.1 acceptance";'
+DEFAULT_EXPECTED_FINAL_TEXT = 'return "PD Agent Gemini 3 v0.1.1 live acceptance";'
 
 
 @dataclass(slots=True)
