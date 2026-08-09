@@ -12,6 +12,7 @@ from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.providers import OpenAIProvider
 from pd_agent.reporting import RunStorage
+from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
 
 
@@ -53,7 +54,7 @@ def build_runtime_bundle(
 ) -> RuntimeBundle:
     """Compose the runtime graph outside the core runtime."""
 
-    storage = storage or RunStorage(config.runs_dir)
+    storage = _configure_storage(storage, config.openai_api_key, config.runs_dir)
     provider = provider_factory(config)
     controller = controller_factory(
         provider=provider,
@@ -65,3 +66,13 @@ def build_runtime_bundle(
         model_config={},
     )
     return RuntimeBundle(config=config, storage=storage, controller=controller, provider=provider)
+
+
+def _configure_storage(storage: RunStorage | None, api_key: str | None, runs_dir: Path) -> RunStorage:
+    if storage is None:
+        secrets = (api_key,) if api_key else ()
+        return RunStorage(runs_dir, secrets=secrets)
+    if api_key:
+        existing = getattr(storage.redactor, "secrets", ())
+        storage.redactor = Redactor((*existing, api_key))
+    return storage

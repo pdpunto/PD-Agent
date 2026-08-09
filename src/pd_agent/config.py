@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 from typing import Mapping
 
 from .core import ExecutionLimits
@@ -39,7 +40,7 @@ class AppConfig:
 def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     """Load config from environment-like mapping."""
 
-    source = env or {}
+    source: Mapping[str, str] = os.environ if env is None else env
     provider = source.get("PD_AGENT_PROVIDER", "openai")
     model = source.get("PD_AGENT_MODEL")
     api_key = source.get("OPENAI_API_KEY")

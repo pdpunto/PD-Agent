@@ -110,7 +110,7 @@ def test_run_state_round_trip_via_run_json() -> None:
 
 
 def test_secret_is_redacted_from_events_and_reports() -> None:
-    secret = "super-secret-token"
+    secret = "sk-test-pd-agent-v011-redaction"
     with tempfile.TemporaryDirectory() as temp_dir:
         storage = RunStorage(Path(temp_dir), secrets=(secret,))
         run_id = generate_run_id()
@@ -151,6 +151,49 @@ def test_secret_is_redacted_from_events_and_reports() -> None:
         assert secret not in report_md_text
         assert "[REDACTED]" in event_text
         assert "[REDACTED]" in report_json_text
+
+
+def test_generated_artifacts_do_not_persist_synthetic_redaction_secret() -> None:
+    secret = "sk-test-pd-agent-v011-redaction"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        storage = RunStorage(Path(temp_dir), secrets=(secret,))
+        run_id = generate_run_id()
+        writer = storage.event_writer(run_id)
+
+        writer.append(
+            RunEvent(
+                run_id=run_id,
+                event_type=RunEventType.RUN_STARTED,
+                timestamp=_utc("2026-08-08T12:11:00"),
+                payload={"secret": secret},
+            )
+        )
+        storage.write_run_state(RunState(run_id=run_id, task=f"use {secret}", project_root=Path("C:/x")))
+        storage.write_final_report(
+            FinalReport(
+                run_id=run_id,
+                final_state=RunStatus.COMPLETED,
+                summary=f"summary {secret}",
+                project=f"project {secret}",
+                requested_task=f"task {secret}",
+                warnings=(f"warn {secret}",),
+                termination_reason=f"reason {secret}",
+            )
+        )
+
+        run_dir = storage.paths_for(run_id)
+        artifact_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (
+                run_dir.events_jsonl,
+                run_dir.run_json,
+                run_dir.final_report_json,
+                run_dir.final_report_md,
+            )
+        )
+
+        assert secret not in artifact_text
+        assert "[REDACTED]" in artifact_text
 
 
 def test_large_outputs_are_referenced() -> None:

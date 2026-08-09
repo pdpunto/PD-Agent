@@ -165,6 +165,7 @@ class OpenAIProvider(ModelProvider):
                 continue
             if key in request.model_config and request.model_config[key] is not None:
                 payload[key] = request.model_config[key]
+        payload["store"] = False
         instructions = request.model_config.get("instructions")
         if instructions is not None:
             payload["instructions"] = str(instructions)

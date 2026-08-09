@@ -185,6 +185,28 @@ def test_request_mapping_and_response_mapping() -> None:
     )
 
 
+def test_store_is_forced_false_even_if_requested_true() -> None:
+    response = SimpleNamespace(
+        id="resp_store",
+        model="gpt-test",
+        status="completed",
+        _request_id="req_store",
+        usage=None,
+        output=[_Message(_Text("ok"))],
+    )
+    client = _FakeClient([response])
+    provider = _provider(client=client)
+
+    provider.execute(
+        _request(
+            messages=(AgentMessage(role="user", content="hi"),),
+            model_config={"model": "gpt-test", "store": True},
+        )
+    )
+
+    assert client.responses.calls[0]["store"] is False
+
+
 def test_tool_call_mapping_and_multiple_calls() -> None:
     response = SimpleNamespace(
         id="resp_2",
