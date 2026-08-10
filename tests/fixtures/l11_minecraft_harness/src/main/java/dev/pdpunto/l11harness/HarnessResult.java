@@ -76,6 +76,23 @@ final class HarnessResult {
         );
     }
 
+    static HarnessResult fail(HarnessConfig config, HarnessIdentity identity, String reason) {
+        return new HarnessResult(
+            1,
+            config.testId(),
+            config.targetModId(),
+            identity.targetLoaded(),
+            identity.targetOriginResolved(),
+            identity.runtimeTargetPath() == null ? null : identity.runtimeTargetPath().toString(),
+            identity.runtimeTargetSha256(),
+            identity.targetShaMatch(),
+            true,
+            "FAIL",
+            reason,
+            true
+        );
+    }
+
     String toJson() {
         StringBuilder builder = new StringBuilder();
         builder.append("{\n");

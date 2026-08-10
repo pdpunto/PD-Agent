@@ -59,4 +59,6 @@ src/pd_agent/artifacts/**
 runs/
 reports/
 cache/
+tests/fixtures/**/bin/
+tests/fixtures/**/run/
 *.zip

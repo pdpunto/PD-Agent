@@ -15,7 +15,7 @@ final class HarnessRunner {
     private HarnessRunner() {
     }
 
-    static HarnessResult run(MinecraftServer server, HarnessConfig config) {
+    static HarnessResult run(MinecraftServer server, HarnessConfig config, HarnessRuntimeOptions options) {
         HarnessIdentity identity = TargetIdentityProbe.inspect(config.targetModId(), config.targetSha256());
         if (!identity.targetLoaded()) {
             return HarnessResult.infraError(config, identity.reason(), identity);
@@ -27,7 +27,7 @@ final class HarnessRunner {
             return HarnessResult.infraError(config, identity.reason(), identity);
         }
 
-        ServerWorld world = server.getOverworld();
+        ServerWorld world = waitForOverworld(server, options.hangMillis());
         if (world == null) {
             return HarnessResult.infraError(config, "overworld not available", identity);
         }
@@ -35,25 +35,29 @@ final class HarnessRunner {
         world.setBlockState(CONTROLLED_POS, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         boolean changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
         BlockState actual = world.getBlockState(CONTROLLED_POS);
-        boolean functionalPass = changed && actual.equals(ExampleMod.expectedProbeState());
+        boolean functionalPass = changed && actual.equals(options.expectedBlockState());
 
         if (!functionalPass) {
-            return new HarnessResult(
-                1,
-                config.testId(),
-                config.targetModId(),
-                true,
-                true,
-                identity.runtimeTargetPath() == null ? null : identity.runtimeTargetPath().toString(),
-                identity.runtimeTargetSha256(),
-                true,
-                true,
-                "FAIL",
-                "expected block state was not observed",
-                true
-            );
+            return HarnessResult.fail(config, identity, "expected block state was not observed");
         }
 
         return HarnessResult.pass(config, identity);
+    }
+
+    private static ServerWorld waitForOverworld(MinecraftServer server, long timeoutMillis) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(1000L, timeoutMillis));
+        while (System.nanoTime() < deadline) {
+            ServerWorld world = server.getOverworld();
+            if (world != null) {
+                return world;
+            }
+            try {
+                Thread.sleep(50L);
+            } catch (InterruptedException exc) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("interrupted while waiting for overworld", exc);
+            }
+        }
+        return null;
     }
 }

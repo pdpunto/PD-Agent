@@ -99,10 +99,12 @@ def test_batch_b_built_jars_stay_separate() -> None:
 def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> None:
     target_source = _read(TARGET_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java")
     harness_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
+    runtime_options_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRuntimeOptions.java")
 
     assert "Blocks.AIR.getDefaultState()" in harness_source
     assert "ExampleMod.applyProbeState" in harness_source
-    assert "ExampleMod.expectedProbeState" in harness_source
+    assert "expectedBlockState()" in runtime_options_source
+    assert "FUNCTIONAL_FAIL" in runtime_options_source
     assert "world.getBlockState" in harness_source
     assert "ServerWorld" in target_source
     assert "applyProbeState" in target_source
