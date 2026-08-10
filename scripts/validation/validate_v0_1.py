@@ -47,8 +47,8 @@ IGNORED_COPY_DIRS = {
 
 _SOURCE_EDIT_CANDIDATES: tuple[tuple[str, str], ...] = (
     (
-        'System.out.println("[.Core] Fabric bootstrap ready");',
-        'System.out.println("[.Core] Fabric bootstrap ready - PD Agent L11 acceptance");',
+        "        // Intentionally empty. The batch-B acceptance uses the public server-side helper below.",
+        "        // Intentionally empty. PD Agent v0.1 acceptance uses this helper path.",
     ),
     ('return "";', 'return "PD Agent L11 acceptance";'),
 )

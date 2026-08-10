@@ -172,6 +172,18 @@ public final class Sample {
         assert edit.after_text == source.read_text(encoding="utf-8").replace('return "";', 'return "PD Agent L11 acceptance";')
 
 
+def test_v0_1_fixture_has_stable_source_edit_target() -> None:
+    runner = _load_runner()
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
+
+    edit = runner._prepare_source_edit(fixture)
+
+    assert edit.relative_path == Path("src/main/java/dev/pdpunto/l11/ExampleMod.java")
+    assert edit.replacement == "        // Intentionally empty. PD Agent v0.1 acceptance uses this helper path."
+    assert edit.before_hash != edit.after_hash
+    assert "PD Agent v0.1 acceptance" in edit.after_text
+
+
 def test_security_scenario_records_outside_absence_and_tool_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = _load_runner()
     import pd_agent
