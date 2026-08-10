@@ -9,6 +9,15 @@ from .artifacts import ArtifactClassification, ArtifactValidator
 from .context import ContextBundle, ContextItem, ContextManager, ContextRequest, ExternalContextSource, ProjectContextSource, RunContextSource
 from .config import AppConfig, load_config
 from .build import GradleBuildRunner
+from .brain import (
+    CompatibilityStatus,
+    EnvironmentDetectionStatus,
+    KnowledgeEnvironment,
+    KnowledgeEnvironmentResolution,
+    KnowledgeEnvironmentResolver,
+    KnowledgeNeed,
+    KnowledgeType,
+)
 from .minecraft import (
     MinecraftEvidencePaths,
     MinecraftLaunchPlan,
@@ -37,8 +46,15 @@ __all__ = [
     "ContextItem",
     "ContextManager",
     "ContextRequest",
+    "CompatibilityStatus",
     "ExternalContextSource",
+    "EnvironmentDetectionStatus",
     "GradleBuildRunner",
+    "KnowledgeEnvironment",
+    "KnowledgeEnvironmentResolution",
+    "KnowledgeEnvironmentResolver",
+    "KnowledgeNeed",
+    "KnowledgeType",
     "MinecraftEvidencePaths",
     "MinecraftLaunchPlan",
     "MinecraftProcessEvidence",
