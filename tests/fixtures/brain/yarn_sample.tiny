@@ -1,0 +1,23 @@
+tiny	2	0	official	intermediary	named
+c	amo	net/minecraft/class_2960	net/minecraft/util/Identifier
+	c	An identifier used to identify things. This is also known as "resource location" and "namespaced ID".
+	f	Lcom/mojang/serialization/Codec;	a	field_25139	CODEC
+	f	Ljava/lang/String;	e	field_33381	DEFAULT_NAMESPACE
+	m	(Ljava/lang/String;)Lamo;	a	method_13052	of
+	m	()Ljava/lang/String;	b	method_13053	toString
+c	jq	net/minecraft/class_2378	net/minecraft/registry/Registry
+	c	A registry is used to register various in-game components. Registries hold the mapping between string ID, numeric ID, and registered value.
+	m	(Lamo;)Ljava/lang/Object;	a	method_63535	get
+	m	(Ljq;Lamo;Ljava/lang/Object;)Ljava/lang/Object;	a	method_10230	register
+	m	(Ljq;Lamt;Ljava/lang/Object;)Ljava/lang/Object;	a	method_39197	register
+c	mj	net/minecraft/class_7924	net/minecraft/registry/RegistryKeys
+	c	Registries are registered in the registry of registries.
+	f	Lamt;	A	field_51841	ENCHANTMENT_LEVEL_BASED_VALUE_TYPE
+	f	Lamt;	F	field_41266	ENTITY_TYPE
+	f	Lamt;	Z	field_52571	BLOCK
+	c	Block registry entry used for block lookup.
+c	amg	net/minecraft/class_6323	net/minecraft/unused/packageinfo/PackageInfo6323
+c	amh	net/minecraft/class_8803	net/minecraft/block/BlockKeys
+	f	Lamt;	a	field_46221	PUMPKIN
+	f	Lamt;	d	field_46224	MELON
+	m	(Ljava/lang/String;)Lamt;	a	method_53910	of

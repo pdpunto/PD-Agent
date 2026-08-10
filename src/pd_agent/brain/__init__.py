@@ -8,16 +8,34 @@ from .models import (
     KnowledgeEnvironment,
     KnowledgeEnvironmentResolution,
     KnowledgeNeed,
+    KnowledgeItem,
+    KnowledgeProvenance,
+    KnowledgeRetrievalResult,
+    KnowledgeRetrievalStatus,
+    KnowledgeSourceResult,
     KnowledgeType,
+    SourceAuthority,
 )
+from .retrieval import FileKnowledgeCache, KnowledgeSource, MinecraftBrain
 from .resolver import KnowledgeEnvironmentResolver
+from .yarn import YarnKnowledgeSource
 
 __all__ = [
     "CompatibilityStatus",
+    "FileKnowledgeCache",
     "EnvironmentDetectionStatus",
     "KnowledgeEnvironment",
     "KnowledgeEnvironmentResolution",
     "KnowledgeEnvironmentResolver",
     "KnowledgeNeed",
+    "KnowledgeItem",
+    "KnowledgeProvenance",
+    "KnowledgeRetrievalResult",
+    "KnowledgeRetrievalStatus",
+    "KnowledgeSource",
+    "KnowledgeSourceResult",
     "KnowledgeType",
+    "MinecraftBrain",
+    "SourceAuthority",
+    "YarnKnowledgeSource",
 ]
