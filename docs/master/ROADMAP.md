@@ -8,6 +8,19 @@ Status: Updated after v0.2 validation.
 2. `v0.1.1` — Real Provider Validation — completed
 3. `v0.2` — Minecraft Test Harness Foundation — completed
 
+## v0.2 Closure
+
+`v0.2` stays closed as:
+
+- `IMPLEMENTADO + VALIDADO + PASS`
+- baseline closure: `3a58ad0212413f4b15b44666fb22a34507b856ae`
+- final suite: `190 passed, 1 skipped`
+- regression v0.1: `PASS`
+- v0.1.1 historical live validation: `PASS`
+- v0.1.1 current re-run: `BLOCKED BY CREDENTIALS`
+
+This is strategic closure point for Minecraft Test Harness Foundation.
+
 ## v0.2 Strategic Goal
 
 Close the gap:
