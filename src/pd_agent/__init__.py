@@ -6,7 +6,21 @@ __version__ = "0.1.0"
 
 from .cli import main
 from .artifacts import ArtifactClassification, ArtifactValidator
-from .context import ContextBundle, ContextItem, ContextManager, ContextRequest, ExternalContextSource, ProjectContextSource, RunContextSource
+from .context import (
+    ContextBundle,
+    ContextItem,
+    ContextManager,
+    ContextRequest,
+    ExternalContextSource,
+    KnowledgeContextSource,
+    KnowledgeRejection,
+    KnowledgeSelector,
+    KnowledgeSourceAttempt,
+    KnowledgeTrace,
+    ProjectContextSource,
+    RunContextSource,
+    SelectedKnowledge,
+)
 from .config import AppConfig, load_config
 from .build import GradleBuildRunner
 from .brain import (
@@ -59,6 +73,8 @@ __all__ = [
     "CompatibilityStatus",
     "FileKnowledgeCache",
     "ExternalContextSource",
+    "KnowledgeContextSource",
+    "KnowledgeRejection",
     "EnvironmentDetectionStatus",
     "GradleBuildRunner",
     "KnowledgeEnvironment",
@@ -92,10 +108,14 @@ __all__ = [
     "AgentRuntime",
     "ProjectContextSource",
     "ProviderContinuation",
+    "KnowledgeSelector",
+    "KnowledgeSourceAttempt",
+    "KnowledgeTrace",
     "configure_logging",
     "load_config",
     "main",
     "RunController",
     "RunContextSource",
+    "SelectedKnowledge",
     "YarnKnowledgeSource",
 ]

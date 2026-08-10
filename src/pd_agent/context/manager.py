@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pd_agent.core import AgentMessage, ContextSource, ExecutionLimits
 from pd_agent.reporting.redaction import Redactor
 
+from .knowledge import KnowledgeContextSource, KnowledgeTrace
 from .models import ContextBundle, ContextItem, ContextRequest
 from .sources import ExternalContextSource, ProjectContextSource, RunContextSource
 
@@ -33,16 +34,19 @@ class ContextManager:
         default_sources = (
             ("project", ProjectContextSource()),
             ("run", RunContextSource()),
+            ("knowledge", KnowledgeContextSource()),
             ("external", ExternalContextSource()),
         )
         source_pairs = sources if sources is not None else default_sources
         self._sources = tuple(_RegisteredSource(name=name, source=source) for name, source in source_pairs)
+        self.last_knowledge_traces: tuple[KnowledgeTrace, ...] = ()
 
     def register_source(self, name: str, source: ContextSource) -> None:
         self._sources = (*self._sources, _RegisteredSource(name=name, source=source))
 
     def collect(self, request: ContextRequest) -> ContextBundle:
         items: list[ContextItem] = []
+        traces: list[KnowledgeTrace] = []
         for binding_index, binding in enumerate(self._sources):
             source_items = binding.source.get(request) or ()
             for item_index, item in enumerate(source_items):
@@ -57,6 +61,9 @@ class ContextManager:
                         },
                     )
                 )
+            source_traces = getattr(binding.source, "last_traces", ())
+            if source_traces:
+                traces.extend(trace for trace in source_traces if trace is not None)
 
         ordered = sorted(
             items,
@@ -69,6 +76,7 @@ class ContextManager:
             ),
         )
         max_bytes = request.limits.max_context_bytes if request.limits is not None else self.max_context_bytes
+        self.last_knowledge_traces = tuple(traces)
         return ContextBundle.build(ordered, max_bytes=max_bytes, redactor=request.redactor or self.redactor)
 
     def build_context(

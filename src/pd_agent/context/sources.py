@@ -12,6 +12,7 @@ from pd_agent.project import ProjectSnapshot
 from pd_agent.reporting.redaction import json_ready
 
 from .models import ContextItem, ContextRequest
+from .knowledge import KnowledgeRetrievalResult, KnowledgeTrace, SelectedKnowledge
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +126,8 @@ class ExternalContextSource:
         for index, raw in enumerate(request.external_context, start=1):
             if isinstance(raw, ContextItem):
                 items.append(raw)
+                continue
+            if isinstance(raw, (KnowledgeRetrievalResult, SelectedKnowledge, KnowledgeTrace)):
                 continue
             if isinstance(raw, str):
                 items.append(

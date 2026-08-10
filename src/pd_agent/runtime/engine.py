@@ -64,6 +64,8 @@ class AgentRuntime:
         self.reporting = reporting
         self.model_config = dict(model_config or {})
         self._telemetry = _LoopTelemetry()
+        self._knowledge_trace_hashes: dict[str, set[str]] = {}
+        self._knowledge_trace_refs: dict[str, list[str]] = {}
 
     def run(
         self,
@@ -261,6 +263,7 @@ class AgentRuntime:
             external_context=external_context,
             limits=limits,
         )
+        self._persist_knowledge_traces(run_state.run_id)
         messages = bundle.to_messages() + tuple(history)
         request = AgentRequest(
             messages=messages,
@@ -285,6 +288,27 @@ class AgentRuntime:
             run_state.state = RunStatus.FAILED
             run_state.termination_reason = "provider error"
             raise
+
+    def _persist_knowledge_traces(self, run_id: str) -> None:
+        traces = getattr(self.context_manager, "last_knowledge_traces", ())
+        if not traces or self.reporting is None:
+            return
+        seen = self._knowledge_trace_hashes.setdefault(run_id, set())
+        refs = self._knowledge_trace_refs.setdefault(run_id, [])
+        paths = self.reporting.paths_for(run_id)
+        for trace in traces:
+            payload = trace.to_dict()
+            digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+            if digest in seen:
+                continue
+            seen.add(digest)
+            evidence_path = self.reporting.store_large_payload(
+                run_id,
+                "knowledge-trace",
+                payload,
+                sequence=len(refs) + 1,
+            )
+            refs.append(evidence_path.relative_to(paths.root).as_posix())
 
     def _execute_tool_calls(
         self,
@@ -333,7 +357,7 @@ class AgentRuntime:
             limits_usage=self._limits_usage(run_state, limits),
             warnings=(),
             termination_reason=run_state.termination_reason,
-            evidence_refs=(),
+            evidence_refs=tuple(self._knowledge_trace_refs.get(run_state.run_id, ())),
         )
         if self.reporting is not None:
             self.reporting.write_run_state(run_state)
