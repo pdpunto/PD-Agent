@@ -49,12 +49,19 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
 
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
     assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' in build_file
-    assert 'modImplementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")' in build_file
+    assert "fabric_api_version" not in build_file
+    assert "fabric-api" not in build_file
+    assert 'id("fabric-loom") version "1.13.3"' in build_file
     assert manifest["id"] == "pdagentl11_harness"
     assert manifest["environment"] == "server"
     assert manifest["entrypoints"]["server"] == ["dev.pdpunto.l11harness.L11HarnessMod"]
-    assert "SERVER_STARTED" in mod_source
-    assert "ServerLifecycleEvents.SERVER_STARTED" in mod_source
+    assert 'minecraft("com.mojang:minecraft:${property("minecraft_version")}")' in build_file
+    assert 'modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")' in build_file
+    assert "DedicatedServerModInitializer" in mod_source
+    assert "Thread.ofPlatform().daemon().name(\"pd-agent-l11-harness\")" in mod_source
+    assert "waitForServerStart" in mod_source
+    assert "ServerLifecycleEvents.SERVER_STARTED" not in mod_source
+    assert "server.stop(false)" in mod_source
     assert "FabricLoader.getInstance()" in identity_source
     assert "getModContainer" in identity_source
     assert "getOrigin" in identity_source

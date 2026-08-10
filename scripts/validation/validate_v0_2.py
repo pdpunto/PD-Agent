@@ -1,4 +1,4 @@
-"""Validacion externa reproducible de PD Agent v0.2 Batch C."""
+"""Validacion externa reproducible de PD Agent v0.2 Batch D."""
 
 from __future__ import annotations
 
@@ -25,12 +25,14 @@ DEFAULT_TARGET_MOD_ID = "pdagentl11"
 DEFAULT_MINECRAFT_VERSION = "1.21.11"
 DEFAULT_LOADER_VERSION = "0.19.3"
 DEFAULT_TEST_ID = "block_state_probe"
+WORKSPACE_COPY_IGNORED_DIRS = tuple(sorted(name for name in base.IGNORED_COPY_DIRS if name != ".gradle"))
 
 
 @dataclass(slots=True)
 class ValidationSummary:
     started_at: datetime
     finished_at: datetime | None = None
+    repository_commit: str | None = None
     validation_root: Path | None = None
     workspace_root: Path | None = None
     target_root: Path | None = None
@@ -72,6 +74,7 @@ class ValidationSummary:
         return {
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "repository_commit": self.repository_commit,
             "validation_root": str(self.validation_root) if self.validation_root else None,
             "workspace_root": str(self.workspace_root) if self.workspace_root else None,
             "target_root": str(self.target_root) if self.target_root else None,
@@ -89,13 +92,18 @@ class ValidationSummary:
             "malformed_result": _scenario_to_dict(self.malformed_result),
             "notes": list(self.notes),
             "final_status": self.final_status(),
+            "total_duration_seconds": (
+                max((self.finished_at - self.started_at).total_seconds(), 0.0)
+                if self.finished_at is not None
+                else None
+            ),
         }
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="validate_v0_2.py",
-        description="Runner externo reproducible de validacion PD Agent v0.2 Batch C.",
+        description="Runner externo reproducible de validacion PD Agent v0.2 Batch D.",
     )
     parser.add_argument("--validation-root", type=Path, default=DEFAULT_VALIDATION_ROOT)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
@@ -160,7 +168,13 @@ def _check_preconditions(summary: ValidationSummary) -> None:
     result = base._run_command(["git", "status", "--short"], cwd=REPO_ROOT, timeout_seconds=30)
     if result.timed_out or result.exit_code != 0:
         raise base.ScenarioBlocked("git status failed")
+    commit = base._run_command(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, timeout_seconds=30)
+    if commit.timed_out or commit.exit_code != 0:
+        raise base.ScenarioBlocked("git rev-parse HEAD failed")
+    summary.repository_commit = commit.stdout.strip()
     summary.notes.append("prechecks: ok")
+    if summary.repository_commit:
+        summary.notes.append(f"repository_commit: {summary.repository_commit}")
 
 
 def _prepare_workspace(summary: ValidationSummary) -> None:
@@ -172,12 +186,12 @@ def _prepare_workspace(summary: ValidationSummary) -> None:
     shutil.copytree(
         DEFAULT_TARGET_ROOT,
         summary.target_root,
-        ignore=shutil.ignore_patterns(*base.IGNORED_COPY_DIRS),
+        ignore=shutil.ignore_patterns(*WORKSPACE_COPY_IGNORED_DIRS),
     )
     shutil.copytree(
         DEFAULT_HARNESS_ROOT,
         summary.harness_root,
-        ignore=shutil.ignore_patterns(*base.IGNORED_COPY_DIRS),
+        ignore=shutil.ignore_patterns(*WORKSPACE_COPY_IGNORED_DIRS),
     )
 
 
@@ -249,6 +263,7 @@ def _run_positive(
     with _temp_env(GRADLE_USER_HOME=str(summary.validation_root / "gradle-home")):
         result = runner.run(spec, run_id=run_id, java_version="21", launch_mode=launch_mode)
     details = {
+        "repository_commit": summary.repository_commit,
         "result_status": result.status.value,
         "result_reason": result.reason,
         "result_json": str(result.evidence_paths.result_json),
@@ -257,9 +272,24 @@ def _run_positive(
         "stderr_log": str(result.evidence_paths.stderr_log),
         "latest_log": str(result.evidence_paths.latest_log),
         "crash_reports_dir": str(result.evidence_paths.crash_reports_dir),
+        "target_jar_path": str(result.target.path),
+        "target_mod_id": result.target.mod_id,
+        "target_sha256": result.target.sha256,
+        "minecraft_version": result.spec.minecraft_version,
+        "loader_version": result.spec.loader_version,
+        "java_version": result.target.java_version,
         "server_started": result.metadata.get("server_started"),
-        "target_sha_match": result.metadata.get("target_sha_match"),
-        "harness_result_state": result.metadata.get("harness_result_state"),
+        "runtime_target_sha_match": result.metadata.get("target_sha_match"),
+        "functional_test_result": result.metadata.get("harness_result_state"),
+        "shutdown_requested": (
+            result.runtime_evidence.metadata.get("shutdown_requested")
+            if result.runtime_evidence is not None
+            else None
+        ),
+        "process_exit_code": result.process_evidence.exit_code if result.process_evidence else None,
+        "process_timed_out": result.process_evidence.timed_out if result.process_evidence else None,
+        "duration_seconds": result.duration_seconds,
+        "evidence_root": str(result.evidence_paths.root),
     }
     if result.status.value == "PASS" and launch_mode == "pass":
         return base._scenario_result("Positive runtime", "PASS", "completed", **details)
@@ -334,9 +364,15 @@ def _write_artifacts(summary: ValidationSummary) -> None:
 
 def _summary_markdown(summary: ValidationSummary) -> str:
     lines = [
-        "# PD Agent v0.2 Batch C Validation",
+        "# PD Agent v0.2 Batch D Validation",
         "",
         f"- Final status: `{summary.final_status()}`",
+        f"- Repository commit: `{summary.repository_commit}`" if summary.repository_commit else "- Repository commit: unknown",
+        (
+            f"- Total duration: `{max((summary.finished_at - summary.started_at).total_seconds(), 0.0):.3f}s`"
+            if summary.finished_at is not None
+            else "- Total duration: unknown"
+        ),
         "",
         "## Scenarios",
     ]
@@ -362,8 +398,9 @@ def _summary_markdown(summary: ValidationSummary) -> str:
 
 
 def _print_summary(summary: ValidationSummary) -> None:
-    print("L11 v0.2 VALIDATION")
+    print("L11 v0.2 VALIDATION - BATCH D")
     print()
+    print(f"Repository commit: {summary.repository_commit or 'NOT RECORDED'}")
     print(f"Target build: {summary.build_target.status if summary.build_target else 'NOT RUN'}")
     print(f"Harness build: {summary.build_harness.status if summary.build_harness else 'NOT RUN'}")
     print(f"Pass run 1: {summary.pass_run_1.status if summary.pass_run_1 else 'NOT RUN'}")
@@ -377,6 +414,9 @@ def _print_summary(summary: ValidationSummary) -> None:
     print(f"Malformed result: {summary.malformed_result.status if summary.malformed_result else 'NOT RUN'}")
     print()
     print(f"FINAL: {summary.final_status()}")
+    if summary.finished_at is not None:
+        duration = max((summary.finished_at - summary.started_at).total_seconds(), 0.0)
+        print(f"Duration: {duration:.3f}s")
     print(f"Evidence: {summary.validation_root}")
 
 

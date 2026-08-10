@@ -2,9 +2,10 @@
 
 PD Agent is an AI agent system for Minecraft Fabric projects.
 
-Status: pre-implementation.
+Status: v0.2 Minecraft Test Harness validated.
 
 v0.1 focus: existing Minecraft Fabric projects.
+v0.2 adds the server-side Minecraft test harness and validation flow.
 
 Run:
 
@@ -31,3 +32,7 @@ Docs:
 - [Architecture](docs/architecture/PD_AGENT_V0.1_ARCHITECTURE.md)
 - [RFC](docs/rfc/PD_AGENT_V0.1_RFC.md)
 - [IMP](docs/implementation/PD_AGENT_V0.1_IMP.md)
+- [v0.2 Design](docs/design/PD_AGENT_V0.2_MINECRAFT_TEST_HARNESS_DESIGN.md)
+- [v0.2 RFC](docs/rfc/PD_AGENT_V0.2_MINECRAFT_TEST_HARNESS_RFC.md)
+- [v0.2 IMP](docs/implementation/PD_AGENT_V0.2_MINECRAFT_TEST_HARNESS_IMP.md)
+- [v0.2 Validation](docs/validation/PD_AGENT_V0.2_VALIDATION.md)

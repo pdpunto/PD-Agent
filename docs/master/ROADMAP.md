@@ -1,12 +1,12 @@
 # PD Agent — Roadmap
 
-Status: Updated after v0.1.1 validation.
+Status: Updated after v0.2 validation.
 
 ## Confirmed Milestones
 
 1. `v0.1` — Fabric Coding Loop — completed
 2. `v0.1.1` — Real Provider Validation — completed
-3. `v0.2` — Minecraft Test Harness Foundation — next
+3. `v0.2` — Minecraft Test Harness Foundation — completed
 
 ## v0.2 Strategic Goal
 
@@ -14,7 +14,7 @@ Close the gap:
 
 `valid JAR` -> `Minecraft real` -> `mod loaded` -> `behavior observed` -> `PASS/FAIL`
 
-The purpose is to improve evidence quality inside Minecraft before expanding the system with heavier intelligence layers such as Knowledge Base / RAG.
+The purpose was to improve evidence quality inside Minecraft before expanding the system with heavier intelligence layers such as Knowledge Base / RAG.
 
 ## v0.2 Scope, at a high level
 
