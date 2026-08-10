@@ -9,6 +9,20 @@ from .artifacts import ArtifactClassification, ArtifactValidator
 from .context import ContextBundle, ContextItem, ContextManager, ContextRequest, ExternalContextSource, ProjectContextSource, RunContextSource
 from .config import AppConfig, load_config
 from .build import GradleBuildRunner
+from .minecraft import (
+    MinecraftEvidencePaths,
+    MinecraftLaunchPlan,
+    MinecraftProcessEvidence,
+    MinecraftRuntimeEvidence,
+    MinecraftTargetMetadata,
+    MinecraftTestError,
+    MinecraftTestResult,
+    MinecraftTestRunner,
+    MinecraftTestSpec,
+    MinecraftTestStatus,
+    MinecraftTestValidationError,
+    UnsupportedMinecraftEnvironmentError,
+)
 from .logging import configure_logging
 from .project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from .runtime import AgentRuntime, RunController
@@ -25,6 +39,18 @@ __all__ = [
     "ContextRequest",
     "ExternalContextSource",
     "GradleBuildRunner",
+    "MinecraftEvidencePaths",
+    "MinecraftLaunchPlan",
+    "MinecraftProcessEvidence",
+    "MinecraftRuntimeEvidence",
+    "MinecraftTargetMetadata",
+    "MinecraftTestError",
+    "MinecraftTestResult",
+    "MinecraftTestRunner",
+    "MinecraftTestSpec",
+    "MinecraftTestStatus",
+    "MinecraftTestValidationError",
+    "UnsupportedMinecraftEnvironmentError",
     "ProjectInspector",
     "ProjectInspectionStatus",
     "ProjectSnapshot",
