@@ -9,6 +9,7 @@ PD Agent is a small, provider-neutral Python runtime for safe, evidence-based co
 - `v0.1` is `IMPLEMENTADO + VALIDADO + PASS`.
 - `v0.1.1` is `IMPLEMENTADO + LIVE VALIDATED + PASS`.
 - `v0.2` is `IMPLEMENTADO + VALIDADO + PASS`.
+- `v0.3` is `IMPLEMENTADO + LIVE VALIDATED + PASS`.
 
 ## Strategic Direction
 
@@ -29,7 +30,7 @@ The project remains:
 1. `v0.1` - Fabric coding/build loop - completed
 2. `v0.1.1` - real provider validation - completed
 3. `v0.2` - Minecraft Test Harness Foundation - completed
-4. `Minecraft Brain` / Knowledge Base - under evaluation
+4. `Minecraft Brain` / Knowledge Base - completed
 5. `Build & Debug` advanced - future review
 6. `Fabric Agent` complete - future review
 7. Later expansions such as benchmarks, multi-agent, UI and `.Fuzzer` remain dependent on evidence and re-evaluation
@@ -46,3 +47,16 @@ The project remains:
 - v0.1.1 current re-run: `BLOCKED BY CREDENTIALS`
 
 This closes the v0.2 evidence loop without broadening scope beyond dedicated server-side Minecraft validation.
+
+## v0.3 Closure
+
+`PD Agent v0.3 - Minecraft Brain Foundation` is now strategically closed as:
+
+- `IMPLEMENTADO + LIVE VALIDATED + PASS`
+- baseline closure: `9d86344c445df3ad98b1674fdf6922e812637b13`
+- final suite: `238 passed, 1 skipped`
+- regression v0.1: `PASS`
+- regression v0.1.1: `PASS`
+- regression v0.2: `PASS`
+
+This confirms the project can use versioned, provenance-bearing external knowledge in a real Fabric/Minecraft flow. Benchmarks remain a candidate under evaluation, not a committed milestone.

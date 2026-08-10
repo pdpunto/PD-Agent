@@ -21,6 +21,19 @@ Status: Updated after v0.2 validation.
 
 This is strategic closure point for Minecraft Test Harness Foundation.
 
+## v0.3 Closure
+
+`v0.3` stays closed as:
+
+- `IMPLEMENTADO + LIVE VALIDATED + PASS`
+- baseline closure: `9d86344c445df3ad98b1674fdf6922e812637b13`
+- final suite: `238 passed, 1 skipped`
+- regression v0.1: `PASS`
+- regression v0.1.1: `PASS`
+- regression v0.2: `PASS`
+
+The project now has a validated Minecraft Brain Foundation with versioned external knowledge and provenance. Benchmarks remain a candidate under evaluation.
+
 ## v0.2 Strategic Goal
 
 Close the gap:
