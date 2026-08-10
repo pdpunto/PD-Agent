@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import importlib.util
 from pathlib import Path
 import sys
 import tempfile
 from types import SimpleNamespace
+import zipfile
 
 import pytest
 
@@ -174,14 +176,28 @@ public final class Sample {
 
 def test_v0_1_fixture_has_stable_source_edit_target() -> None:
     runner = _load_runner()
-    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        source = root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            """package dev.pdpunto.l11;
 
-    edit = runner._prepare_source_edit(fixture)
+public final class ExampleMod {
+    public String message() {
+        return "";
+    }
+}
+""",
+            encoding="utf-8",
+        )
+
+        edit = runner._prepare_source_edit(root)
 
     assert edit.relative_path == Path("src/main/java/dev/pdpunto/l11/ExampleMod.java")
-    assert edit.replacement == "        // Intentionally empty. PD Agent v0.1 acceptance uses this helper path."
+    assert edit.replacement == 'return "PD Agent L11 acceptance";'
     assert edit.before_hash != edit.after_hash
-    assert "PD Agent v0.1 acceptance" in edit.after_text
+    assert "PD Agent L11 acceptance" in edit.after_text
 
 
 def test_v0_1_suite_clears_pytest_temp_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,3 +517,167 @@ def test_v011_continuation_summary_hides_raw_signature() -> None:
     assert summary["replay_success"] is True
     assert summary["response_records"][0]["payload_sha256"] == "hash-a"
     assert summary["request_records"][0]["payload_sha256"] == "hash-a"
+
+
+def _yarn_artifact_bytes() -> bytes:
+    root = Path(__file__).resolve().parents[1] / "fixtures" / "brain" / "yarn_sample.tiny"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("mappings/mappings.tiny", root.read_text(encoding="utf-8"))
+    return buffer.getvalue()
+
+
+def test_v03_prepare_workspace_resets_fixture_and_harness(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_3.py")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        candidate = base / "candidate"
+        harness = base / "harness"
+        validation = base / "validation"
+        (candidate / "build").mkdir(parents=True)
+        (candidate / ".gradle").mkdir(parents=True)
+        target_source = candidate / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+        target_source.parent.mkdir(parents=True, exist_ok=True)
+        target_source.write_text(
+            """package dev.pdpunto.l11;
+
+import net.minecraft.block.Blocks;
+
+public final class ExampleMod {
+    public static final Object PROBE = Blocks.DIAMOND_BLOCK;
+}
+""",
+            encoding="utf-8",
+        )
+        (candidate / "build" / "stale.txt").write_text("stale", encoding="utf-8")
+        (harness / "src" / "main" / "java").mkdir(parents=True)
+        (harness / "src" / "main" / "java" / "Harness.java").write_text("class Harness {}", encoding="utf-8")
+        (harness / "build").mkdir(parents=True)
+        (harness / "build" / "stale.txt").write_text("stale", encoding="utf-8")
+
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=candidate,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        monkeypatch.setattr(runner, "DEFAULT_HARNESS_ROOT", harness)
+
+        runner._prepare_workspace(summary)
+
+        assert (summary.target_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java").exists()
+        assert (summary.harness_root / "src" / "main" / "java" / "Harness.java").exists()
+        assert not (summary.target_root / "build").exists()
+        assert not (summary.harness_root / "build").exists()
+        target_source_text = (summary.target_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java").read_text(encoding="utf-8")
+
+    assert "Blocks.DIAMOND_BLOCK" in target_source_text
+    assert "Registries.BLOCK" not in target_source_text
+
+
+def test_v03_knowledge_need_uses_detected_environment() -> None:
+    runner = _load_runner("validate_v0_3.py")
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=fixture,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        summary.target_root = fixture
+        summary.environment_resolution = runner._scenario_result("Environment resolution", "PASS", "detected")
+
+        need = runner._build_knowledge_need(summary)
+
+    assert need.query == "Identifier Registries Block registry lookup"
+    assert tuple(need.hints) == ("Identifier", "Registries", "Block registry lookup")
+    assert need.environment.minecraft_version == "1.21.11"
+    assert need.environment.loader_version == "0.19.3"
+    assert need.environment.loom_version == "1.13.3"
+
+
+def test_v03_brain_retrieval_records_provenance_and_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_3.py")
+    fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        validation.mkdir(parents=True, exist_ok=True)
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=fixture,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        summary.target_root = fixture
+        summary.environment_resolution = runner._scenario_result("Environment resolution", "PASS", "detected")
+        monkeypatch.setattr(
+            runner,
+            "YarnKnowledgeSource",
+            lambda: __import__("pd_agent").YarnKnowledgeSource(artifact_bytes=_yarn_artifact_bytes()),
+        )
+
+        result = runner._run_brain_retrieval(summary)
+        evidence = json.loads((summary.evidence_root / "knowledge.json").read_text(encoding="utf-8"))
+
+    assert result.status == "PASS"
+    assert summary.knowledge_result is not None
+    assert summary.knowledge_result.items
+    assert evidence["retrieved_item_ids"]
+    assert evidence["provenance"]
+    assert evidence["raw_result"]["source_results"]
+
+
+def test_v03_acceptance_source_evidence_helpers_capture_real_change() -> None:
+    runner = _load_runner("validate_v0_3.py")
+
+    before = """package dev.pdpunto.l11;
+
+public final class ExampleMod {
+    private static final String BLOCK = Blocks.DIAMOND_BLOCK.toString();
+}
+"""
+    after = """package dev.pdpunto.l11;
+
+public final class ExampleMod {
+    private static final String BLOCK = Registries.BLOCK.getId(Blocks.DIAMOND_BLOCK).toString();
+}
+"""
+
+    assert runner._source_excerpt(before, "Blocks.DIAMOND_BLOCK") == 'private static final String BLOCK = Blocks.DIAMOND_BLOCK.toString();'
+    assert runner._source_excerpt(after, "Registries.BLOCK") == 'private static final String BLOCK = Registries.BLOCK.getId(Blocks.DIAMOND_BLOCK).toString();'
+
+
+def test_v03_acceptance_blocks_without_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_3.py")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        target = base / "target"
+        validation = base / "validation"
+        target.mkdir(parents=True)
+        validation.mkdir(parents=True)
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=target,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.target_root = target
+        summary.harness_root = base / "harness"
+        summary.evidence_root = validation / "evidence"
+        summary.knowledge_result = object()
+        summary.evidence_root.mkdir(parents=True, exist_ok=True)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+        result = runner._run_acceptance_main(summary, SimpleNamespace(), runner._scenario_result("Brain retrieval", "PASS", "retrieved"))
+
+    assert result.status == "BLOCKED"
+    assert result.reason == "GEMINI_API_KEY missing"

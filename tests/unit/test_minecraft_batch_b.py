@@ -34,6 +34,8 @@ def test_batch_b_target_fixture_uses_server_side_block_probe() -> None:
     assert "ServerWorld" in source
     assert "BlockPos" in source
     assert "Blocks.DIAMOND_BLOCK" in source
+    assert "Registries.BLOCK" not in source
+    assert "Identifier.of(\"minecraft\", \"diamond_block\")" not in source
     assert "setBlockState" in source
     assert "expectedProbeState" in source
 
