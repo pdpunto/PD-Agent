@@ -184,6 +184,42 @@ def test_v0_1_fixture_has_stable_source_edit_target() -> None:
     assert "PD Agent v0.1 acceptance" in edit.after_text
 
 
+def test_v0_1_suite_clears_pytest_temp_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+
+    def fake_run_command(command, *, cwd, timeout_seconds, extra_env=None):  # noqa: ANN001
+        pytest_temp = Path(extra_env["PYTEST_DEBUG_TEMPROOT"])  # type: ignore[index]
+        assert pytest_temp.exists()
+        assert list(pytest_temp.iterdir()) == []
+        return runner.CommandResult(
+            command=tuple(command),
+            cwd=cwd,
+            exit_code=0,
+            timed_out=False,
+            stdout=".",
+            stderr="",
+            duration_seconds=0.1,
+        )
+
+    monkeypatch.setattr(runner, "_run_command", fake_run_command)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        validation.mkdir(parents=True, exist_ok=True)
+        stale = validation / "pytest-tmp"
+        (stale / "pytest-of-Usuario" / "old").mkdir(parents=True, exist_ok=True)
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            validation_root=validation,
+        )
+        summary.evidence_root = validation / "evidence"
+        summary.evidence_root.mkdir(parents=True, exist_ok=True)
+        result = runner._run_suite(summary, SimpleNamespace(pytest_timeout_seconds=30))
+
+    assert result.status == "PASS"
+    assert not (stale / "pytest-of-Usuario" / "old").exists()
+
+
 def test_security_scenario_records_outside_absence_and_tool_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = _load_runner()
     import pd_agent

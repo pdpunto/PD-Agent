@@ -638,6 +638,8 @@ def _run_openai_live(summary: ValidationSummary, args: argparse.Namespace) -> Sc
 
 def _run_suite(summary: ValidationSummary, args: argparse.Namespace) -> ScenarioResult:
     pytest_temp = summary.validation_root / "pytest-tmp"
+    if pytest_temp.exists():
+        shutil.rmtree(pytest_temp, ignore_errors=True)
     pytest_temp.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     result = _run_command(
