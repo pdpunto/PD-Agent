@@ -46,7 +46,7 @@ DEFAULT_LOADER_VERSION = "0.19.3"
 DEFAULT_TEST_ID = "block_state_probe"
 WORKSPACE_TARGET_ROOT = Path("tests/fixtures/l11_fabric_fixture")
 WORKSPACE_HARNESS_ROOT = Path("tests/fixtures/l11_minecraft_harness")
-WORKSPACE_TARGET_JAR = Path("tests/fixtures/l11_fabric_fixture/build/libs/pd-agent-l11-fixture.jar")
+WORKSPACE_TARGET_JAR = Path("build/libs/pd-agent-l11-fixture.jar")
 IGNORED_COPY_DIRS = tuple(sorted(name for name in base.IGNORED_COPY_DIRS if name != ".gradle"))
 
 
@@ -95,9 +95,13 @@ class ValidationSummary:
     knowledge_result: Any | None = None
     baseline_target_build: base.ScenarioResult | None = None
     baseline_harness_build: base.ScenarioResult | None = None
+    brain_off_acceptance: base.ScenarioResult | None = None
     acceptance_main: base.ScenarioResult | None = None
+    comparison: base.ScenarioResult | None = None
     minecraft_runtime: base.ScenarioResult | None = None
     suite: base.ScenarioResult | None = None
+    accepted_target_root: Path | None = None
+    accepted_harness_root: Path | None = None
     notes: list[str] = field(default_factory=list)
 
     def final_status(self) -> str:
@@ -106,6 +110,7 @@ class ValidationSummary:
             self.brain_retrieval,
             self.baseline_target_build,
             self.baseline_harness_build,
+            self.comparison,
             self.acceptance_main,
             self.minecraft_runtime,
             self.suite,
@@ -131,9 +136,13 @@ class ValidationSummary:
             "brain_retrieval": _scenario_to_dict(self.brain_retrieval),
             "baseline_target_build": _scenario_to_dict(self.baseline_target_build),
             "baseline_harness_build": _scenario_to_dict(self.baseline_harness_build),
+            "brain_off_acceptance": _scenario_to_dict(self.brain_off_acceptance),
             "acceptance_main": _scenario_to_dict(self.acceptance_main),
+            "comparison": _scenario_to_dict(self.comparison),
             "minecraft_runtime": _scenario_to_dict(self.minecraft_runtime),
             "suite": _scenario_to_dict(self.suite),
+            "accepted_target_root": str(self.accepted_target_root) if self.accepted_target_root else None,
+            "accepted_harness_root": str(self.accepted_harness_root) if self.accepted_harness_root else None,
             "notes": list(self.notes),
             "final_status": self.final_status(),
         }
@@ -148,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validation-root", type=Path, default=DEFAULT_VALIDATION_ROOT)
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--pytest-timeout-seconds", type=int, default=DEFAULT_PYTEST_TIMEOUT_SECONDS)
+    parser.add_argument("--brain-off", action="store_true", help="Run only the Brain OFF comparison case")
+    parser.add_argument("--brain-on", action="store_true", help="Run only the Brain ON acceptance case")
     parser.add_argument("--keep-working-copy", action="store_true")
     return parser
 
@@ -179,7 +190,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary.baseline_harness_build = _run_gradle_build(summary.harness_root, args.timeout_seconds, summary.validation_root / "gradle-home")
         if summary.baseline_harness_build.status != "PASS":
             raise base.ScenarioBlocked(f"harness build failed: {summary.baseline_harness_build.reason}")
-        summary.acceptance_main = _run_acceptance_main(summary, args, knowledge)
+        run_brain_off = args.brain_off or not args.brain_on
+        run_brain_on = args.brain_on or not args.brain_off
+        if run_brain_off:
+            summary.brain_off_acceptance = _run_acceptance_case(
+                summary,
+                args,
+                knowledge,
+                case_name="brain-off",
+                brain_enabled=False,
+            )
+        else:
+            summary.brain_off_acceptance = _scenario_result("Brain OFF comparison", "NOT RUN", "not requested")
+        if run_brain_on:
+            summary.acceptance_main = _run_acceptance_case(
+                summary,
+                args,
+                knowledge,
+                case_name="brain-on",
+                brain_enabled=True,
+            )
+        else:
+            summary.acceptance_main = _scenario_result("Brain ON acceptance", "NOT RUN", "not requested")
+        summary.comparison = _run_comparison(summary, run_brain_off=run_brain_off, run_brain_on=run_brain_on)
         summary.minecraft_runtime = _run_minecraft_runtime(summary)
         summary.suite = _run_suite(summary, args)
     except base.ScenarioBlocked as exc:
@@ -321,18 +354,60 @@ def _run_acceptance_main(
     args: argparse.Namespace,
     knowledge: base.ScenarioResult,
 ) -> base.ScenarioResult:
+    return _run_acceptance_case(summary, args, knowledge, case_name="brain-on", brain_enabled=True)
+
+
+def _prepare_acceptance_workspace(summary: ValidationSummary, case_name: str) -> tuple[Path, Path]:
+    if summary.working_root is None or summary.candidate_root is None:
+        raise base.ScenarioBlocked("workspace missing")
+    case_root = summary.working_root / case_name
+    target_root = case_root / WORKSPACE_TARGET_ROOT
+    harness_root = case_root / WORKSPACE_HARNESS_ROOT
+    if case_root.exists():
+        shutil.rmtree(case_root)
+    case_root.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        summary.candidate_root,
+        target_root,
+        ignore=shutil.ignore_patterns(*IGNORED_COPY_DIRS),
+    )
+    shutil.copytree(
+        DEFAULT_HARNESS_ROOT,
+        harness_root,
+        ignore=shutil.ignore_patterns(*IGNORED_COPY_DIRS),
+    )
+    return target_root, harness_root
+
+
+def _run_acceptance_case(
+    summary: ValidationSummary,
+    args: argparse.Namespace,
+    knowledge: base.ScenarioResult,
+    *,
+    case_name: str,
+    brain_enabled: bool,
+) -> base.ScenarioResult:
     if summary.target_root is None or summary.validation_root is None or summary.evidence_root is None:
         raise base.ScenarioBlocked("workspace missing")
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        details = {"provider": "gemini", "model": DEFAULT_GEMINI_MODEL, "block_reason": "GEMINI_API_KEY missing"}
-        _write_json(summary.evidence_root / "provider.json", details)
-        return _scenario_result("Brain ON acceptance", "BLOCKED", "GEMINI_API_KEY missing", **details)
+        details = {"provider": "gemini", "model": DEFAULT_GEMINI_MODEL, "block_reason": "GEMINI_API_KEY missing", "brain_enabled": brain_enabled}
+        _write_json(summary.evidence_root / f"{case_name}-provider.json", details)
+        return _scenario_result(
+            "Brain ON acceptance" if brain_enabled else "Brain OFF comparison",
+            "BLOCKED",
+            "GEMINI_API_KEY missing",
+            **details,
+        )
 
     provider = GeminiProvider(model=DEFAULT_GEMINI_MODEL, api_key=api_key, provider_retry_limit=1)
     recording_client = RecordingGeminiClient(provider._client)  # noqa: SLF001
     provider._client = recording_client  # noqa: SLF001
-    storage = RunStorage(summary.evidence_root / "acceptance")
+    target_root, harness_root = _prepare_acceptance_workspace(summary, case_name)
+    if brain_enabled:
+        summary.accepted_target_root = target_root
+        summary.accepted_harness_root = harness_root
+    storage = RunStorage(summary.evidence_root / "acceptance" / case_name)
     controller = RunController(
         provider=provider,
         storage=storage,
@@ -344,13 +419,13 @@ def _run_acceptance_main(
     )
     gradle_home = summary.validation_root / "gradle-home"
     task = DEFAULT_TASK
-    source_path = summary.target_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+    source_path = target_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
     before_text = source_path.read_text(encoding="utf-8")
     with _temp_env(GRADLE_USER_HOME=str(gradle_home)):
         run_state, report = controller.run(
-            summary.target_root,
+            target_root,
             task,
-            external_context=(summary.knowledge_result,),
+            external_context=(summary.knowledge_result,) if brain_enabled else (),
         )
     evaluation = evaluate_pass(storage, run_state.run_id)
     after_text = source_path.read_text(encoding="utf-8")
@@ -358,7 +433,7 @@ def _run_acceptance_main(
     after_hash = _sha256_text(after_text)
     source_changed = before_hash != after_hash
     before_contains_direct_block = "Blocks.DIAMOND_BLOCK" in before_text
-    after_contains_registry_lookup = "Registries.BLOCK" in after_text and "Identifier.of(\"minecraft\", \"diamond_block\")" in after_text
+    after_contains_registry_lookup = _contains_registry_lookup(after_text)
     diff_text = "\n".join(
         difflib.unified_diff(
             before_text.splitlines(),
@@ -371,12 +446,17 @@ def _run_acceptance_main(
     provider_details = {
         "provider": "gemini",
         "model": DEFAULT_GEMINI_MODEL,
+        "brain_enabled": brain_enabled,
+        "external_context_count": 1 if brain_enabled else 0,
         "request_count": len(recording_client.calls),
         "tool_call_count": run_state.tool_call_count,
         "continuation_count": sum(1 for call in recording_client.calls if call.request.get("tool_calls")),
     }
     code_details = {
-        "source_path": str(source_path.relative_to(summary.target_root)),
+        "workspace_root": str(target_root.parents[3]),
+        "target_root": str(target_root),
+        "harness_root": str(harness_root),
+        "source_path": str(source_path.relative_to(target_root)),
         "before_hash": before_hash,
         "after_hash": after_hash,
         "source_changed": source_changed,
@@ -396,9 +476,9 @@ def _run_acceptance_main(
         "report_final_build": report.final_build.to_dict() if report.final_build else None,
         "evidence_refs": list(report.evidence_refs),
     }
-    _write_json(summary.evidence_root / "provider.json", provider_details)
-    _write_json(summary.evidence_root / "code.json", code_details)
-    _write_json(summary.evidence_root / "build.json", build_details)
+    _write_json(summary.evidence_root / case_name / "provider.json", provider_details)
+    _write_json(summary.evidence_root / case_name / "code.json", code_details)
+    _write_json(summary.evidence_root / case_name / "build.json", build_details)
     if (
         run_state.state.value == "COMPLETED"
         and evaluation.passed
@@ -410,13 +490,50 @@ def _run_acceptance_main(
         and before_contains_direct_block
         and after_contains_registry_lookup
     ):
-        return _scenario_result("Brain ON acceptance", "PASS", "completed", **{**provider_details, **code_details, **build_details})
+        return _scenario_result(
+            "Brain ON acceptance" if brain_enabled else "Brain OFF comparison",
+            "PASS",
+            "completed" if brain_enabled else "compared",
+            **{**provider_details, **code_details, **build_details},
+        )
     return _scenario_result(
-        "Brain ON acceptance",
+        "Brain ON acceptance" if brain_enabled else "Brain OFF comparison",
         "FAIL",
         evaluation.reason if not source_changed else "acceptance failed",
         **{**provider_details, **code_details, **build_details},
     )
+
+
+def _run_comparison(
+    summary: ValidationSummary,
+    *,
+    run_brain_off: bool,
+    run_brain_on: bool,
+) -> base.ScenarioResult:
+    if not run_brain_off or not run_brain_on:
+        return _scenario_result("Brain comparison", "NOT RUN", "both cases required")
+    brain_off = summary.brain_off_acceptance
+    brain_on = summary.acceptance_main
+    if brain_off is None or brain_on is None:
+        return _scenario_result("Brain comparison", "FAIL", "missing case result")
+    details = {
+        "same_task": True,
+        "same_provider": brain_off.details.get("provider") == brain_on.details.get("provider"),
+        "same_model": brain_off.details.get("model") == brain_on.details.get("model"),
+        "same_environment": summary.environment_resolution is not None,
+        "environment_details": summary.environment_resolution.details if summary.environment_resolution else None,
+        "same_target_fixture": summary.candidate_root.as_posix() if summary.candidate_root else None,
+        "brain_off": _scenario_to_dict(brain_off),
+        "brain_on": _scenario_to_dict(brain_on),
+        "brain_off_external_context_count": brain_off.details.get("external_context_count"),
+        "brain_on_external_context_count": brain_on.details.get("external_context_count"),
+        "same_build_runner": True,
+        "same_harness_fixture": True,
+    }
+    _write_json(summary.evidence_root / "comparison.json", details)
+    if details["same_provider"] and details["same_model"] and details["brain_off_external_context_count"] == 0 and details["brain_on_external_context_count"] == 1:
+        return _scenario_result("Brain comparison", "PASS", "brain off/on compared", **details)
+    return _scenario_result("Brain comparison", "FAIL", "comparison mismatch", **details)
 
 
 def _knowledge_result(summary: ValidationSummary) -> Any:
@@ -432,12 +549,23 @@ def _source_excerpt(text: str, needle: str) -> str:
     return ""
 
 
+def _contains_registry_lookup(text: str) -> bool:
+    return "Registries.BLOCK" in text and (
+        'Identifier.of("minecraft", "diamond_block")' in text
+        or 'Identifier.ofVanilla("diamond_block")' in text
+    )
+
+
 def _run_minecraft_runtime(summary: ValidationSummary) -> base.ScenarioResult:
     if summary.working_root is None or summary.validation_root is None:
         raise base.ScenarioBlocked("workspace missing")
+    project_root = summary.accepted_target_root
+    harness_root = summary.accepted_harness_root
+    if project_root is None or harness_root is None:
+        raise base.ScenarioBlocked("brain on workspace missing")
     runner = MinecraftTestRunner(
-        project_root=summary.working_root,
-        harness_root=summary.harness_root,
+        project_root=project_root,
+        harness_root=harness_root,
         evidence_root=summary.evidence_root / "minecraft",
     )
     spec = MinecraftTestSpec(
@@ -563,12 +691,22 @@ def _summary_markdown(summary: ValidationSummary) -> str:
         summary.brain_retrieval,
         summary.baseline_target_build,
         summary.baseline_harness_build,
+        summary.brain_off_acceptance,
         summary.acceptance_main,
+        summary.comparison,
         summary.minecraft_runtime,
         summary.suite,
     ):
         if item is not None:
             lines.append(f"- {item.name}: {item.status} - {item.reason}")
+    if summary.brain_off_acceptance is not None or summary.acceptance_main is not None:
+        lines.extend(["", "## Brain comparison"])
+        if summary.brain_off_acceptance is not None:
+            lines.append(f"- Brain OFF: {summary.brain_off_acceptance.status} - {summary.brain_off_acceptance.reason}")
+        if summary.acceptance_main is not None:
+            lines.append(f"- Brain ON: {summary.acceptance_main.status} - {summary.acceptance_main.reason}")
+        if summary.comparison is not None:
+            lines.append(f"- Comparison: {summary.comparison.status} - {summary.comparison.reason}")
     if summary.notes:
         lines.extend(["", "## Notes"])
         lines.extend(f"- {note}" for note in summary.notes)
@@ -582,7 +720,9 @@ def _print_summary(summary: ValidationSummary) -> None:
     print(f"Harness build: {summary.baseline_harness_build.status if summary.baseline_harness_build else 'NOT RUN'}")
     print(f"Environment: {summary.environment_resolution.status if summary.environment_resolution else 'NOT RUN'}")
     print(f"Brain retrieval: {summary.brain_retrieval.status if summary.brain_retrieval else 'NOT RUN'}")
+    print(f"Brain OFF: {summary.brain_off_acceptance.status if summary.brain_off_acceptance else 'NOT RUN'}")
     print(f"Acceptance main: {summary.acceptance_main.status if summary.acceptance_main else 'NOT RUN'}")
+    print(f"Comparison: {summary.comparison.status if summary.comparison else 'NOT RUN'}")
     print(f"Minecraft harness: {summary.minecraft_runtime.status if summary.minecraft_runtime else 'NOT RUN'}")
     print(f"Suite: {summary.suite.status if summary.suite else 'NOT RUN'}")
     print()

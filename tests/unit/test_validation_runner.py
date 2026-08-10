@@ -577,6 +577,60 @@ public final class ExampleMod {
     assert "Registries.BLOCK" not in target_source_text
 
 
+def test_v03_prepare_acceptance_workspace_keeps_cases_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_3.py")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        base = Path(temp_dir)
+        candidate = base / "candidate"
+        harness = base / "harness"
+        validation = base / "validation"
+        source = candidate / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            """package dev.pdpunto.l11;
+
+import net.minecraft.block.Blocks;
+
+public final class ExampleMod {
+    public static final Object PROBE = Blocks.DIAMOND_BLOCK;
+}
+""",
+            encoding="utf-8",
+        )
+        (harness / "src" / "main" / "java").mkdir(parents=True)
+        (harness / "src" / "main" / "java" / "Harness.java").write_text("class Harness {}", encoding="utf-8")
+
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=candidate,
+            validation_root=validation,
+        )
+        summary.working_root = validation / "working"
+        summary.evidence_root = validation / "evidence"
+        monkeypatch.setattr(runner, "DEFAULT_HARNESS_ROOT", harness)
+
+        off_target, off_harness = runner._prepare_acceptance_workspace(summary, "brain-off")
+        (off_target / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java").write_text(
+            """package dev.pdpunto.l11;
+
+import net.minecraft.block.Blocks;
+
+public final class ExampleMod {
+    public static final Object PROBE = Registries.BLOCK.get(Identifier.of("minecraft", "diamond_block"));
+}
+""",
+            encoding="utf-8",
+        )
+        on_target, on_harness = runner._prepare_acceptance_workspace(summary, "brain-on")
+        on_text = (on_target / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java").read_text(encoding="utf-8")
+
+    assert off_target != on_target
+    assert off_harness != on_harness
+    assert "Blocks.DIAMOND_BLOCK" in on_text
+    assert "Registries.BLOCK" not in on_text
+
+
 def test_v03_knowledge_need_uses_detected_environment() -> None:
     runner = _load_runner("validate_v0_3.py")
     fixture = Path(__file__).resolve().parents[1] / "fixtures" / "l11_fabric_fixture"
@@ -647,12 +701,14 @@ public final class ExampleMod {
     after = """package dev.pdpunto.l11;
 
 public final class ExampleMod {
-    private static final String BLOCK = Registries.BLOCK.getId(Blocks.DIAMOND_BLOCK).toString();
+    private static final String BLOCK = Registries.BLOCK.get(Identifier.ofVanilla("diamond_block")).toString();
 }
 """
 
     assert runner._source_excerpt(before, "Blocks.DIAMOND_BLOCK") == 'private static final String BLOCK = Blocks.DIAMOND_BLOCK.toString();'
-    assert runner._source_excerpt(after, "Registries.BLOCK") == 'private static final String BLOCK = Registries.BLOCK.getId(Blocks.DIAMOND_BLOCK).toString();'
+    assert runner._source_excerpt(after, "Registries.BLOCK") == 'private static final String BLOCK = Registries.BLOCK.get(Identifier.ofVanilla("diamond_block")).toString();'
+    assert runner._contains_registry_lookup(after) is True
+    assert runner._contains_registry_lookup('private static final String BLOCK = Registries.BLOCK.get(Identifier.ofVanilla("diamond_block")).toString();') is True
 
 
 def test_v03_acceptance_blocks_without_gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -681,3 +737,85 @@ def test_v03_acceptance_blocks_without_gemini_key(monkeypatch: pytest.MonkeyPatc
 
     assert result.status == "BLOCKED"
     assert result.reason == "GEMINI_API_KEY missing"
+
+
+def test_v03_main_runs_brain_off_and_brain_on_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner("validate_v0_3.py")
+    calls: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(runner, "_run_prechecks", lambda summary, args: None)
+    monkeypatch.setattr(runner, "_prepare_workspace", lambda summary: None)
+    monkeypatch.setattr(runner, "_seed_gradle_home", lambda summary: None)
+    monkeypatch.setattr(runner, "_resolve_environment", lambda summary: runner._scenario_result("Environment resolution", "PASS", "detected"))
+    monkeypatch.setattr(runner, "_run_brain_retrieval", lambda summary: runner._scenario_result("Brain retrieval", "PASS", "retrieved"))
+    monkeypatch.setattr(runner, "_run_gradle_build", lambda *args, **kwargs: runner._scenario_result("build", "PASS", "ok"))
+
+    def fake_acceptance(summary, args, knowledge, *, case_name, brain_enabled):  # noqa: ANN001
+        calls.append((case_name, brain_enabled))
+        if brain_enabled:
+            summary.accepted_target_root = Path("accepted-target")
+            summary.accepted_harness_root = Path("accepted-harness")
+        return runner._scenario_result(case_name, "PASS", "ok", brain_enabled=brain_enabled)
+
+    monkeypatch.setattr(runner, "_run_acceptance_case", fake_acceptance)
+    monkeypatch.setattr(runner, "_run_comparison", lambda summary, run_brain_off, run_brain_on: runner._scenario_result("Brain comparison", "PASS", "ok"))
+    monkeypatch.setattr(runner, "_run_minecraft_runtime", lambda summary: runner._scenario_result("Minecraft harness", "PASS", "ok"))
+    monkeypatch.setattr(runner, "_run_suite", lambda summary, args: runner._scenario_result("Suite PD Agent", "PASS", "ok"))
+    monkeypatch.setattr(runner, "_finalize", lambda summary: None)
+    monkeypatch.setattr(runner, "_write_artifacts", lambda summary: None)
+    monkeypatch.setattr(runner, "_print_summary", lambda summary: None)
+    monkeypatch.setattr(runner, "_cleanup", lambda summary, keep_working_copy=False: None)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        candidate = Path(temp_dir) / "candidate"
+        candidate.mkdir()
+        code = runner.main(
+            [
+                "--candidate-root",
+                str(candidate),
+                "--validation-root",
+                str(validation),
+            ]
+        )
+
+    assert code == 0
+    assert calls == [("brain-off", False), ("brain-on", True)]
+
+
+def test_v03_comparison_records_context_difference() -> None:
+    runner = _load_runner("validate_v0_3.py")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        validation = Path(temp_dir) / "validation"
+        validation.mkdir(parents=True, exist_ok=True)
+        summary = runner.ValidationSummary(
+            started_at=runner.datetime.now(runner.timezone.utc),
+            candidate_root=Path(temp_dir) / "candidate",
+            validation_root=validation,
+        )
+        summary.evidence_root = validation / "evidence"
+        summary.evidence_root.mkdir(parents=True, exist_ok=True)
+        summary.environment_resolution = runner._scenario_result("Environment resolution", "PASS", "detected", environment={"minecraft": "1.21.11"})
+        summary.brain_off_acceptance = runner._scenario_result(
+            "Brain OFF comparison",
+            "PASS",
+            "compared",
+            provider="gemini",
+            model="gemini-3.1-flash-lite",
+            external_context_count=0,
+        )
+        summary.acceptance_main = runner._scenario_result(
+            "Brain ON acceptance",
+            "PASS",
+            "completed",
+            provider="gemini",
+            model="gemini-3.1-flash-lite",
+            external_context_count=1,
+        )
+
+        result = runner._run_comparison(summary, run_brain_off=True, run_brain_on=True)
+
+    assert result.status == "PASS"
+    assert result.details["brain_off_external_context_count"] == 0
+    assert result.details["brain_on_external_context_count"] == 1
