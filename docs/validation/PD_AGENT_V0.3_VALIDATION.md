@@ -32,24 +32,26 @@ python .\scripts\validation\validate_v0_3.py
 
 ## Brain Comparison
 
-| Aspect            | Brain OFF | Brain ON |
-| ------------------ | --------- | -------- |
-| External knowledge | `0` | `1` |
-| Provenance         | no external provenance | Yarn provenance preserved |
-| Retrieved items    | `5` | `5` |
-| Selected/context   | `3 / 3` | `3 / 3` |
-| Tool calls         | `3` | `2` |
-| Build              | PASS | PASS |
-| JAR                | VALID | VALID |
-| Minecraft          | PASS | PASS |
-| Functional result  | PASS | PASS |
-| Final result       | PASS | PASS |
+| Aspect | Brain OFF | Brain ON |
+| ------ | --------- | -------- |
+| External knowledge injected into provider | `0` | `1` |
+| Provenance | no external provenance | Yarn provenance preserved |
+| Retrieval bookkeeping: retrieved items | `5` | `5` |
+| Retrieval bookkeeping: selected/context | `3 / 3` | `3 / 3` |
+| Tool calls | `3` | `2` |
+| Build | PASS | PASS |
+| JAR | VALID | VALID |
+| Minecraft | PASS | PASS |
+| Functional result | PASS | PASS |
+| Final result | PASS | PASS |
 
 ## Brain OFF
 
 - Provider: `gemini`
 - Model: `gemini-3.1-flash-lite`
 - External knowledge count: `0`
+- Retrieval bookkeeping: `5` items retrieved, `3 / 3` selected/context, `0` external-context items injected into the provider request
+- Provider request evidence: no retrieved external knowledge was delivered to Gemini
 - Tool calls: `3`
 - Diff produced:
   - `Blocks.DIAMOND_BLOCK` -> `Registries.BLOCK.get(Identifier.ofVanilla("diamond_block")).getDefaultState()`
@@ -73,6 +75,7 @@ python .\scripts\validation\validate_v0_3.py
 - Retrieved items: `5`
 - Selected items: `3`
 - Context items: `3`
+- External knowledge injected into provider: `1`
 - Rejected items: `2`
 - Rejection reason: `CONTEXT_BUDGET`
 - Tool calls: `2`
@@ -111,6 +114,7 @@ python .\scripts\validation\validate_v0_3.py
 ## Scope Notes
 
 - Brain OFF and Brain ON were both executed.
+- Brain OFF retrieved Yarn for bookkeeping, but did not receive external context in the provider request.
 - Regression suite passed.
 - Minecraft runtime was validated.
 - No new capability beyond the documented v0.3 acceptance was added.

@@ -819,3 +819,13 @@ def test_v03_comparison_records_context_difference() -> None:
     assert result.status == "PASS"
     assert result.details["brain_off_external_context_count"] == 0
     assert result.details["brain_on_external_context_count"] == 1
+
+
+def test_v03_validation_doc_separates_retrieval_from_provider_context() -> None:
+    doc_path = Path(__file__).resolve().parents[2] / "docs" / "validation" / "PD_AGENT_V0.3_VALIDATION.md"
+    text = doc_path.read_text(encoding="utf-8")
+
+    assert "External knowledge injected into provider" in text
+    assert "Retrieval bookkeeping: retrieved items" in text
+    assert "Retrieval bookkeeping: selected/context" in text
+    assert "no retrieved external knowledge was delivered to Gemini" in text
