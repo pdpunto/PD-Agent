@@ -234,6 +234,22 @@ def test_config_hash_is_stable_and_order_insensitive() -> None:
     assert config_a.config_hash() == config_b.config_hash()
 
 
+def test_config_hash_preserves_public_token_counts() -> None:
+    config = _config(
+        model_config={"max_tokens": 4096, "max_output_tokens": 1024, "input_tokens": 12},
+        provider_config={"input_token_limit": 2048, "retry_after_seconds": 5},
+        knowledge_config={"output_tokens": 128, "offline": True},
+    )
+
+    payload = config.to_dict()
+
+    assert payload["model_config"]["max_tokens"] == 4096
+    assert payload["model_config"]["max_output_tokens"] == 1024
+    assert payload["model_config"]["input_tokens"] == 12
+    assert payload["provider_config"]["input_token_limit"] == 2048
+    assert payload["knowledge_config"]["output_tokens"] == 128
+
+
 def test_config_hash_changes_for_semantic_differences() -> None:
     off = _config(config_id="cfg-off", brain_enabled=False)
     on = _config(config_id="cfg-on", brain_enabled=True)
@@ -241,6 +257,13 @@ def test_config_hash_changes_for_semantic_differences() -> None:
 
     assert off.config_hash() != on.config_hash()
     assert off.config_hash() != provider_changed.config_hash()
+
+
+def test_config_hash_changes_when_public_token_limits_change() -> None:
+    low = _config(model_config={"max_output_tokens": 1024, "temperature": 0.2})
+    high = _config(model_config={"max_output_tokens": 2048, "temperature": 0.2})
+
+    assert low.config_hash() != high.config_hash()
 
 
 def test_config_hash_ignores_secrets_and_runtime_noise() -> None:
@@ -251,9 +274,9 @@ def test_config_hash_ignores_secrets_and_runtime_noise() -> None:
     )
     noisy = _config(
         config_id="different-config-id",
-        model_config={"temperature": 0.2, "api_key": "secret-123", "nested": {"token": "secret-456", "visible": "ok"}},
+        model_config={"temperature": 0.2, "api_key": "secret-123", "nested": {"access_token": "secret-456", "visible": "ok"}},
         provider_config={"timeout_seconds": 60, "secret": "hidden"},
-        knowledge_config={"offline": True, "access_token": "secret-789", "nested": {"visible": "ok", "token": "secret-789"}},
+        knowledge_config={"offline": True, "access_token": "secret-789", "nested": {"visible": "ok", "client_secret": "secret-789"}},
     )
 
     assert noisy.to_dict()["model_config"]["nested"] == {"visible": "ok"}

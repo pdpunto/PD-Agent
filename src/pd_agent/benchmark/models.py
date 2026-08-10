@@ -77,21 +77,20 @@ class BenchmarkComparisonStatus(StrEnum):
 
 def _is_secret_key(key: object) -> bool:
     text = str(key).casefold()
-    return any(
-        marker in text
-        for marker in (
-            "api_key",
-            "apikey",
-            "access_token",
-            "refresh_token",
-            "client_secret",
-            "secret",
-            "password",
-            "passwd",
-            "private_key",
-            "token",
-        )
-    )
+    return text in {
+        "api_key",
+        "apikey",
+        "access_token",
+        "refresh_token",
+        "auth_token",
+        "bearer_token",
+        "client_secret",
+        "secret",
+        "password",
+        "passwd",
+        "private_key",
+        "token",
+    }
 
 
 def _json_ready(value: Any) -> Any:
