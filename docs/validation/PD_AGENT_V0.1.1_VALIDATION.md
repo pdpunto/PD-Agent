@@ -31,3 +31,9 @@
 - Project validation passed with a real Gemini 3 request and a real tool-driven source edit.
 - The write was produced by a Gemini tool call, not by harness-side injection.
 - No raw continuation payloads or keys are stored here.
+
+## Current Re-run
+
+- Status: BLOCKED
+- Reason: `PD_AGENT_PROVIDER` and `GEMINI_API_KEY` are missing in the current environment.
+- Re-run date: 2026-08-10
