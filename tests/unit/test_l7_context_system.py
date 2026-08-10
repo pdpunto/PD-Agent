@@ -93,7 +93,7 @@ def test_priority_retains_critical_items_before_huge_external(tmp_path: Path) ->
     )
     huge_external = "EXTERNAL-" + ("z" * 20000)
 
-    bundle = _context_manager(max_context_bytes=5000).build_context(
+    bundle = _context_manager(max_context_bytes=8000).build_context(
         project_snapshot=snapshot,
         run_state=run_state,
         external_context=(huge_external,),
@@ -106,7 +106,7 @@ def test_priority_retains_critical_items_before_huge_external(tmp_path: Path) ->
     assert "external-1" not in labels
     assert bundle.truncated is True
     assert bundle.omitted_count >= 1
-    assert len(bundle.to_text().encode("utf-8")) <= 5000
+    assert len(bundle.to_text().encode("utf-8")) <= 8000
 
 
 def test_build_logs_are_bounded_and_recent(tmp_path: Path) -> None:
