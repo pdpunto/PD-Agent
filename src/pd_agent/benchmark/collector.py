@@ -43,6 +43,35 @@ def _unique_strings(values: Sequence[str]) -> tuple[str, ...]:
     return tuple(ordered)
 
 
+def _tool_call_from_event(event: RunEvent) -> tuple[str | None, str | None]:
+    payload = event.payload
+    if not isinstance(payload, Mapping):
+        return None, None
+    if event.event_type == RunEventType.TOOL_REQUESTED:
+        call = payload
+    elif event.event_type in {RunEventType.TOOL_EXECUTED, RunEventType.TOOL_REJECTED}:
+        call = payload.get("call")
+        if not isinstance(call, Mapping):
+            call = payload
+    else:
+        return None, None
+    call_id = call.get("call_id")
+    tool_name = call.get("tool_name") or call.get("name")
+    return (str(call_id) if call_id is not None else None, str(tool_name) if tool_name is not None else None)
+
+
+def _logical_tool_calls(events: Sequence[RunEvent]) -> tuple[tuple[str, str | None], ...]:
+    ordered: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for event in events:
+        call_id, tool_name = _tool_call_from_event(event)
+        if not call_id or call_id in seen:
+            continue
+        seen.add(call_id)
+        ordered.append((call_id, tool_name))
+    return tuple(ordered)
+
+
 def _trace_provenance_refs(trace: KnowledgeTrace) -> tuple[str, ...]:
     refs: list[str] = []
     for attempt in trace.source_attempts:
@@ -339,11 +368,11 @@ class BenchmarkCollector:
             if final_report.artifact.to_dict() != run_state.artifact_result.to_dict():
                 inconsistencies.append("artifact_contradiction")
 
-        tool_names = self._tool_names(events)
+        logical_tool_calls = _logical_tool_calls(events)
+        tool_names = self._tool_names(logical_tool_calls)
         tool_call_count = run_state.tool_call_count if run_state is not None else None
-        if tool_call_count is not None and events:
-            event_tool_calls = sum(1 for event in events if event.event_type in {RunEventType.TOOL_REQUESTED, RunEventType.TOOL_EXECUTED, RunEventType.TOOL_REJECTED})
-            if event_tool_calls != tool_call_count:
+        if tool_call_count is not None and logical_tool_calls:
+            if len(logical_tool_calls) != tool_call_count:
                 inconsistencies.append("tool_call_mismatch")
         if run_state is not None and build_attempts and run_state.build_attempt_count != len(build_attempts):
             inconsistencies.append("build_count_mismatch")
@@ -471,19 +500,9 @@ class BenchmarkCollector:
                         return dict(usage)
         return None
 
-    def _tool_names(self, events: Sequence[RunEvent]) -> tuple[str, ...]:
+    def _tool_names(self, logical_tool_calls: Sequence[tuple[str, str | None]]) -> tuple[str, ...]:
         names: list[str] = []
-        for event in events:
-            if event.event_type not in {RunEventType.TOOL_REQUESTED, RunEventType.TOOL_EXECUTED, RunEventType.TOOL_REJECTED}:
-                continue
-            payload = event.payload
-            name = None
-            if isinstance(payload, Mapping):
-                raw = payload.get("tool_name") or payload.get("name")
-                if raw is None and isinstance(payload.get("call"), Mapping):
-                    raw = payload["call"].get("tool_name") or payload["call"].get("name")
-                if raw is not None:
-                    name = str(raw)
+        for _call_id, name in logical_tool_calls:
             if name:
                 names.append(name)
         return _unique_strings(names)
