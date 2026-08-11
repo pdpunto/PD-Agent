@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .catalog import BenchmarkCatalog, BenchmarkCatalogError
 from .models import (
     BenchmarkAcceptanceSpec,
     BenchmarkComparison,
@@ -23,8 +24,17 @@ from .models import (
     BenchmarkValidationRequirements,
     SCHEMA_VERSION,
 )
+from .workspace import (
+    BenchmarkWorkspace,
+    BenchmarkWorkspaceError,
+    FIXTURE_IDENTITY_ALGORITHM,
+    compute_fixture_identity,
+    prepare_workspace,
+)
 
 __all__ = [
+    "BenchmarkCatalog",
+    "BenchmarkCatalogError",
     "BenchmarkAcceptanceSpec",
     "BenchmarkComparison",
     "BenchmarkComparisonCell",
@@ -43,5 +53,10 @@ __all__ = [
     "BenchmarkTaskOutcome",
     "BenchmarkTaskReference",
     "BenchmarkValidationRequirements",
+    "BenchmarkWorkspace",
+    "BenchmarkWorkspaceError",
+    "FIXTURE_IDENTITY_ALGORITHM",
+    "compute_fixture_identity",
     "SCHEMA_VERSION",
+    "prepare_workspace",
 ]
