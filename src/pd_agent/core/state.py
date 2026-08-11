@@ -165,6 +165,8 @@ class RunState:
     build_results: tuple[BuildResult, ...] = ()
     artifact_result: ArtifactResult | None = None
     last_error: str | None = None
+    provider_error_kind: str | None = None
+    provider_error_message: str | None = None
     termination_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -235,6 +237,8 @@ class RunState:
                 self.artifact_result.to_dict() if self.artifact_result is not None else None
             ),
             "last_error": self.last_error,
+            "provider_error_kind": self.provider_error_kind,
+            "provider_error_message": self.provider_error_message,
             "termination_reason": self.termination_reason,
         }
 
@@ -267,5 +271,7 @@ class RunState:
                 else None
             ),
             last_error=data.get("last_error"),
+            provider_error_kind=data.get("provider_error_kind"),
+            provider_error_message=data.get("provider_error_message"),
             termination_reason=data.get("termination_reason"),
         )

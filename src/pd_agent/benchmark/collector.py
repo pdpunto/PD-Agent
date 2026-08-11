@@ -377,7 +377,7 @@ class BenchmarkCollector:
         if run_state is not None and build_attempts and run_state.build_attempt_count != len(build_attempts):
             inconsistencies.append("build_count_mismatch")
 
-        provider_metadata = self._provider_metadata(provider_response, events)
+        provider_metadata = self._provider_metadata(provider_response, events, run_state=run_state)
         usage = self._usage(provider_response, events)
         provider = config.provider if config is not None else provider_metadata.get("provider") if provider_metadata else None
         model = config.model if config is not None else provider_metadata.get("model") if provider_metadata else None
@@ -476,17 +476,29 @@ class BenchmarkCollector:
             metrics=metrics,
         )
 
-    def _provider_metadata(self, provider_response: AgentResponse | None, events: Sequence[RunEvent]) -> dict[str, Any]:
+    def _provider_metadata(
+        self,
+        provider_response: AgentResponse | None,
+        events: Sequence[RunEvent],
+        *,
+        run_state: RunState | None = None,
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
         if provider_response is not None and provider_response.provider_metadata is not None:
-            return dict(provider_response.provider_metadata)
+            metadata.update(dict(provider_response.provider_metadata))
         for event in events:
             if event.event_type == RunEventType.MODEL_RESPONDED:
                 payload = event.payload
                 if isinstance(payload, Mapping):
-                    metadata = payload.get("provider_metadata")
-                    if isinstance(metadata, Mapping):
-                        return dict(metadata)
-        return {}
+                    event_metadata = payload.get("provider_metadata")
+                    if isinstance(event_metadata, Mapping):
+                        metadata.update(dict(event_metadata))
+        if run_state is not None and run_state.provider_error_kind is not None:
+            metadata["provider_error"] = {
+                "kind": run_state.provider_error_kind,
+                "message": run_state.provider_error_message or run_state.last_error,
+            }
+        return metadata
 
     def _usage(self, provider_response: AgentResponse | None, events: Sequence[RunEvent]) -> dict[str, Any] | None:
         if provider_response is not None and provider_response.usage is not None:

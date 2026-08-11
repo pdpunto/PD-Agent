@@ -184,7 +184,16 @@ class BenchmarkClassifier:
         elif kind == "unavailable":
             code = BenchmarkFailureCode.PROVIDER_UNAVAILABLE
         else:
-            return self._invalid("provider protocol error")
+            code = BenchmarkFailureCode.UNKNOWN
+
+        if kind not in {"authentication", "rate_limit", "timeout", "unavailable"}:
+            return BenchmarkClassification(
+                execution_status=BenchmarkExecutionStatus.BLOCKED,
+                task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,
+                failure_origin=BenchmarkFailureOrigin.PROVIDER,
+                failure_code=code,
+                reason=error.message,
+            )
 
         return BenchmarkClassification(
             execution_status=BenchmarkExecutionStatus.BLOCKED,

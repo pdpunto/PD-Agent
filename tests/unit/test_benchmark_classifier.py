@@ -121,6 +121,15 @@ def test_classifier_provider_blocks(error: ProviderError, origin: BenchmarkFailu
     assert classification.failure_code == code
 
 
+def test_classifier_unknown_provider_error_stays_unknown() -> None:
+    classification = BenchmarkClassifier().classify(_collection(), runtime_error=ProviderError("boom", kind="weird"))
+
+    assert classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert classification.failure_origin == BenchmarkFailureOrigin.PROVIDER
+    assert classification.failure_code == BenchmarkFailureCode.UNKNOWN
+
+
 def test_classifier_build_environment_block() -> None:
     classification = BenchmarkClassifier().classify(_collection(), runtime_error=BuildError("Gradle Wrapper absent"))
 

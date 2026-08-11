@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -146,6 +147,8 @@ def _run_state(project_root: Path, task: str, *, status: RunStatus, error: str |
         build_results=(build,),
         artifact_result=artifact,
         last_error=error,
+        provider_error_kind=None,
+        provider_error_message=None,
         termination_reason="completed" if status == RunStatus.COMPLETED else error,
     )
 
@@ -315,6 +318,8 @@ def test_executor_brain_off_pass_and_cleans_workspace(monkeypatch: pytest.Monkey
     assert _FakeController.last_run["external_context"] == ()
     assert fake_minecraft.calls == []
     assert not result.workspace.workspace_root.exists()
+    assert result.runtime_storage_root.exists()
+    assert result.benchmark_run.underlying_run_id == result.run_state.run_id
     assert result.collection.retrieved_count == 0
     assert result.collection.selected_count == 0
     assert result.collection.injected_count == 0
@@ -366,10 +371,21 @@ def test_executor_brain_on_injects_context_and_traces(monkeypatch: pytest.Monkey
     assert result.collection.knowledge_traces[0].context_item_ids == ("yarn:item:1",)
 
 
-def test_executor_provider_issue_maps_to_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "kind, expected_code",
+    [
+        ("authentication", BenchmarkFailureCode.PROVIDER_AUTH),
+        ("rate_limit", BenchmarkFailureCode.PROVIDER_RATE_LIMIT),
+        ("timeout", BenchmarkFailureCode.PROVIDER_TIMEOUT),
+        ("unavailable", BenchmarkFailureCode.PROVIDER_UNAVAILABLE),
+    ],
+)
+def test_executor_provider_issue_uses_structured_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, expected_code: BenchmarkFailureCode) -> None:
     class _BlockedController(_FakeController):
         def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
-            run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="provider unavailable")
+            run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="provider failed")
+            run_state.provider_error_kind = kind
+            run_state.provider_error_message = f"{kind} failure"
             final_report = _final_report(run_state)
             return run_state, final_report
 
@@ -394,4 +410,105 @@ def test_executor_provider_issue_maps_to_blocked(monkeypatch: pytest.MonkeyPatch
     assert result.classification.execution_status == BenchmarkExecutionStatus.BLOCKED
     assert result.classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
     assert result.classification.failure_origin == BenchmarkFailureOrigin.PROVIDER
-    assert result.classification.failure_code == BenchmarkFailureCode.PROVIDER_UNAVAILABLE
+    assert result.classification.failure_code == expected_code
+
+
+def test_executor_message_with_provider_word_without_kind_does_not_fake_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class _NoKindController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+            run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="provider word only")
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _NoKindController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task()
+    config = _config(brain_enabled=False)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-4", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+    )
+
+    assert result.classification.failure_code != BenchmarkFailureCode.PROVIDER_UNAVAILABLE
+
+
+def test_executor_contamination_invalidates_pass(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fixture_root = tmp_path / "fixture"
+    shutil.copytree(_fixture_root(), fixture_root)
+    target_file = fixture_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+
+    class _MutatingController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+            target_file.write_text(target_file.read_text(encoding="utf-8") + "\n// contamination\n", encoding="utf-8")
+            run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _MutatingController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task()
+    config = _config(brain_enabled=False)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-5", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=fixture_root,
+        execution_root=tmp_path / "exec",
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.INVALID
+    assert result.classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert result.classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
+    assert result.classification.failure_code == BenchmarkFailureCode.BENCHMARK_CONTAMINATION
+    assert result.benchmark_run.environment_snapshot["fixture_integrity"]["contaminated"] is True
+    assert result.benchmark_run.environment_snapshot["fixture_integrity"]["canonical_hash_before"] != result.benchmark_run.environment_snapshot["fixture_integrity"]["canonical_hash_after"]
+    assert any("fixture contamination detected" in note for note in result.benchmark_run.notes)
+
+
+def test_executor_contamination_invalidates_even_if_runtime_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fixture_root = tmp_path / "fixture"
+    shutil.copytree(_fixture_root(), fixture_root)
+    target_file = fixture_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
+
+    class _FailingController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+            target_file.write_text(target_file.read_text(encoding="utf-8") + "\n// contamination\n", encoding="utf-8")
+            run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="build failed")
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FailingController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task()
+    config = _config(brain_enabled=False)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-6", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=fixture_root,
+        execution_root=tmp_path / "exec",
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.INVALID
+    assert result.classification.failure_code == BenchmarkFailureCode.BENCHMARK_CONTAMINATION

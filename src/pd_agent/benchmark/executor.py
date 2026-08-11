@@ -13,7 +13,7 @@ from pd_agent.brain import FileKnowledgeCache, KnowledgeEnvironment, KnowledgeEn
 from pd_agent.brain.models import KnowledgeType
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager, ProjectContextSource, RunContextSource
-from pd_agent.core import ModelProvider, RunState
+from pd_agent.core import ModelProvider, ProviderError, RunState
 from pd_agent.minecraft import MinecraftTestResult, MinecraftTestRunner, MinecraftTestSpec
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunStorage
@@ -34,6 +34,7 @@ from .scheduler import BenchmarkScheduledAttempt
 from .workspace import BenchmarkWorkspace, BenchmarkWorkspaceError, compute_fixture_identity, prepare_workspace
 from pd_agent.core import RunStatus
 from pd_agent.runtime import RunController
+from dataclasses import replace
 
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> Path:
@@ -119,6 +120,7 @@ def _execution_environment_snapshot(
     project_snapshot: ProjectSnapshot,
     resolution: Mapping[str, Any] | None,
     knowledge_needs: Sequence[KnowledgeNeed],
+    fixture_hash_after: str | None = None,
 ) -> dict[str, Any]:
     snapshot = {
         "task": task.to_dict(),
@@ -132,6 +134,12 @@ def _execution_environment_snapshot(
     }
     if resolution is not None:
         snapshot["knowledge_environment"] = resolution
+    if fixture_hash_after is not None:
+        snapshot["fixture_integrity"] = {
+            "canonical_hash_before": workspace.canonical_hash_before,
+            "canonical_hash_after": fixture_hash_after,
+            "contaminated": fixture_hash_after != workspace.canonical_hash_before,
+        }
     return snapshot
 
 
@@ -257,6 +265,13 @@ class BenchmarkExecutor:
                 benchmark_run_id=benchmark_run_id,
                 minecraft_runner=minecraft_runner or self.minecraft_runner,
             )
+            fixture_hash_after = compute_fixture_identity(workspace.source_fixture)
+            contamination_reason = None
+            if fixture_hash_after != workspace.canonical_hash_before:
+                contamination_reason = (
+                    "fixture contamination detected: "
+                    f"before={workspace.canonical_hash_before} after={fixture_hash_after}"
+                )
 
             collection = self.collector.collect(
                 storage=runtime_storage,
@@ -267,7 +282,17 @@ class BenchmarkExecutor:
                 task=task,
                 minecraft_result=minecraft,
             )
+            if contamination_reason is not None:
+                collection = replace(collection, inconsistencies=(*collection.inconsistencies, contamination_reason))
             classification = self._classify(collection, run_state=run_state)
+            if contamination_reason is not None:
+                classification = BenchmarkClassification(
+                    execution_status=BenchmarkExecutionStatus.INVALID,
+                    task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,
+                    failure_origin=BenchmarkFailureOrigin.BENCHMARK_INFRA,
+                    failure_code=BenchmarkFailureCode.BENCHMARK_CONTAMINATION,
+                    reason=contamination_reason,
+                )
             benchmark_run = self._benchmark_run(
                 benchmark_run_id=benchmark_run_id,
                 task=task,
@@ -283,6 +308,7 @@ class BenchmarkExecutor:
                 env_resolution=env_resolution.to_dict(),
                 knowledge_needs=requested_needs,
                 runtime_storage=runtime_storage,
+                fixture_hash_after=fixture_hash_after,
             )
 
             benchmark_run_path, collection_path, classification_path, workspace_metadata_path = self._persist(
@@ -367,6 +393,7 @@ class BenchmarkExecutor:
         env_resolution: Mapping[str, Any],
         knowledge_needs: Sequence[KnowledgeNeed],
         runtime_storage: RunStorage,
+        fixture_hash_after: str,
     ) -> BenchmarkRun:
         evidence_refs = (
             f"workspace-metadata.json",
@@ -384,6 +411,7 @@ class BenchmarkExecutor:
             project_snapshot=project_snapshot,
             resolution=env_resolution,
             knowledge_needs=knowledge_needs,
+            fixture_hash_after=fixture_hash_after,
         )
         return BenchmarkRun(
             benchmark_run_id=benchmark_run_id,
@@ -410,16 +438,31 @@ class BenchmarkExecutor:
         )
 
     def _classify(self, collection: BenchmarkCollection, *, run_state: RunState) -> BenchmarkClassification:
-        error_text = " ".join(str(item) for item in (run_state.last_error, run_state.termination_reason) if item).casefold()
-        if "provider" in error_text:
-            return BenchmarkClassification(
-                execution_status=BenchmarkExecutionStatus.BLOCKED,
-                task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,
-                failure_origin=BenchmarkFailureOrigin.PROVIDER,
-                failure_code=BenchmarkFailureCode.PROVIDER_UNAVAILABLE,
-                reason=run_state.termination_reason or "provider error",
-            )
+        provider_error = self._provider_error(collection, run_state=run_state)
+        if provider_error is not None:
+            return self.classifier.classify(collection, runtime_error=provider_error)
         return self.classifier.classify(collection)
+
+    def _provider_error(self, collection: BenchmarkCollection, *, run_state: RunState) -> ProviderError | None:
+        metadata = collection.provider_metadata or {}
+        raw = metadata.get("provider_error") if isinstance(metadata, Mapping) else None
+        if isinstance(raw, Mapping):
+            message = str(raw.get("message") or run_state.provider_error_message or run_state.last_error or "provider error")
+            return ProviderError(
+                message,
+                kind=str(raw.get("kind") or run_state.provider_error_kind or "unknown"),
+                request_id=(str(raw["request_id"]) if raw.get("request_id") is not None else None),
+                status_code=(int(raw["status_code"]) if raw.get("status_code") is not None else None),
+                retryable=(bool(raw["retryable"]) if raw.get("retryable") is not None else None),
+                provider=(str(raw["provider"]) if raw.get("provider") is not None else None),
+                details=dict(raw.get("details", {})) if isinstance(raw.get("details"), Mapping) else None,
+            )
+        if run_state.provider_error_kind is None:
+            return None
+        return ProviderError(
+            run_state.provider_error_message or run_state.last_error or "provider error",
+            kind=run_state.provider_error_kind,
+        )
 
     def _persist(
         self,

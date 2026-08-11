@@ -295,6 +295,39 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
     assert collection.inconsistencies == ()
 
 
+def test_collects_structured_provider_error_from_run_state(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "44444444-4444-4444-8444-444444444444"
+    run_state = RunState(
+        run_id=run_id,
+        task="repair",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T13:00:00"),
+        provider_error_kind="rate_limit",
+        provider_error_message="provider rate limit",
+        termination_reason="provider error",
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="provider error",
+            generated_at=_utc("2026-08-11T13:00:01"),
+        )
+    )
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.provider_metadata is not None
+    assert collection.provider_metadata["provider_error"] == {
+        "kind": "rate_limit",
+        "message": "provider rate limit",
+    }
+
+
 def test_collects_none_semantics_and_brain_off_zeroes(tmp_path: Path) -> None:
     storage = RunStorage(tmp_path / "runs")
     run_id = "22222222-2222-4222-8222-222222222222"

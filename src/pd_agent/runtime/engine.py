@@ -238,6 +238,9 @@ class AgentRuntime:
             if run_state.state not in {RunStatus.FAILED, RunStatus.BLOCKED, RunStatus.LIMIT_REACHED, RunStatus.ABORTED}:
                 run_state.state = RunStatus.FAILED
             run_state.last_error = str(exc)
+            if isinstance(exc, ProviderError):
+                run_state.provider_error_kind = exc.kind
+                run_state.provider_error_message = exc.message
             run_state.termination_reason = str(exc)
         except Exception as exc:  # pragma: no cover - defensive
             run_state.state = RunStatus.FAILED
@@ -285,8 +288,10 @@ class AgentRuntime:
         )
         try:
             return self.provider.execute(request)
-        except ProviderError:
+        except ProviderError as exc:
             run_state.state = RunStatus.FAILED
+            run_state.provider_error_kind = exc.kind
+            run_state.provider_error_message = exc.message
             run_state.termination_reason = "provider error"
             raise
 
