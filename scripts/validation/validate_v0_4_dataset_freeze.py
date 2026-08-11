@@ -268,6 +268,12 @@ def _parse_harness_result(path: Path) -> dict[str, Any] | None:
     return dict(_load_json(path))
 
 
+def _read_tail(path: Path | None) -> str:
+    if path is None or not path.exists():
+        return ""
+    return base._tail(_read_text(path))
+
+
 def _jar_sha256(path: Path) -> str:
     import hashlib
 
@@ -679,8 +685,12 @@ def _validate_control(
                 expected_sha256=_jar_sha256(target_jar_path),
             )
             minecraft_status = runtime_result.status.value
-            harness_run_stdout_tail = base._tail(runtime_result.process_evidence.stdout if runtime_result.process_evidence else "")
-            harness_run_stderr_tail = base._tail(runtime_result.process_evidence.stderr if runtime_result.process_evidence else "")
+            harness_run_stdout_tail = _read_tail(
+                runtime_result.process_evidence.stdout_log if runtime_result.process_evidence else None
+            )
+            harness_run_stderr_tail = _read_tail(
+                runtime_result.process_evidence.stderr_log if runtime_result.process_evidence else None
+            )
             harness_result = _parse_harness_result(runtime_result.evidence_paths.harness_result_json)
             neighbor_value = None if harness_result is None else harness_result.get("neighbor_update_triggered")
             if neighbor_value is True:

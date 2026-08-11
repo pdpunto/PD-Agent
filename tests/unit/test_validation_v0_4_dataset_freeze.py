@@ -5,8 +5,10 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from pd_agent.minecraft import MinecraftProcessEvidence
 
 
 def _load_runner():
@@ -122,3 +124,76 @@ def test_temp_copy_does_not_touch_canonical_fixture(tmp_path: Path) -> None:
     after = runner.compute_fixture_identity(source)
 
     assert before == after
+
+
+def test_validate_control_reads_process_logs_from_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+    spec = runner._control_specs()[1]
+    target_root, harness_root, evidence_root = runner._prepare_case_workspace(tmp_path, spec.task, spec.fixture_version)
+    (target_root / "build" / "libs").mkdir(parents=True, exist_ok=True)
+    target_jar = target_root / "build" / "libs" / "pd-agent-l11-fixture.jar"
+    target_jar.write_text("jar", encoding="utf-8")
+    (harness_root / "build" / "libs").mkdir(parents=True, exist_ok=True)
+    (evidence_root / "minecraft").mkdir(parents=True, exist_ok=True)
+    harness_result_path = evidence_root / "minecraft" / "run" / "harness-result.json"
+    harness_result_path.parent.mkdir(parents=True, exist_ok=True)
+    harness_result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "functional_test_result": "PASS",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "target_sha_match": True,
+                "server_started": True,
+                "shutdown_requested": True,
+                "neighbor_update_triggered": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    stdout_log = evidence_root / "minecraft" / "run" / "stdout.log"
+    stderr_log = evidence_root / "minecraft" / "run" / "stderr.log"
+    stdout_log.write_text("stdout line\n", encoding="utf-8")
+    stderr_log.write_text("stderr line\n", encoding="utf-8")
+
+    def fake_run_gradle_build(**kwargs):  # noqa: ANN001
+        return SimpleNamespace(exit_code=0, timed_out=False, stdout="build ok\n", stderr="")
+
+    def fake_validate_target(self, spec_for_validation, *, java_version=None):  # noqa: ANN001
+        return SimpleNamespace(path=target_jar, sha256="a" * 64)
+
+    def fake_run(self, spec_for_run, *, run_id, java_version, expected_sha256):  # noqa: ANN001
+        return SimpleNamespace(
+            status=SimpleNamespace(value="PASS"),
+            process_evidence=MinecraftProcessEvidence(
+                command_display="cmd",
+                cwd=harness_root,
+                started_at=runner.datetime.now(runner.timezone.utc),
+                finished_at=runner.datetime.now(runner.timezone.utc),
+                duration_seconds=1.0,
+                exit_code=0,
+                timed_out=False,
+                stdout_log=stdout_log,
+                stderr_log=stderr_log,
+            ),
+            evidence_paths=SimpleNamespace(harness_result_json=harness_result_path),
+        )
+
+    monkeypatch.setattr(runner, "_run_gradle_build", fake_run_gradle_build)
+    monkeypatch.setattr(runner.MinecraftTestRunner, "validate_target", fake_validate_target, raising=False)
+    monkeypatch.setattr(runner.MinecraftTestRunner, "run", fake_run, raising=False)
+
+    result = runner._validate_control(
+        spec=spec,
+        target_root=target_root,
+        harness_root=harness_root,
+        evidence_root=evidence_root,
+        gradle_exe=runner.DEFAULT_GRADLE_EXE,
+        gradle_user_home=tmp_path / "gradle-home",
+        timeout_seconds=5,
+        repo_root=runner.REPO_ROOT,
+    )
+
+    assert result.harness_run_stdout_tail == "stdout line"
+    assert result.harness_run_stderr_tail == "stderr line"
