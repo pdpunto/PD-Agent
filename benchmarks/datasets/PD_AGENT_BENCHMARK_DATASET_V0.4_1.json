@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "dataset_id": "PD_AGENT_BENCHMARK_DATASET_V0.4_1",
+  "dataset_version": "0.4.1",
+  "description": "Frozen v0.4 benchmark dataset for Minecraft Brain Foundation.",
+  "tasks": [
+    {
+      "schema_version": 1,
+      "task_id": "B001",
+      "task_version": "1"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "B002",
+      "task_version": "1"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "B003",
+      "task_version": "1"
+    }
+  ],
+  "tags": [
+    "fabric",
+    "minecraft",
+    "brain",
+    "frozen"
+  ]
+}

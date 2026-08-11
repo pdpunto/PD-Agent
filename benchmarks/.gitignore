@@ -1,0 +1,4 @@
+# Benchmark fixture build output is generated locally and must not be versioned.
+fixtures/**/build/
+fixtures/**/.gradle/
+fixtures/**/bin/

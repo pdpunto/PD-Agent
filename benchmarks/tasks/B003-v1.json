@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "task_id": "B003",
+  "task_version": "1",
+  "description": "Multi-symbol version-sensitive change.",
+  "prompt": "Refactor ExampleMod into a two-symbol version-sensitive change: keep the probe state on the vanilla registry path and keep the write path on the correct 1.21.11-safe block update flag.",
+  "fixture": {
+    "schema_version": 1,
+    "fixture_ref": "fixtures/B003-v1",
+    "fixture_identity": "c2648999209fa4d92f901b0c54517595da6152a14f6e9bc8c0dc27ecc0707e4f",
+    "identity_algorithm": "sha256-tree-v1",
+    "metadata": {
+      "source_fixture": "tests/fixtures/l11_fabric_fixture",
+      "source_kind": "fabric_fixture_copy",
+      "baseline": "diamond_block"
+    }
+  },
+  "validation": {
+    "schema_version": 1,
+    "build": true,
+    "artifact": true,
+    "minecraft": true,
+    "source_change": true
+  },
+  "acceptance": {
+    "schema_version": 1,
+    "acceptance_type": "minecraft_harness",
+    "spec": {
+      "target_mod_id": "pdagentl11",
+      "test_id": "block_state_probe",
+      "minecraft_version": "1.21.11",
+      "loader_version": "0.19.3",
+      "expected_block_state_id": "diamond_block",
+      "multi_symbol": true,
+      "knowledge_needs": [
+        {
+          "id": "b003-yarn-registry-plus-write",
+          "type": "MAPPING",
+          "query": "Which Yarn 1.21.11 symbols should ExampleMod combine for a registry lookup plus the block update flag on the server side?",
+          "environment": {
+            "minecraft_version": "1.21.11",
+            "loader_version": "0.19.3",
+            "loom_version": "1.13.3",
+            "mappings_namespace": "yarn",
+            "mappings_version": "1.21.11+build.6",
+            "fabric_api_version": null,
+            "java_version": "21"
+          },
+          "hints": [
+            "Registries.BLOCK",
+            "Identifier.of",
+            "Block.NOTIFY_ALL"
+          ]
+        }
+      ]
+    },
+    "notes": [
+      "This task requires more than one Yarn symbol to resolve correctly.",
+      "The harness still validates the resulting runtime behavior."
+    ]
+  },
+  "environment": {
+    "schema_version": 1,
+    "minecraft_version": "1.21.11",
+    "loader_version": "0.19.3",
+    "loom_version": "1.13.3",
+    "yarn_version": "1.21.11+build.6",
+    "java_version": "21",
+    "fabric_api_version": null,
+    "extra": {}
+  },
+  "tags": [
+    "fabric",
+    "minecraft",
+    "brain",
+    "version-sensitive",
+    "multi-symbol",
+    "runtime"
+  ],
+  "notes": [
+    "B003 is the multi-symbol control task for the frozen dataset."
+  ]
+}

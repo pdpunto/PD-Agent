@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "task_id": "B001",
+  "task_version": "1",
+  "description": "Registry lookup baseline from v0.3.",
+  "prompt": "Convert ExampleMod so the probe block is resolved from the vanilla block registry using Yarn-correct 1.21.11 symbols instead of the direct block constant.",
+  "fixture": {
+    "schema_version": 1,
+    "fixture_ref": "fixtures/B001-v1",
+    "fixture_identity": "c2648999209fa4d92f901b0c54517595da6152a14f6e9bc8c0dc27ecc0707e4f",
+    "identity_algorithm": "sha256-tree-v1",
+    "metadata": {
+      "source_fixture": "tests/fixtures/l11_fabric_fixture",
+      "source_kind": "fabric_fixture_copy",
+      "baseline": "diamond_block"
+    }
+  },
+  "validation": {
+    "schema_version": 1,
+    "build": true,
+    "artifact": true,
+    "minecraft": true,
+    "source_change": true
+  },
+  "acceptance": {
+    "schema_version": 1,
+    "acceptance_type": "minecraft_harness",
+    "spec": {
+      "target_mod_id": "pdagentl11",
+      "test_id": "block_state_probe",
+      "minecraft_version": "1.21.11",
+      "loader_version": "0.19.3",
+      "expected_block_state_id": "diamond_block",
+      "knowledge_needs": [
+        {
+          "id": "b001-yarn-registries-block",
+          "type": "SYMBOL",
+          "query": "How does Yarn 1.21.11 expose the vanilla block registry and Identifier lookup for diamond_block?",
+          "environment": {
+            "minecraft_version": "1.21.11",
+            "loader_version": "0.19.3",
+            "loom_version": "1.13.3",
+            "mappings_namespace": "yarn",
+            "mappings_version": "1.21.11+build.6",
+            "fabric_api_version": null,
+            "java_version": "21"
+          },
+          "hints": [
+            "Registries.BLOCK",
+            "Identifier.of",
+            "minecraft:diamond_block"
+          ]
+        }
+      ]
+    },
+    "notes": [
+      "Use the canonical l11 fixture copy.",
+      "No manual registry solution is pre-applied in the source fixture."
+    ]
+  },
+  "environment": {
+    "schema_version": 1,
+    "minecraft_version": "1.21.11",
+    "loader_version": "0.19.3",
+    "loom_version": "1.13.3",
+    "yarn_version": "1.21.11+build.6",
+    "java_version": "21",
+    "fabric_api_version": null,
+    "extra": {}
+  },
+  "tags": [
+    "fabric",
+    "minecraft",
+    "brain",
+    "version-sensitive",
+    "registry",
+    "runtime"
+  ],
+  "notes": [
+    "B001 is the exact acceptance task chosen from the l11 fixture pair."
+  ]
+}
