@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .classifier import BenchmarkClassification, BenchmarkClassifier
+from .collector import BenchmarkCollection, BenchmarkCollector
 from .catalog import BenchmarkCatalog, BenchmarkCatalogError
 from .models import (
     BenchmarkAcceptanceSpec,
@@ -33,6 +35,10 @@ from .workspace import (
 )
 
 __all__ = [
+    "BenchmarkClassification",
+    "BenchmarkClassifier",
+    "BenchmarkCollection",
+    "BenchmarkCollector",
     "BenchmarkCatalog",
     "BenchmarkCatalogError",
     "BenchmarkAcceptanceSpec",

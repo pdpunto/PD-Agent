@@ -176,6 +176,28 @@ def test_edit_build_artifact_valid(tmp_path: Path) -> None:
     assert any("BUILD SUCCESSFUL" in line for line in paths.events_jsonl.read_text(encoding="utf-8").splitlines()) is False
 
 
+def test_model_response_usage_is_persisted_in_events(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "usage", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="plan",
+                tool_calls=(),
+                usage={"input_tokens": 5, "output_tokens": 2, "total_tokens": 7},
+                provider_metadata={"provider": "fake", "model": "fake-model"},
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, _report = controller.run(root, "inspect usage")
+    events = storage.read_events(run_state.run_id)
+
+    model_events = [event for event in events if event.event_type == RunEventType.MODEL_RESPONDED]
+    assert model_events
+    assert model_events[0].payload["usage"] == {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+
+
 def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "repair", build_state="fail")
     provider = ScriptedProvider(

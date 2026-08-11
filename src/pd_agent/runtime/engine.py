@@ -124,6 +124,7 @@ class AgentRuntime:
                         {
                             "assistant_message": response.assistant_message,
                             "tool_call_count": len(response.tool_calls),
+                            "usage": response.usage,
                             "provider_metadata": response.provider_metadata,
                         },
                     )
