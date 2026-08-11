@@ -545,6 +545,124 @@ class BenchmarkMetrics:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class BenchmarkMetricSummary:
+    """Descriptive summary for one numeric metric."""
+
+    schema_version: int = SCHEMA_VERSION
+    median: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    observations: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observations", int(self.observations))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "median": self.median,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "observations": self.observations,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkMetricSummary":
+        _schema_version_or_raise(data, model="BenchmarkMetricSummary")
+        return cls(
+            median=data.get("median"),
+            minimum=data.get("minimum"),
+            maximum=data.get("maximum"),
+            observations=int(data.get("observations", 0)),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BenchmarkAggregateMetrics:
+    """Aggregated descriptive metrics for a comparison cell."""
+
+    schema_version: int = SCHEMA_VERSION
+    duration_seconds: BenchmarkMetricSummary | None = None
+    tool_call_count: BenchmarkMetricSummary | None = None
+    build_count: BenchmarkMetricSummary | None = None
+    agent_step_count: BenchmarkMetricSummary | None = None
+    input_tokens: BenchmarkMetricSummary | None = None
+    output_tokens: BenchmarkMetricSummary | None = None
+    total_tokens: BenchmarkMetricSummary | None = None
+    cost: BenchmarkMetricSummary | None = None
+    extra: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "extra", dict(self.extra))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "duration_seconds": self.duration_seconds.to_dict() if self.duration_seconds is not None else None,
+            "tool_call_count": self.tool_call_count.to_dict() if self.tool_call_count is not None else None,
+            "build_count": self.build_count.to_dict() if self.build_count is not None else None,
+            "agent_step_count": self.agent_step_count.to_dict() if self.agent_step_count is not None else None,
+            "input_tokens": self.input_tokens.to_dict() if self.input_tokens is not None else None,
+            "output_tokens": self.output_tokens.to_dict() if self.output_tokens is not None else None,
+            "total_tokens": self.total_tokens.to_dict() if self.total_tokens is not None else None,
+            "cost": self.cost.to_dict() if self.cost is not None else None,
+            "extra": _json_ready(dict(self.extra)),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkAggregateMetrics":
+        _schema_version_or_raise(data, model="BenchmarkAggregateMetrics")
+        legacy_keys = {"median", "minimum", "maximum", "observations"}
+        if legacy_keys.intersection(data.keys()):
+            return cls(
+                duration_seconds=BenchmarkMetricSummary.from_dict(data),
+            )
+        return cls(
+            duration_seconds=(
+                BenchmarkMetricSummary.from_dict(dict(data["duration_seconds"]))
+                if data.get("duration_seconds") is not None
+                else None
+            ),
+            tool_call_count=(
+                BenchmarkMetricSummary.from_dict(dict(data["tool_call_count"]))
+                if data.get("tool_call_count") is not None
+                else None
+            ),
+            build_count=(
+                BenchmarkMetricSummary.from_dict(dict(data["build_count"]))
+                if data.get("build_count") is not None
+                else None
+            ),
+            agent_step_count=(
+                BenchmarkMetricSummary.from_dict(dict(data["agent_step_count"]))
+                if data.get("agent_step_count") is not None
+                else None
+            ),
+            input_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["input_tokens"]))
+                if data.get("input_tokens") is not None
+                else None
+            ),
+            output_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["output_tokens"]))
+                if data.get("output_tokens") is not None
+                else None
+            ),
+            total_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["total_tokens"]))
+                if data.get("total_tokens") is not None
+                else None
+            ),
+            cost=(
+                BenchmarkMetricSummary.from_dict(dict(data["cost"]))
+                if data.get("cost") is not None
+                else None
+            ),
+            extra=dict(data.get("extra", {})),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkRun:
     """One isolated benchmark run."""
 
@@ -665,6 +783,7 @@ class BenchmarkComparisonCell:
     task_id: str
     task_version: str
     config_id: str
+    config_hash: str
     attempted: int
     valid: int
     passed: int
@@ -673,16 +792,23 @@ class BenchmarkComparisonCell:
     invalid: int
     target_valid: int
     complete: bool
-    metrics: BenchmarkMetrics | None = None
+    metrics: BenchmarkAggregateMetrics | None = None
     notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "task_id", _non_empty_text(self.task_id, field_name="task_id"))
         object.__setattr__(self, "task_version", _non_empty_text(self.task_version, field_name="task_version"))
         object.__setattr__(self, "config_id", _non_empty_text(self.config_id, field_name="config_id"))
+        object.__setattr__(self, "config_hash", _non_empty_text(self.config_hash, field_name="config_hash"))
         for field_name in ("attempted", "valid", "passed", "failed", "blocked", "invalid", "target_valid"):
             object.__setattr__(self, field_name, int(getattr(self, field_name)))
         object.__setattr__(self, "notes", tuple(_tuple_of_strings(self.notes)))
+
+    @property
+    def success_rate(self) -> float | None:
+        if self.valid <= 0:
+            return None
+        return self.passed / self.valid
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -690,6 +816,7 @@ class BenchmarkComparisonCell:
             "task_id": self.task_id,
             "task_version": self.task_version,
             "config_id": self.config_id,
+            "config_hash": self.config_hash,
             "attempted": self.attempted,
             "valid": self.valid,
             "passed": self.passed,
@@ -709,6 +836,7 @@ class BenchmarkComparisonCell:
             task_id=str(data["task_id"]),
             task_version=str(data["task_version"]),
             config_id=str(data["config_id"]),
+            config_hash=str(data.get("config_hash", data["config_id"])),
             attempted=int(data["attempted"]),
             valid=int(data["valid"]),
             passed=int(data["passed"]),
@@ -717,7 +845,11 @@ class BenchmarkComparisonCell:
             invalid=int(data["invalid"]),
             target_valid=int(data["target_valid"]),
             complete=bool(data["complete"]),
-            metrics=(BenchmarkMetrics.from_dict(dict(data["metrics"])) if data.get("metrics") is not None else None),
+            metrics=(
+                BenchmarkAggregateMetrics.from_dict(dict(data["metrics"]))
+                if data.get("metrics") is not None
+                else None
+            ),
             notes=tuple(str(item) for item in data.get("notes", [])),
         )
 
@@ -797,6 +929,7 @@ __all__ = [
     "BenchmarkComparison",
     "BenchmarkComparisonCell",
     "BenchmarkComparisonStatus",
+    "BenchmarkAggregateMetrics",
     "BenchmarkConfig",
     "BenchmarkDataset",
     "BenchmarkEnvironmentRequirements",
@@ -804,6 +937,7 @@ __all__ = [
     "BenchmarkFailureCode",
     "BenchmarkFailureOrigin",
     "BenchmarkFixtureReference",
+    "BenchmarkMetricSummary",
     "BenchmarkMetrics",
     "BenchmarkSchemaError",
     "BenchmarkTask",

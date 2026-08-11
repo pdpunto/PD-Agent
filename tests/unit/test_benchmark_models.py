@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 
 from pd_agent.benchmark import (
+    BenchmarkAggregateMetrics,
     BenchmarkAcceptanceSpec,
     BenchmarkComparison,
     BenchmarkComparisonCell,
@@ -17,6 +18,7 @@ from pd_agent.benchmark import (
     BenchmarkFailureCode,
     BenchmarkFailureOrigin,
     BenchmarkFixtureReference,
+    BenchmarkMetricSummary,
     BenchmarkMetrics,
     BenchmarkSchemaError,
     BenchmarkRun,
@@ -126,6 +128,17 @@ def test_round_trip_main_models() -> None:
         cost=0.25,
         extra={"provider": "gemini"},
     )
+    aggregate_metrics = BenchmarkAggregateMetrics(
+        duration_seconds=BenchmarkMetricSummary(median=12.5, minimum=12.5, maximum=12.5, observations=1),
+        tool_call_count=BenchmarkMetricSummary(median=3.0, minimum=3.0, maximum=3.0, observations=1),
+        build_count=BenchmarkMetricSummary(median=2.0, minimum=2.0, maximum=2.0, observations=1),
+        agent_step_count=BenchmarkMetricSummary(median=4.0, minimum=4.0, maximum=4.0, observations=1),
+        input_tokens=BenchmarkMetricSummary(median=11.0, minimum=11.0, maximum=11.0, observations=1),
+        output_tokens=BenchmarkMetricSummary(median=7.0, minimum=7.0, maximum=7.0, observations=1),
+        total_tokens=BenchmarkMetricSummary(median=18.0, minimum=18.0, maximum=18.0, observations=1),
+        cost=BenchmarkMetricSummary(median=0.25, minimum=0.25, maximum=0.25, observations=1),
+        extra={"observations": 1},
+    )
     run = BenchmarkRun(
         benchmark_run_id="run-001",
         task_id=task.task_id,
@@ -153,6 +166,7 @@ def test_round_trip_main_models() -> None:
         task_id=task.task_id,
         task_version=task.task_version,
         config_id=config.config_id,
+        config_hash=config.config_hash(),
         attempted=3,
         valid=3,
         passed=2,
@@ -161,7 +175,7 @@ def test_round_trip_main_models() -> None:
         invalid=0,
         target_valid=3,
         complete=True,
-        metrics=metrics,
+        metrics=aggregate_metrics,
         notes=("cell",),
     )
     comparison = BenchmarkComparison(
@@ -187,6 +201,8 @@ def test_round_trip_main_models() -> None:
     assert BenchmarkTask.from_dict(task.to_dict()) == task
     assert BenchmarkConfig.from_dict(config.to_dict()) == config
     assert BenchmarkMetrics.from_dict(metrics.to_dict()) == metrics
+    assert BenchmarkMetricSummary.from_dict(aggregate_metrics.duration_seconds.to_dict()) == aggregate_metrics.duration_seconds
+    assert BenchmarkAggregateMetrics.from_dict(aggregate_metrics.to_dict()) == aggregate_metrics
     assert BenchmarkRun.from_dict(run.to_dict()) == run
     assert BenchmarkComparisonCell.from_dict(cell.to_dict()) == cell
     assert BenchmarkComparison.from_dict(comparison.to_dict()) == comparison
@@ -370,10 +386,11 @@ def test_comparison_and_run_do_not_depend_on_runtime_objects() -> None:
         runs_blocked=1,
         runs_invalid=0,
         cell_results=(
-            BenchmarkComparisonCell(
+        BenchmarkComparisonCell(
                 task_id=task.task_id,
                 task_version=task.task_version,
                 config_id=config.config_id,
+                config_hash=config.config_hash(),
                 attempted=3,
                 valid=2,
                 passed=1,

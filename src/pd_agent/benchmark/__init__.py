@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from .classifier import BenchmarkClassification, BenchmarkClassifier
+from .aggregator import BenchmarkAggregator, render_comparison_markdown
 from .collector import BenchmarkCollection, BenchmarkCollector
 from .catalog import BenchmarkCatalog, BenchmarkCatalogError
+from .scheduler import (
+    BenchmarkSchedule,
+    BenchmarkScheduleCell,
+    BenchmarkScheduledAttempt,
+    BenchmarkScheduler,
+)
 from .models import (
+    BenchmarkAggregateMetrics,
     BenchmarkAcceptanceSpec,
     BenchmarkComparison,
     BenchmarkComparisonCell,
@@ -17,6 +25,7 @@ from .models import (
     BenchmarkFailureCode,
     BenchmarkFailureOrigin,
     BenchmarkFixtureReference,
+    BenchmarkMetricSummary,
     BenchmarkMetrics,
     BenchmarkSchemaError,
     BenchmarkRun,
@@ -36,12 +45,15 @@ from .workspace import (
 
 __all__ = [
     "BenchmarkClassification",
+    "BenchmarkAggregator",
     "BenchmarkClassifier",
     "BenchmarkCollection",
     "BenchmarkCollector",
     "BenchmarkCatalog",
     "BenchmarkCatalogError",
+    "render_comparison_markdown",
     "BenchmarkAcceptanceSpec",
+    "BenchmarkAggregateMetrics",
     "BenchmarkComparison",
     "BenchmarkComparisonCell",
     "BenchmarkComparisonStatus",
@@ -52,6 +64,7 @@ __all__ = [
     "BenchmarkFailureCode",
     "BenchmarkFailureOrigin",
     "BenchmarkFixtureReference",
+    "BenchmarkMetricSummary",
     "BenchmarkMetrics",
     "BenchmarkSchemaError",
     "BenchmarkRun",
@@ -59,6 +72,10 @@ __all__ = [
     "BenchmarkTaskOutcome",
     "BenchmarkTaskReference",
     "BenchmarkValidationRequirements",
+    "BenchmarkSchedule",
+    "BenchmarkScheduleCell",
+    "BenchmarkScheduledAttempt",
+    "BenchmarkScheduler",
     "BenchmarkWorkspace",
     "BenchmarkWorkspaceError",
     "FIXTURE_IDENTITY_ALGORITHM",
