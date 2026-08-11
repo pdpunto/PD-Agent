@@ -6,6 +6,8 @@ from .classifier import BenchmarkClassification, BenchmarkClassifier
 from .aggregator import BenchmarkAggregator, render_comparison_markdown
 from .collector import BenchmarkCollection, BenchmarkCollector
 from .catalog import BenchmarkCatalog, BenchmarkCatalogError
+from .executor import BenchmarkExecutionResult, BenchmarkExecutor
+from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionRunner
 from .scheduler import (
     BenchmarkSchedule,
     BenchmarkScheduleCell,
@@ -52,6 +54,11 @@ __all__ = [
     "BenchmarkCatalog",
     "BenchmarkCatalogError",
     "render_comparison_markdown",
+    "BenchmarkExecutionBatch",
+    "BenchmarkExecutionManifest",
+    "BenchmarkExecutionResult",
+    "BenchmarkExecutionRunner",
+    "BenchmarkExecutor",
     "BenchmarkAcceptanceSpec",
     "BenchmarkAggregateMetrics",
     "BenchmarkComparison",
