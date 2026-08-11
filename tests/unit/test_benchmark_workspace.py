@@ -92,13 +92,52 @@ def test_prepare_workspace_creates_isolated_copy_and_round_trip_metadata(tmp_pat
     assert compute_fixture_identity(fixture) == workspace.canonical_hash_before
 
 
+def test_cleanup_revalidates_confinement_and_rejects_exterior_paths(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+    workspace = prepare_workspace(fixture, benchmark_root, run_id="run-1", attempt_id="attempt-1")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    object.__setattr__(workspace, "workspace_root", outside)
+
+    with pytest.raises(BenchmarkWorkspaceError, match="escapes benchmark_root/workspaces"):
+        workspace.cleanup()
+    assert outside.exists()
+    assert fixture.exists()
+
+
+def test_cleanup_rejects_benchmark_root_and_workspaces_root(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+    workspace = prepare_workspace(fixture, benchmark_root, run_id="run-1", attempt_id="attempt-1")
+
+    with pytest.raises(BenchmarkWorkspaceError, match="cannot equal benchmark_root"):
+        BenchmarkWorkspace.from_dict({**workspace.to_dict(), "workspace_root": str(benchmark_root)})
+    with pytest.raises(BenchmarkWorkspaceError, match="cannot equal workspaces root"):
+        BenchmarkWorkspace.from_dict({**workspace.to_dict(), "workspace_root": str(benchmark_root / "workspaces")})
+
+
+def test_round_trip_metadata_keeps_valid_cleanup(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+    workspace = prepare_workspace(fixture, benchmark_root, run_id="run-1", attempt_id="attempt-1")
+    restored = BenchmarkWorkspace.from_dict(workspace.to_dict())
+
+    restored.cleanup()
+    assert not restored.workspace_root.exists()
+
+
 def test_two_workspaces_are_isolated_and_source_remains_unchanged(tmp_path: Path) -> None:
     benchmark_root = tmp_path / "benchmarks"
     benchmark_root.mkdir()
     fixture = _make_fixture(benchmark_root)
 
-    workspace_a = prepare_workspace(fixture, benchmark_root, run_id="run-a", attempt_id="attempt-1")
-    workspace_b = prepare_workspace(fixture, benchmark_root, run_id="run-a", attempt_id="attempt-2")
+    workspace_a = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    workspace_b = prepare_workspace(fixture, benchmark_root, run_id="run_b", attempt_id="attempt_2")
 
     assert workspace_a.workspace_root != workspace_b.workspace_root
     source_file_a = workspace_a.workspace_root / "src" / "main" / "java" / "dev" / "pdpunto" / "Example.java"
@@ -114,6 +153,43 @@ def test_two_workspaces_are_isolated_and_source_remains_unchanged(tmp_path: Path
     workspace_b.cleanup()
     assert not workspace_a.workspace_root.exists()
     assert not workspace_b.workspace_root.exists()
+
+
+@pytest.mark.parametrize("run_id", ["run/a", "../x", "run\\a", "run:a", ".", "..", ""])
+def test_invalid_run_ids_rejected(tmp_path: Path, run_id: str) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+
+    with pytest.raises(BenchmarkWorkspaceError):
+        prepare_workspace(fixture, benchmark_root, run_id=run_id, attempt_id="attempt_1")
+
+
+@pytest.mark.parametrize("attempt_id", ["attempt/a", "../x", "attempt\\a", "attempt:a", ".", "..", ""])
+def test_invalid_attempt_ids_rejected(tmp_path: Path, attempt_id: str) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+
+    with pytest.raises(BenchmarkWorkspaceError):
+        prepare_workspace(fixture, benchmark_root, run_id="run_1", attempt_id=attempt_id)
+
+
+def test_valid_ids_remain_distinct(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+
+    first = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    second = prepare_workspace(fixture, benchmark_root, run_id="run_b", attempt_id="attempt_1")
+
+    assert first.workspace_root != second.workspace_root
+    assert first.workspace_root.name == "fixture"
+    assert second.workspace_root.name == "fixture"
+    assert first.workspace_root.parent.parent.name == "run_a"
+    assert second.workspace_root.parent.parent.name == "run_b"
+    first.cleanup()
+    second.cleanup()
 
 
 def test_symlink_escape_rejected_when_supported(tmp_path: Path) -> None:
@@ -134,4 +210,3 @@ def test_symlink_escape_rejected_when_supported(tmp_path: Path) -> None:
 
     with pytest.raises(BenchmarkWorkspaceError, match="symlink not allowed"):
         prepare_workspace(fixture, benchmark_root, run_id="run-link", attempt_id="attempt-1")
-
