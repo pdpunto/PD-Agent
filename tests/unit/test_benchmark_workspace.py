@@ -120,6 +120,31 @@ def test_cleanup_rejects_benchmark_root_and_workspaces_root(tmp_path: Path) -> N
         BenchmarkWorkspace.from_dict({**workspace.to_dict(), "workspace_root": str(benchmark_root / "workspaces")})
 
 
+def test_identity_binding_rejects_mismatched_run_or_attempt(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+    workspace = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    payload = workspace.to_dict()
+
+    with pytest.raises(BenchmarkWorkspaceError, match="expected identity path"):
+        BenchmarkWorkspace.from_dict({**payload, "run_id": "run_b"})
+    with pytest.raises(BenchmarkWorkspaceError, match="expected identity path"):
+        BenchmarkWorkspace.from_dict({**payload, "attempt_id": "attempt_2"})
+
+
+def test_identity_binding_rejects_other_run_workspace_within_allowed_root(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+    workspace_a = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    workspace_b = prepare_workspace(fixture, benchmark_root, run_id="run_b", attempt_id="attempt_1")
+    payload = workspace_a.to_dict()
+
+    with pytest.raises(BenchmarkWorkspaceError, match="expected identity path"):
+        BenchmarkWorkspace.from_dict({**payload, "workspace_root": str(workspace_b.workspace_root)})
+
+
 def test_round_trip_metadata_keeps_valid_cleanup(tmp_path: Path) -> None:
     benchmark_root = tmp_path / "benchmarks"
     benchmark_root.mkdir()
@@ -153,6 +178,25 @@ def test_two_workspaces_are_isolated_and_source_remains_unchanged(tmp_path: Path
     workspace_b.cleanup()
     assert not workspace_a.workspace_root.exists()
     assert not workspace_b.workspace_root.exists()
+
+
+def test_prepare_workspace_rejects_exact_existing_workspace_and_cleanup_allows_reprepare(tmp_path: Path) -> None:
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    fixture = _make_fixture(benchmark_root)
+
+    first = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    with pytest.raises(BenchmarkWorkspaceError, match="workspace already exists"):
+        prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+
+    assert first.workspace_root.exists()
+    first.cleanup()
+    assert not first.workspace_root.exists()
+
+    second = prepare_workspace(fixture, benchmark_root, run_id="run_a", attempt_id="attempt_1")
+    assert second.workspace_root.exists()
+    assert second.workspace_root == first.workspace_root
+    second.cleanup()
 
 
 @pytest.mark.parametrize("run_id", ["run/a", "../x", "run\\a", "run:a", ".", "..", ""])

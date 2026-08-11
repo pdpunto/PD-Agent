@@ -129,6 +129,29 @@ def _validate_workspace_confinement(benchmark_root: Path, workspace_root: Path) 
     return candidate
 
 
+def _expected_workspace_root(benchmark_root: Path, run_id: str, attempt_id: str, fixture_name: str) -> Path:
+    return _workspace_root_for(benchmark_root, run_id, attempt_id) / _validate_benchmark_id(
+        fixture_name, field_name="fixture_name"
+    )
+
+
+def _validate_workspace_identity(
+    *,
+    benchmark_root: Path,
+    workspace_root: Path,
+    run_id: str,
+    attempt_id: str,
+    fixture_name: str,
+) -> Path:
+    expected = _expected_workspace_root(benchmark_root, run_id, attempt_id, fixture_name).resolve(strict=False)
+    candidate = _validate_workspace_confinement(benchmark_root, workspace_root)
+    if candidate != expected:
+        raise BenchmarkWorkspaceError(
+            f"workspace_root does not match expected identity path: expected {expected}, got {candidate}"
+        )
+    return candidate
+
+
 def _copy_canonical_tree(source_root: Path, destination_root: Path) -> None:
     destination_root.mkdir(parents=True, exist_ok=True)
     for relative_path, file_path in _iter_canonical_files(source_root):
@@ -154,13 +177,23 @@ class BenchmarkWorkspace:
     def __post_init__(self) -> None:
         object.__setattr__(self, "benchmark_root", Path(self.benchmark_root).resolve(strict=True))
         object.__setattr__(self, "source_fixture", Path(self.source_fixture).resolve(strict=True))
-        object.__setattr__(self, "workspace_root", _validate_workspace_confinement(self.benchmark_root, Path(self.workspace_root)))
         object.__setattr__(self, "canonical_hash_before", str(self.canonical_hash_before))
         object.__setattr__(self, "workspace_hash_initial", str(self.workspace_hash_initial))
         object.__setattr__(self, "run_id", str(self.run_id).strip())
         object.__setattr__(self, "attempt_id", str(self.attempt_id).strip())
         _validate_benchmark_id(self.run_id, field_name="run_id")
         _validate_benchmark_id(self.attempt_id, field_name="attempt_id")
+        object.__setattr__(
+            self,
+            "workspace_root",
+            _validate_workspace_identity(
+                benchmark_root=self.benchmark_root,
+                workspace_root=Path(self.workspace_root),
+                run_id=self.run_id,
+                attempt_id=self.attempt_id,
+                fixture_name=self.source_fixture.name,
+            ),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -192,10 +225,16 @@ class BenchmarkWorkspace:
     def cleanup(self) -> None:
         if self.preserve_on_cleanup:
             return
-        workspace_root = _validate_workspace_confinement(self.benchmark_root, self.workspace_root)
+        workspace_root = _validate_workspace_identity(
+            benchmark_root=self.benchmark_root,
+            workspace_root=self.workspace_root,
+            run_id=self.run_id,
+            attempt_id=self.attempt_id,
+            fixture_name=self.source_fixture.name,
+        )
         if not workspace_root.exists():
             return
-        shutil.rmtree(self.workspace_root, ignore_errors=True)
+        shutil.rmtree(workspace_root, ignore_errors=False)
 
 
 def prepare_workspace(
@@ -219,9 +258,14 @@ def prepare_workspace(
     canonical_hash = compute_fixture_identity(canonical_root)
     validated_run_id = _validate_benchmark_id(run_id, field_name="run_id")
     validated_attempt_id = _validate_benchmark_id(attempt_id, field_name="attempt_id")
-    workspace_root = _workspace_root_for(benchmark_root, validated_run_id, validated_attempt_id) / canonical_root.name
+    workspace_root = _expected_workspace_root(
+        benchmark_root,
+        validated_run_id,
+        validated_attempt_id,
+        canonical_root.name,
+    ).resolve(strict=False)
     if workspace_root.exists():
-        shutil.rmtree(workspace_root)
+        raise BenchmarkWorkspaceError(f"workspace already exists for run_id={validated_run_id!r} attempt_id={validated_attempt_id!r}")
     workspace_root.parent.mkdir(parents=True, exist_ok=True)
     _copy_canonical_tree(canonical_root, workspace_root)
     workspace_hash = compute_fixture_identity(workspace_root)
