@@ -105,6 +105,7 @@ def test_three_of_three_pass_and_complete_comparison() -> None:
     assert comparison.cell_results[0].success_rate == 1.0
     assert comparison.aggregate_metadata["macro_success_rates"]["cfg-off:" + config_a.config_hash()]["macro_success_rate"] == 1.0
     assert comparison.aggregate_metadata["macro_success_rates"]["cfg-on:" + config_b.config_hash()]["macro_success_rate"] == 1 / 3
+    assert comparison.aggregate_metadata["equal_macro_success_rate"] is False
     assert BenchmarkComparison.from_dict(comparison.to_dict()) == comparison
 
 
@@ -164,6 +165,21 @@ def test_blocked_and_invalid_do_not_enter_denominator() -> None:
     assert cell.metrics is None
 
 
+def test_no_cells_is_incomplete() -> None:
+    comparison = BenchmarkAggregator().aggregate(
+        (),
+        dataset_id="pd-agent-fabric-brain",
+        dataset_version="0.4.1",
+        configs=(),
+        target_valid_repetitions=3,
+        expected_cells=(),
+    )
+
+    assert comparison.comparison_status == BenchmarkComparisonStatus.INCOMPLETE
+    assert comparison.runs_expected == 0
+    assert comparison.aggregate_metadata["cell_count"] == 0
+
+
 def test_missing_metrics_are_not_zero_and_cost_stays_null() -> None:
     config = _config("cfg-off")
     runs = [
@@ -220,7 +236,7 @@ def test_equal_task_weighting_and_incomplete_task_visible() -> None:
     assert any(not cell.complete for cell in comparison.cell_results)
 
 
-def test_tie_yields_inconclusive_and_markdown_has_no_universal_winner() -> None:
+def test_complete_tie_is_complete_and_markdown_has_no_universal_winner() -> None:
     config_a = _config("cfg-off", seed=1)
     config_b = _config("cfg-on", seed=2)
     runs = [
@@ -242,10 +258,47 @@ def test_tie_yields_inconclusive_and_markdown_has_no_universal_winner() -> None:
     )
     markdown = render_comparison_markdown(comparison)
 
-    assert comparison.comparison_status == BenchmarkComparisonStatus.INCONCLUSIVE
+    assert comparison.comparison_status == BenchmarkComparisonStatus.COMPLETE
+    assert comparison.aggregate_metadata["equal_macro_success_rate"] is True
     assert "winner" not in markdown.casefold()
     assert "ganador" not in markdown.casefold()
     assert BenchmarkComparison.from_dict(comparison.to_dict()) == comparison
+
+
+def test_split_result_stays_complete() -> None:
+    off = _config("cfg-off")
+    on = _config("cfg-on")
+    runs = [
+        _run(run_id="a-1", task_id="B001", task_version="1", config=off, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+        _run(run_id="a-2", task_id="B001", task_version="1", config=off, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+        _run(run_id="a-3", task_id="B001", task_version="1", config=off, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+        _run(run_id="b-1", task_id="B001", task_version="1", config=on, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="b-2", task_id="B001", task_version="1", config=on, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="b-3", task_id="B001", task_version="1", config=on, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="c-1", task_id="B002", task_version="1", config=off, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="c-2", task_id="B002", task_version="1", config=off, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="c-3", task_id="B002", task_version="1", config=off, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL),
+        _run(run_id="d-1", task_id="B002", task_version="1", config=on, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+        _run(run_id="d-2", task_id="B002", task_version="1", config=on, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+        _run(run_id="d-3", task_id="B002", task_version="1", config=on, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS),
+    ]
+
+    comparison = BenchmarkAggregator().aggregate(
+        runs,
+        dataset_id="pd-agent-fabric-brain",
+        dataset_version="0.4.1",
+        configs=(off, on),
+        target_valid_repetitions=3,
+        expected_cells=(
+            ("B001", "1", off.config_id, off.config_hash()),
+            ("B001", "1", on.config_id, on.config_hash()),
+            ("B002", "1", off.config_id, off.config_hash()),
+            ("B002", "1", on.config_id, on.config_hash()),
+        ),
+    )
+
+    assert comparison.comparison_status == BenchmarkComparisonStatus.COMPLETE
+    assert comparison.aggregate_metadata["equal_macro_success_rate"] is True
 
 
 def test_configs_are_separated_by_config_hash_and_raw_runs_stay_unchanged() -> None:

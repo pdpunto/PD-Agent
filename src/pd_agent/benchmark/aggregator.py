@@ -219,6 +219,11 @@ class BenchmarkAggregator:
                 "task_ids": task_names,
             }
         all_macro_rates = [entry["macro_success_rate"] for entry in macro_by_config.values() if entry["macro_success_rate"] is not None]
+        non_none_rates = list(all_macro_rates)
+        equal_macro_success_rate = None
+        if len(non_none_rates) >= 2:
+            baseline = non_none_rates[0]
+            equal_macro_success_rate = all(abs(rate - baseline) <= 1e-12 for rate in non_none_rates[1:])
         return {
             "cell_count": len(cells),
             "complete_cell_count": len(complete_cells),
@@ -227,6 +232,7 @@ class BenchmarkAggregator:
             "config_count": len(config_keys),
             "macro_success_rates": macro_by_config,
             "macro_success_rate": (sum(all_macro_rates) / len(all_macro_rates)) if all_macro_rates else None,
+            "equal_macro_success_rate": equal_macro_success_rate,
         }
 
     def _comparison_status(self, cells: Sequence[BenchmarkComparisonCell], configs: Sequence[BenchmarkConfig]) -> BenchmarkComparisonStatus:
@@ -234,23 +240,7 @@ class BenchmarkAggregator:
             return BenchmarkComparisonStatus.INCOMPLETE
         if any(not cell.complete for cell in cells):
             return BenchmarkComparisonStatus.INCOMPLETE
-        config_keys = {(cell.config_id, cell.config_hash) for cell in cells}
-        if len(config_keys) < 2 or len(configs) < 2:
-            return BenchmarkComparisonStatus.INCONCLUSIVE
-        config_rates: dict[tuple[str, str], float] = {}
-        for config_id, config_hash in config_keys:
-            rates = [
-                _success_rate(cell.passed, cell.valid)
-                for cell in cells
-                if cell.config_id == config_id and cell.config_hash == config_hash and cell.complete and cell.valid > 0
-            ]
-            filtered = [rate for rate in rates if rate is not None]
-            if not filtered:
-                return BenchmarkComparisonStatus.INCONCLUSIVE
-            config_rates[(config_id, config_hash)] = sum(filtered) / len(filtered)
-        best = max(config_rates.values())
-        winners = [key for key, rate in config_rates.items() if abs(rate - best) <= 1e-12]
-        return BenchmarkComparisonStatus.COMPLETE if len(winners) == 1 else BenchmarkComparisonStatus.INCONCLUSIVE
+        return BenchmarkComparisonStatus.COMPLETE
 
     def render_markdown(self, comparison: BenchmarkComparison) -> str:
         lines: list[str] = []
@@ -262,6 +252,8 @@ class BenchmarkAggregator:
         lines.append(f"- Runs valid: `{comparison.runs_valid}`")
         lines.append(f"- Runs blocked: `{comparison.runs_blocked}`")
         lines.append(f"- Runs invalid: `{comparison.runs_invalid}`")
+        if comparison.aggregate_metadata:
+            lines.append(f"- Equal macro success rate: `{comparison.aggregate_metadata.get('equal_macro_success_rate')}`")
         lines.append("")
         if comparison.configs:
             lines.append("## Configs")
