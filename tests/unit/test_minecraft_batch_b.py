@@ -81,6 +81,7 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "neighbor_update_triggered" in result_source
     assert "HarnessSignals" in signals_source
     assert "NeighborUpdateProbeBlock" in probe_source
+    assert "WireOrientation" in probe_source
     assert "schema_version" in result_source
     assert "target_origin_resolved" in result_source
     assert "runtime_target_sha256" in result_source
