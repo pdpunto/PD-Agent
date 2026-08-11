@@ -49,7 +49,6 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     result_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java")
     mod_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java")
     signals_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessSignals.java")
-    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
 
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
     assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' in build_file
@@ -61,14 +60,23 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert manifest["entrypoints"]["server"] == ["dev.pdpunto.l11harness.L11HarnessMod"]
     assert 'minecraft("com.mojang:minecraft:${property("minecraft_version")}")' in build_file
     assert 'modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")' in build_file
+    assert 'pd.agent.expectNeighborUpdate' in build_file
     assert "DedicatedServerModInitializer" in mod_source
     assert "Thread.ofPlatform().daemon().name(\"pd-agent-l11-harness\")" in mod_source
     assert "waitForServerStart" in mod_source
     assert "ServerLifecycleEvents.SERVER_STARTED" not in mod_source
     assert "server.stop(false)" in mod_source
     assert "HarnessSignals.reset()" in mod_source
-    assert "Registry.register" in mod_source
-    assert "neighbor_update_probe" in mod_source
+    assert "Registry.register" not in mod_source
+    assert "registryKey" not in mod_source
+    assert "neighbor_update_probe" not in mod_source
+    assert "Blocks.OBSERVER" in runner_source
+    assert "ObserverBlock.POWERED" in runner_source
+    assert "FacingBlock.FACING" in runner_source
+    assert "expectNeighborUpdate" in config_source
+    assert "neighborPass = !config.expectNeighborUpdate() || neighborTriggered" in runner_source
+    assert "HarnessResult.pass(config, identity, neighborTriggered)" in runner_source
+    assert "HarnessResult.fail(config, identity, reason, neighborTriggered)" in runner_source
     assert "FabricLoader.getInstance()" in identity_source
     assert "getModContainer" in identity_source
     assert "getOrigin" in identity_source
@@ -80,8 +88,6 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "BlockState" in runner_source
     assert "neighbor_update_triggered" in result_source
     assert "HarnessSignals" in signals_source
-    assert "NeighborUpdateProbeBlock" in probe_source
-    assert "WireOrientation" in probe_source
     assert "schema_version" in result_source
     assert "target_origin_resolved" in result_source
     assert "runtime_target_sha256" in result_source
@@ -120,6 +126,8 @@ def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> N
     runtime_options_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRuntimeOptions.java")
 
     assert "Blocks.AIR.getDefaultState()" in harness_source
+    assert "Blocks.OBSERVER" in harness_source
+    assert "ObserverBlock.POWERED" in harness_source
     assert "ExampleMod.applyProbeState" in harness_source
     assert "expectedBlockState()" in runtime_options_source
     assert "FUNCTIONAL_FAIL" in runtime_options_source

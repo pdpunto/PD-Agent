@@ -61,6 +61,7 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")
     jvmArgs.add("-Dpd.agent.resultMode=${providers.gradleProperty("pd.agent.resultMode").orElse("pass").get()}")
     jvmArgs.add("-Dpd.agent.expectedBlockStateId=${providers.gradleProperty("pd.agent.expectedBlockStateId").orElse("diamond_block").get()}")
+    jvmArgs.add("-Dpd.agent.expectNeighborUpdate=${providers.gradleProperty("pd.agent.expectNeighborUpdate").orElse("false").get()}")
     jvmArgs.add("-Dpd.agent.hangMillis=${providers.gradleProperty("pd.agent.hangMillis").orElse("600000").get()}")
     javaLauncher = javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))

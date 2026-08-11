@@ -59,6 +59,7 @@ class MinecraftTestSpec:
     loader_version: str
     test_id: str
     timeout_seconds: int
+    expect_neighbor_update: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
@@ -70,6 +71,7 @@ class MinecraftTestSpec:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
+        object.__setattr__(self, "expect_neighbor_update", bool(self.expect_neighbor_update))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +81,7 @@ class MinecraftTestSpec:
             "loader_version": self.loader_version,
             "test_id": self.test_id,
             "timeout_seconds": self.timeout_seconds,
+            "expect_neighbor_update": self.expect_neighbor_update,
         }
 
     @classmethod
@@ -90,6 +93,7 @@ class MinecraftTestSpec:
             loader_version=str(data["loader_version"]),
             test_id=str(data["test_id"]),
             timeout_seconds=int(data["timeout_seconds"]),
+            expect_neighbor_update=bool(data.get("expect_neighbor_update", False)),
         )
 
 

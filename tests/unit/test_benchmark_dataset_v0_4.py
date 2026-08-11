@@ -32,7 +32,8 @@ def _b003_accepts(target_source: str, harness_source: str) -> bool:
     harness_required = (
         "neighbor_update_triggered",
         "HarnessSignals",
-        "NeighborUpdateProbeBlock",
+        "Blocks.OBSERVER",
+        "ObserverBlock.POWERED",
     )
     return all(item in target_source for item in target_required) and all(item in harness_source for item in harness_required)
 
@@ -58,6 +59,7 @@ def test_v0_4_hardened_dataset_is_frozen_and_loaded() -> None:
     assert task_b001.validation.minecraft is True
     assert task_b001.acceptance.acceptance_type == "minecraft_harness"
     assert task_b001.acceptance.spec["expected_block_state_id"] == "diamond_block"
+    assert task_b001.acceptance.spec.get("expected_neighbor_update", False) is False
     assert task_b001.acceptance.spec["knowledge_needs"][0]["hints"] == [
         "Registries.BLOCK",
         "Identifier.of",
@@ -160,7 +162,7 @@ def test_v0_4_b003_controls_and_harness_signal() -> None:
     harness_mod = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java").read_text(encoding="utf-8")
     harness_result = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java").read_text(encoding="utf-8")
     signals_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessSignals.java").read_text(encoding="utf-8")
-    probe_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java").read_text(encoding="utf-8")
+    runner_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java").read_text(encoding="utf-8")
 
     baseline = target_source
     partial_registry = target_source.replace(
@@ -173,5 +175,5 @@ def test_v0_4_b003_controls_and_harness_signal() -> None:
     assert _b003_accepts(baseline, harness_source) is False
     assert _b003_accepts(partial_registry.replace("Block.NOTIFY_ALL", "Block.NOTIFY_NEIGHBORS"), harness_source) is False
     assert _b003_accepts(partial_flag, harness_source) is False
-    harness_bundle = harness_source + harness_mod + harness_result + signals_source + probe_source
+    harness_bundle = harness_source + harness_mod + harness_result + signals_source + runner_source
     assert _b003_accepts(correct, harness_bundle) is True

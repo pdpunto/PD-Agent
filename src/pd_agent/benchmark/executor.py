@@ -102,6 +102,7 @@ def _minecraft_spec_for_task(
     minecraft_version = str(spec.get("minecraft_version") or task.environment.minecraft_version or "").strip()
     loader_version = str(spec.get("loader_version") or task.environment.loader_version or "").strip()
     timeout_seconds = int(spec.get("timeout_seconds", 60))
+    expect_neighbor_update = bool(spec.get("expected_neighbor_update", spec.get("expect_neighbor_update", False)))
     return MinecraftTestSpec(
         target_jar=artifact_path,
         target_mod_id=target_mod_id,
@@ -109,6 +110,7 @@ def _minecraft_spec_for_task(
         loader_version=loader_version,
         test_id=test_id,
         timeout_seconds=timeout_seconds,
+        expect_neighbor_update=expect_neighbor_update,
     )
 
 

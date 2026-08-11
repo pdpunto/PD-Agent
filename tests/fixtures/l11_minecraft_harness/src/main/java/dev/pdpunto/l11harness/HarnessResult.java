@@ -45,7 +45,7 @@ final class HarnessResult {
         this.shutdownRequested = shutdownRequested;
     }
 
-    static HarnessResult pass(HarnessConfig config, HarnessIdentity identity) {
+    static HarnessResult pass(HarnessConfig config, HarnessIdentity identity, boolean neighborUpdateTriggered) {
         return new HarnessResult(
             1,
             config.testId(),
@@ -57,7 +57,7 @@ final class HarnessResult {
             identity.targetShaMatch(),
             true,
             "PASS",
-            true,
+            neighborUpdateTriggered,
             identity.reason(),
             true
         );
@@ -81,7 +81,7 @@ final class HarnessResult {
         );
     }
 
-    static HarnessResult fail(HarnessConfig config, HarnessIdentity identity, String reason) {
+    static HarnessResult fail(HarnessConfig config, HarnessIdentity identity, String reason, boolean neighborUpdateTriggered) {
         return new HarnessResult(
             1,
             config.testId(),
@@ -93,7 +93,7 @@ final class HarnessResult {
             identity.targetShaMatch(),
             true,
             "FAIL",
-            false,
+            neighborUpdateTriggered,
             reason,
             true
         );

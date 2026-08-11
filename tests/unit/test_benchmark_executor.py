@@ -44,7 +44,7 @@ def _fixture_root() -> Path:
     return Path("tests/fixtures/l11_fabric_fixture").resolve()
 
 
-def _task(*, minecraft: bool = False) -> BenchmarkTask:
+def _task(*, minecraft: bool = False, expected_neighbor_update: bool = False, test_id: str = "l8") -> BenchmarkTask:
     return BenchmarkTask.from_dict(
         {
             "schema_version": 1,
@@ -74,8 +74,9 @@ def _task(*, minecraft: bool = False) -> BenchmarkTask:
                     "target_mod_id": "pdagentl11",
                     "minecraft_version": "1.21.11",
                     "loader_version": "0.19.3",
-                    "test_id": "l8",
+                    "test_id": test_id,
                     "timeout_seconds": 30,
+                    "expected_neighbor_update": expected_neighbor_update,
                 },
                 "notes": [],
             },
@@ -369,6 +370,33 @@ def test_executor_brain_on_injects_context_and_traces(monkeypatch: pytest.Monkey
     assert result.collection.knowledge_traces[0].retrieved_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].selected_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].context_item_ids == ("yarn:item:1",)
+
+
+def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
+    config = _config(brain_enabled=False)
+    fake_minecraft = _FakeMinecraftRunner()
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-6", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert fake_minecraft.calls
+    spec, kwargs = fake_minecraft.calls[0]
+    assert spec.expect_neighbor_update is True
+    assert kwargs["run_id"] == "attempt-6"
 
 
 @pytest.mark.parametrize(

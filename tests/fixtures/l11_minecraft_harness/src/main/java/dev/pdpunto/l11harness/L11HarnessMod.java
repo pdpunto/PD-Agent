@@ -7,20 +7,9 @@ import java.util.concurrent.TimeUnit;
 
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.AbstractBlock;
-import net.minecraft.block.Block;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.registry.Registries;
-import net.minecraft.registry.Registry;
-import net.minecraft.util.Identifier;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
-    static final Block NEIGHBOR_UPDATE_PROBE = Registry.register(
-        Registries.BLOCK,
-        Identifier.of("pdagentl11harness", "neighbor_update_probe"),
-        new NeighborUpdateProbeBlock(AbstractBlock.Settings.create())
-    );
-
     @Override
     public void onInitializeServer() {
         HarnessSignals.reset();
@@ -79,7 +68,13 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
     }
 
     private HarnessConfig fallbackConfig() {
-        return new HarnessConfig("pdagentl11", "0000000000000000000000000000000000000000000000000000000000000000", HarnessConfig.SUPPORTED_TEST_ID, java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "harness-result.json").toAbsolutePath());
+        return new HarnessConfig(
+            "pdagentl11",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            HarnessConfig.SUPPORTED_TEST_ID,
+            java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "harness-result.json").toAbsolutePath(),
+            false
+        );
     }
 
     private void writeMalformedResult(java.nio.file.Path resultPath) throws IOException {

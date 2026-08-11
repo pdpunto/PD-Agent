@@ -179,6 +179,7 @@ class MinecraftTestRunner:
             ("pd.agent.minecraft.target_mod_id", spec.target_mod_id),
             ("pd.agent.minecraft.expected_sha256", target.sha256),
             ("pd.agent.minecraft.test_id", spec.test_id),
+            ("pd.agent.minecraft.expect_neighbor_update", str(spec.expect_neighbor_update).lower()),
             ("pd.agent.minecraft.result_path", evidence_paths.harness_result_json.as_posix()),
         )
         return MinecraftLaunchPlan(
@@ -345,6 +346,7 @@ class MinecraftTestRunner:
             f"-Ppd.agent.runDir={result.evidence_paths.root / 'runtime'}",
             f"-Ppd.agent.resultMode={result_mode}",
             f"-Ppd.agent.expectedBlockStateId={expected_block_state_id}",
+            f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
         )
 

@@ -72,6 +72,7 @@ def test_spec_validation_and_round_trip(tmp_path: Path) -> None:
         "loader_version": "0.19.3",
         "test_id": "batch-a",
         "timeout_seconds": 90,
+        "expect_neighbor_update": False,
     }
     assert MinecraftTestSpec.from_dict(spec.to_dict()) == spec
 
@@ -185,6 +186,7 @@ def test_launch_plan_serialization(tmp_path: Path) -> None:
     assert plan.run_id == "run-a"
     assert plan.evidence_paths.root.name == "run-a"
     assert dict(plan.system_properties)["pd.agent.minecraft.target_mod_id"] == "pdagentl11"
+    assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
     assert MinecraftLaunchPlan.from_dict(plan.to_dict()) == plan
 
 
