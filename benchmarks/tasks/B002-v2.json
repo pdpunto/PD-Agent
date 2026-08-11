@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "task_id": "B002",
+  "task_version": "2",
+  "description": "Version-sensitive API helper change.",
+  "prompt": "Add a dedicated probe identifier helper to ExampleMod using Identifier.ofVanilla(\"diamond_block\") and thread that helper through the probe path without changing the runtime block result.",
+  "fixture": {
+    "schema_version": 1,
+    "fixture_ref": "fixtures/B002-v2",
+    "fixture_identity": "c2648999209fa4d92f901b0c54517595da6152a14f6e9bc8c0dc27ecc0707e4f",
+    "identity_algorithm": "sha256-tree-v1",
+    "metadata": {
+      "source_fixture": "tests/fixtures/l11_fabric_fixture",
+      "source_kind": "fabric_fixture_copy",
+      "baseline": "diamond_block"
+    }
+  },
+  "validation": {
+    "schema_version": 1,
+    "build": true,
+    "artifact": true,
+    "minecraft": false,
+    "source_change": true
+  },
+  "acceptance": {
+    "schema_version": 1,
+    "acceptance_type": "source_structure",
+    "spec": {
+      "file": "src/main/java/dev/pdpunto/l11/ExampleMod.java",
+      "required_symbols": [
+        "Identifier.ofVanilla(\"diamond_block\")",
+        "probeIdentifier()"
+      ],
+      "forbidden_symbols": [
+        "Identifier.of(\"minecraft\", \"diamond_block\")"
+      ],
+      "build_required": true,
+      "artifact_required": true
+    },
+    "notes": [
+      "This is a build-and-artifact control task, not a Minecraft runtime task.",
+      "The required API is distinct from the B001 registry lookup path."
+    ]
+  },
+  "environment": {
+    "schema_version": 1,
+    "minecraft_version": "1.21.11",
+    "loader_version": "0.19.3",
+    "loom_version": "1.13.3",
+    "yarn_version": "1.21.11+build.6",
+    "java_version": "21",
+    "fabric_api_version": null,
+    "extra": {}
+  },
+  "tags": [
+    "fabric",
+    "minecraft",
+    "brain",
+    "version-sensitive",
+    "build-only",
+    "control"
+  ],
+  "notes": [
+    "B002-v2 hardens the earlier build-only control with an explicit API helper contract."
+  ]
+}

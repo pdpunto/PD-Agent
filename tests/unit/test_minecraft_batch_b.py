@@ -48,6 +48,8 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     identity_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "TargetIdentityProbe.java")
     result_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java")
     mod_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java")
+    signals_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessSignals.java")
+    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
 
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
     assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' in build_file
@@ -64,6 +66,9 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "waitForServerStart" in mod_source
     assert "ServerLifecycleEvents.SERVER_STARTED" not in mod_source
     assert "server.stop(false)" in mod_source
+    assert "HarnessSignals.reset()" in mod_source
+    assert "Registry.register" in mod_source
+    assert "neighbor_update_probe" in mod_source
     assert "FabricLoader.getInstance()" in identity_source
     assert "getModContainer" in identity_source
     assert "getOrigin" in identity_source
@@ -73,6 +78,9 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "ServerWorld" in runner_source
     assert "BlockPos" in runner_source
     assert "BlockState" in runner_source
+    assert "neighbor_update_triggered" in result_source
+    assert "HarnessSignals" in signals_source
+    assert "NeighborUpdateProbeBlock" in probe_source
     assert "schema_version" in result_source
     assert "target_origin_resolved" in result_source
     assert "runtime_target_sha256" in result_source

@@ -11,6 +11,7 @@ final class HarnessResult {
     private final boolean targetShaMatch;
     private final boolean serverStarted;
     private final String functionalTestResult;
+    private final boolean neighborUpdateTriggered;
     private final String reason;
     private final boolean shutdownRequested;
 
@@ -25,6 +26,7 @@ final class HarnessResult {
         boolean targetShaMatch,
         boolean serverStarted,
         String functionalTestResult,
+        boolean neighborUpdateTriggered,
         String reason,
         boolean shutdownRequested
     ) {
@@ -38,6 +40,7 @@ final class HarnessResult {
         this.targetShaMatch = targetShaMatch;
         this.serverStarted = serverStarted;
         this.functionalTestResult = functionalTestResult;
+        this.neighborUpdateTriggered = neighborUpdateTriggered;
         this.reason = reason;
         this.shutdownRequested = shutdownRequested;
     }
@@ -54,6 +57,7 @@ final class HarnessResult {
             identity.targetShaMatch(),
             true,
             "PASS",
+            true,
             identity.reason(),
             true
         );
@@ -71,6 +75,7 @@ final class HarnessResult {
             identity.targetShaMatch(),
             true,
             "INFRA_ERROR",
+            false,
             reason,
             true
         );
@@ -88,6 +93,7 @@ final class HarnessResult {
             identity.targetShaMatch(),
             true,
             "FAIL",
+            false,
             reason,
             true
         );
@@ -106,6 +112,7 @@ final class HarnessResult {
         appendField(builder, "target_sha_match", targetShaMatch).append(",\n");
         appendField(builder, "server_started", serverStarted).append(",\n");
         appendField(builder, "functional_test_result", functionalTestResult).append(",\n");
+        appendField(builder, "neighbor_update_triggered", neighborUpdateTriggered).append(",\n");
         appendField(builder, "reason", reason).append(",\n");
         appendField(builder, "shutdown_requested", shutdownRequested).append("\n");
         builder.append("}");

@@ -1,9 +1,9 @@
 # PD Agent v0.4 Benchmark Dataset
 
-Frozen dataset for v0.4 live comparisons.
+Frozen datasets for v0.4 live comparisons.
 
-- Dataset: `PD_AGENT_BENCHMARK_DATASET_V0.4_1`
-- Dataset version: `0.4.1`
+- Candidate freeze: `PD_AGENT_BENCHMARK_DATASET_V0.4_1` / `0.4.1`
+- Hardened freeze: `PD_AGENT_BENCHMARK_DATASET_V0.4_2` / `0.4.2`
 - Source of truth knowledge source: `net.fabricmc:yarn:1.21.11+build.6:v2`
 
 Baseline fixture source:
@@ -17,7 +17,7 @@ Harness source:
 Frozen tasks:
 
 - `B001` - registry lookup
-- `B002` - version-sensitive API change
-- `B003` - multi-symbol version-sensitive change
+- `B002` - version-sensitive API helper
+- `B003` - multi-symbol runtime check
 
 The `benchmarks/` tree is intentionally data-only. No live benchmark run is part of this lot.

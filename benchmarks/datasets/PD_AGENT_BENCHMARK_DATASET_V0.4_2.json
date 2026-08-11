@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "dataset_id": "PD_AGENT_BENCHMARK_DATASET_V0.4_2",
+  "dataset_version": "0.4.2",
+  "description": "Hardened frozen v0.4 benchmark dataset with stricter acceptance controls.",
+  "tasks": [
+    {
+      "schema_version": 1,
+      "task_id": "B001",
+      "task_version": "1"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "B002",
+      "task_version": "2"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "B003",
+      "task_version": "2"
+    }
+  ],
+  "tags": [
+    "fabric",
+    "minecraft",
+    "brain",
+    "frozen",
+    "hardened"
+  ]
+}

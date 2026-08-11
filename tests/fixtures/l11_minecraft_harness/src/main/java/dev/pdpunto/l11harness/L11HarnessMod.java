@@ -7,11 +7,23 @@ import java.util.concurrent.TimeUnit;
 
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.block.AbstractBlock;
+import net.minecraft.block.Block;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.util.Identifier;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
+    static final Block NEIGHBOR_UPDATE_PROBE = Registry.register(
+        Registries.BLOCK,
+        Identifier.of("pdagentl11harness", "neighbor_update_probe"),
+        new NeighborUpdateProbeBlock(AbstractBlock.Settings.create())
+    );
+
     @Override
     public void onInitializeServer() {
+        HarnessSignals.reset();
         Thread waiter = Thread.ofPlatform().daemon().name("pd-agent-l11-harness").start(this::waitForServerStart);
         if (waiter == null) {
             throw new IllegalStateException("failed to start harness waiter thread");
