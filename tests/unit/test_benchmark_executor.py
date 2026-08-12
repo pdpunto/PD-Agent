@@ -399,6 +399,41 @@ def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: 
     assert kwargs["run_id"] == "attempt-6"
 
 
+def test_executor_sanitizes_filesystem_run_fragment_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
+    config = _config(brain_enabled=False)
+    fake_minecraft = _FakeMinecraftRunner()
+    scheduled_attempt = type(
+        "Attempt",
+        (),
+        {"scheduled_attempt_id": "B001:1:cfg-off:abc:def:0:1", "attempt_index": 7, "repetition_index": 0},
+    )()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.benchmark_run.benchmark_run_id == "B001:1:cfg-off:abc:def:0:1"
+    assert result.workspace.run_id != result.benchmark_run.benchmark_run_id
+    assert ":" not in result.workspace.run_id
+    assert ":" not in result.benchmark_run_path.parent.name
+    assert fake_minecraft.calls
+    _, kwargs = fake_minecraft.calls[0]
+    assert kwargs["run_id"] == result.workspace.run_id
+    assert ":" not in kwargs["run_id"]
+
+
 @pytest.mark.parametrize(
     "kind, expected_code",
     [

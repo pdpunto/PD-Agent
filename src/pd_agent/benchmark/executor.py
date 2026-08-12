@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -51,6 +52,11 @@ def _as_mapping(value: object) -> dict[str, Any] | None:
         if isinstance(dumped, Mapping):
             return dict(dumped)
     return None
+
+
+def _filesystem_safe_fragment(value: str) -> str:
+    fragment = re.sub(r'[<>:"/\\|?*]+', "_", str(value)).strip(" .")
+    return fragment or "run"
 
 
 def _knowledge_need_from_mapping(data: Mapping[str, Any], *, environment: KnowledgeEnvironment) -> KnowledgeNeed:
@@ -198,15 +204,16 @@ class BenchmarkExecutor:
         execution_root = Path(execution_root).resolve(strict=False)
         execution_root.mkdir(parents=True, exist_ok=True)
         benchmark_run_id = scheduled_attempt.scheduled_attempt_id
+        run_fragment = _filesystem_safe_fragment(benchmark_run_id)
         execution_id = execution_root.name
-        run_root = execution_root / "runs" / benchmark_run_id
+        run_root = execution_root / "runs" / run_fragment
         run_root.mkdir(parents=True, exist_ok=True)
 
         fixture_root = Path(fixture_root).resolve(strict=True)
         workspace = prepare_workspace(
             fixture_root,
             execution_root,
-            run_id=benchmark_run_id,
+            run_id=run_fragment,
             attempt_id=f"attempt-{scheduled_attempt.attempt_index:03d}",
             preserve_on_cleanup=preserve_workspace,
         )
@@ -229,7 +236,7 @@ class BenchmarkExecutor:
             )
             external_context: tuple[Any, ...] = ()
             if config.brain_enabled and requested_needs and self.knowledge_source is not None:
-                cache_root = execution_root / "brain-cache" / benchmark_run_id
+                cache_root = execution_root / "brain-cache" / run_fragment
                 brain = MinecraftBrain(
                     source=self.knowledge_source,
                     cache=FileKnowledgeCache(cache_root),
@@ -265,6 +272,7 @@ class BenchmarkExecutor:
                 final_report=final_report,
                 workspace=workspace,
                 benchmark_run_id=benchmark_run_id,
+                filesystem_run_id=run_fragment,
                 minecraft_runner=minecraft_runner or self.minecraft_runner,
             )
             fixture_hash_after = compute_fixture_identity(workspace.source_fixture)
@@ -352,6 +360,7 @@ class BenchmarkExecutor:
         final_report: FinalReport,
         workspace: BenchmarkWorkspace,
         benchmark_run_id: str,
+        filesystem_run_id: str,
         minecraft_runner: MinecraftTestRunner | None,
     ) -> MinecraftTestResult | None:
         if not task.validation.minecraft:
@@ -373,7 +382,7 @@ class BenchmarkExecutor:
             expected_sha256 = task.acceptance.spec.get("expected_sha256")
         return runner.run(
             spec,
-            run_id=benchmark_run_id,
+            run_id=filesystem_run_id,
             java_version=task.environment.java_version,
             expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
         )
