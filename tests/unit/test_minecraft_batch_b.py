@@ -104,6 +104,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "SUPPORTED_TEST_IDS" in config_source
     assert "unsupported test id" in config_source
     assert "result path must be absolute" in config_source
+    assert "boundedNeighborWaitMillis" in runner_source
+    assert "NEIGHBOR_WAIT_CAP_MILLIS = 5_000L" in runner_source
+    assert "neighborWaitMillis = boundedNeighborWaitMillis(options.hangMillis())" in runner_source
+    assert "waitForObserverPowered(world, true, neighborWaitMillis)" in runner_source
 
 
 def test_batch_b_harness_supports_signal_test_id_without_relaxing_validation() -> None:

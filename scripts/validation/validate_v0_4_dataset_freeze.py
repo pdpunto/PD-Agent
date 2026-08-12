@@ -148,7 +148,7 @@ def _b003_registry_only_source() -> str:
 
 
 def _b003_missing_neighbor_harness_source(original: str) -> str:
-    old = "        boolean neighborTriggered = config.expectNeighborUpdate() && waitForObserverPowered(world, true, options.hangMillis());"
+    old = "        boolean neighborTriggered = config.expectNeighborUpdate() && waitForObserverPowered(world, true, neighborWaitMillis);"
     new = "        boolean neighborTriggered = false; // validation-only negative control"
     if old not in original:
         raise RuntimeError("neighbor trigger line not found")

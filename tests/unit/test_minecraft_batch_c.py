@@ -116,6 +116,100 @@ def test_run_pass_records_harness_and_result(tmp_path: Path, monkeypatch: pytest
     assert result.metadata["harness_result_state"] == "PASS"
 
 
+def test_run_signal_test_id_pass_records_neighbor_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe_with_signal",
+        timeout_seconds=30,
+        expect_neighbor_update=True,
+    )
+    run_id = "run-signal-pass"
+    actual_sha = runner.validate_target(spec, java_version="21").sha256
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload={
+                "schema_version": 1,
+                "test_id": "block_state_probe_with_signal",
+                "target_mod_id": "pdagentl11",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "runtime_target_path": str(tmp_path / "build" / "libs" / "target.jar"),
+                "runtime_target_sha256": actual_sha,
+                "target_sha_match": True,
+                "server_started": True,
+                "functional_test_result": "PASS",
+                "neighbor_update_triggered": True,
+                "reason": "target verified",
+                "shutdown_requested": True,
+            },
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.PASS
+    assert result.reason == "target verified"
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.harness_result_path is not None
+    assert result.runtime_evidence.harness_result_path.exists()
+
+
+def test_run_signal_test_id_missing_neighbor_records_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe_with_signal",
+        timeout_seconds=30,
+        expect_neighbor_update=True,
+    )
+    run_id = "run-signal-fail"
+    actual_sha = runner.validate_target(spec, java_version="21").sha256
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload={
+                "schema_version": 1,
+                "test_id": "block_state_probe_with_signal",
+                "target_mod_id": "pdagentl11",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "runtime_target_path": str(tmp_path / "build" / "libs" / "target.jar"),
+                "runtime_target_sha256": actual_sha,
+                "target_sha_match": True,
+                "server_started": True,
+                "functional_test_result": "FAIL",
+                "neighbor_update_triggered": False,
+                "reason": "neighbor update was not observed",
+                "shutdown_requested": True,
+            },
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.FAIL
+    assert result.reason == "neighbor update was not observed"
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.harness_result_path is not None
+    assert result.runtime_evidence.harness_result_path.exists()
+
+
 def test_run_functional_fail_classifies_fail(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_jar(tmp_path)
     runner = _runner(tmp_path)

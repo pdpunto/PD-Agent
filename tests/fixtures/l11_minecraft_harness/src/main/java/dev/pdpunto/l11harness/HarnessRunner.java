@@ -15,12 +15,14 @@ import dev.pdpunto.l11.ExampleMod;
 final class HarnessRunner {
     private static final BlockPos CONTROLLED_POS = new BlockPos(8, 64, 8);
     private static final BlockPos SIGNAL_POS = CONTROLLED_POS.east();
+    private static final long NEIGHBOR_WAIT_CAP_MILLIS = 5_000L;
 
     private HarnessRunner() {
     }
 
     static HarnessResult run(MinecraftServer server, HarnessConfig config, HarnessRuntimeOptions options) {
         HarnessIdentity identity = TargetIdentityProbe.inspect(config.targetModId(), config.targetSha256());
+        long neighborWaitMillis = boundedNeighborWaitMillis(options.hangMillis());
         if (!identity.targetLoaded()) {
             return HarnessResult.infraError(config, identity.reason(), identity);
         }
@@ -46,12 +48,12 @@ final class HarnessRunner {
         );
         world.setBlockState(CONTROLLED_POS, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         if (config.expectNeighborUpdate()) {
-            waitForObserverPowered(world, false, options.hangMillis());
+            waitForObserverPowered(world, false, neighborWaitMillis);
         }
         HarnessSignals.reset();
         boolean changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
         BlockState actual = world.getBlockState(CONTROLLED_POS);
-        boolean neighborTriggered = config.expectNeighborUpdate() && waitForObserverPowered(world, true, options.hangMillis());
+        boolean neighborTriggered = config.expectNeighborUpdate() && waitForObserverPowered(world, true, neighborWaitMillis);
         if (neighborTriggered) {
             HarnessSignals.markNeighborUpdateTriggered();
         }
@@ -72,6 +74,11 @@ final class HarnessRunner {
         }
 
         return HarnessResult.pass(config, identity, neighborTriggered);
+    }
+
+    private static long boundedNeighborWaitMillis(long requestedMillis) {
+        long bounded = Math.min(Math.max(requestedMillis, 250L), NEIGHBOR_WAIT_CAP_MILLIS);
+        return bounded;
     }
 
     private static ServerWorld waitForOverworld(MinecraftServer server, long timeoutMillis) {
