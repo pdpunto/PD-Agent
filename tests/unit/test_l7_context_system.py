@@ -210,6 +210,36 @@ def test_project_and_run_summaries_present(tmp_path: Path) -> None:
     assert "artifact-result" in labels
 
 
+def test_run_summary_exposes_budget_and_phase(tmp_path: Path) -> None:
+    root = make_dirty_git_project(tmp_path / "budget")
+    snapshot = __import__("pd_agent.project", fromlist=["ProjectInspector"]).ProjectInspector().inspect(root)
+    run_state = RunState(
+        project_root=root,
+        task="build",
+        state=RunStatus.PLANNING,
+        current_plan="inspect, act",
+        changed_files=("src/Main.java",),
+        tool_call_count=2,
+        agent_step_count=3,
+        build_attempt_count=1,
+        last_error="none",
+    )
+    limits = ExecutionLimits(max_agent_steps=5, max_tool_calls=7, max_build_attempts=4)
+
+    bundle = _context_manager(max_context_bytes=16_384).build_context(
+        project_snapshot=snapshot,
+        run_state=run_state,
+        limits=limits,
+    )
+
+    text = bundle.to_text()
+    assert "phase: PLANNING" in text
+    assert "agent_steps_remaining: 2" in text
+    assert "tool_calls_remaining: 5" in text
+    assert "build_attempts_remaining: 3" in text
+    assert "logical_provider_request_count" in text
+
+
 def test_utf8_truncation_is_explicit_and_valid(tmp_path: Path) -> None:
     root = make_dirty_git_project(tmp_path / "unicode")
     snapshot = __import__("pd_agent.project", fromlist=["ProjectInspector"]).ProjectInspector().inspect(root)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
 
-from pd_agent.core import BuildResult
+from pd_agent.core import BuildResult, ExecutionLimits
 from pd_agent.project import ProjectSnapshot
 from pd_agent.reporting.redaction import json_ready
 
@@ -68,7 +68,7 @@ class RunContextSource:
                 source=self.name,
                 priority=30,
                 label="run-state",
-                content=_run_state_summary(run_state),
+                content=_run_state_summary(run_state, request.limits),
                 metadata={
                     "run_id": run_state.run_id,
                     "state": run_state.state.value,
@@ -205,19 +205,36 @@ def _project_structure(snapshot: ProjectSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _run_state_summary(run_state) -> str:
+def _run_state_summary(run_state, limits: ExecutionLimits | None) -> str:
     lines = [
         f"run_id: {run_state.run_id}",
         f"task: {run_state.task}",
         f"state: {run_state.state.value}",
         f"current_plan: {run_state.current_plan}",
         f"changed_files: {list(run_state.changed_files)}",
+        f"phase: {run_state.state.value}",
         f"tool_call_count: {run_state.tool_call_count}",
         f"agent_step_count: {run_state.agent_step_count}",
+        f"logical_provider_request_count: {run_state.logical_provider_request_count}",
         f"build_attempt_count: {run_state.build_attempt_count}",
         f"last_error: {run_state.last_error}",
         f"termination_reason: {run_state.termination_reason}",
     ]
+    if limits is not None:
+        lines.extend(
+            [
+                "budget:",
+                f"- agent_steps_used: {run_state.agent_step_count}",
+                f"- agent_steps_max: {limits.max_agent_steps}",
+                f"- agent_steps_remaining: {max(limits.max_agent_steps - run_state.agent_step_count, 0)}",
+                f"- tool_calls_used: {run_state.tool_call_count}",
+                f"- tool_calls_max: {limits.max_tool_calls}",
+                f"- tool_calls_remaining: {max(limits.max_tool_calls - run_state.tool_call_count, 0)}",
+                f"- build_attempts_used: {run_state.build_attempt_count}",
+                f"- build_attempts_max: {limits.max_build_attempts}",
+                f"- build_attempts_remaining: {max(limits.max_build_attempts - run_state.build_attempt_count, 0)}",
+            ]
+        )
     return "\n".join(lines)
 
 

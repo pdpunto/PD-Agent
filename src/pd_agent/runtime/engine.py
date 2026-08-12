@@ -6,11 +6,11 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
-from pd_agent.context import ContextManager
+from pd_agent.context import ContextItem, ContextManager
 from pd_agent.core import (
     AgentMessage,
     AgentRequest,
@@ -39,6 +39,17 @@ class _LoopTelemetry:
     failure_repeat_count: int = 0
     last_tool_signature: str | None = None
     tool_repeat_count: int = 0
+    consecutive_inspection_steps: int = 0
+    recent_inspection_tools: tuple[str, ...] = ()
+    recent_inspected_paths: tuple[str, ...] = ()
+    last_operational_progress_step: int = 0
+    action_pressure_level: str = "normal"
+
+
+_INSPECTION_TOOLS = frozenset({"list_directory", "read_file", "search_text"})
+_ACTION_ESCALATION_STEP = 4
+_ACTION_STALL_STEP = 8
+_RECENT_HISTORY_LIMIT = 8
 
 
 class AgentRuntime:
@@ -150,6 +161,15 @@ class AgentRuntime:
                         run_state.termination_reason = "tool rejected"
                         break
 
+                    self._record_action_telemetry(
+                        run_state,
+                        tool_calls=response.tool_calls,
+                        tool_results=tool_results,
+                    )
+                    if run_state.state.is_terminal():
+                        self._persist_state(run_state)
+                        break
+
                     pending_tool_calls = response.tool_calls
                     pending_tool_results = tool_results
                     pending_provider_continuations = response.provider_continuations
@@ -185,6 +205,10 @@ class AgentRuntime:
                     self._check_limits(run_state, limits)
                     build_result = self.build_runner.run(project_snapshot, run_state, limits)
                     self._observe_progress(run_state, build_result=build_result)
+                    self._record_action_telemetry(
+                        run_state,
+                        build_result=build_result,
+                    )
                     if run_state.state.is_terminal():
                         self._persist_state(run_state)
                         break
@@ -261,10 +285,11 @@ class AgentRuntime:
         tool_results: tuple[ToolResult, ...],
         provider_continuations: tuple[ProviderContinuation, ...],
     ) -> Any:
+        policy_context = self._build_action_transition_context(run_state, limits)
         bundle = self.context_manager.build_context(
             project_snapshot=project_snapshot,
             run_state=run_state,
-            external_context=external_context,
+            external_context=(policy_context, *external_context),
             limits=limits,
         )
         self._persist_knowledge_traces(run_state.run_id)
@@ -408,6 +433,88 @@ class AgentRuntime:
     def _summary(self, run_state: RunState) -> str:
         return f"state={run_state.state.value} steps={run_state.agent_step_count} tools={run_state.tool_call_count} builds={run_state.build_attempt_count}"
 
+    def _build_action_transition_context(self, run_state: RunState, limits: ExecutionLimits) -> ContextItem:
+        telemetry = self._telemetry
+        remaining_agent_steps = max(limits.max_agent_steps - run_state.agent_step_count, 0)
+        remaining_tool_calls = max(limits.max_tool_calls - run_state.tool_call_count, 0)
+        remaining_build_attempts = max(limits.max_build_attempts - run_state.build_attempt_count, 0)
+        policy_lines = self._action_policy_lines(run_state)
+        content_lines = [
+            f"phase: {run_state.state.value}",
+            "budget:",
+            f"- agent_steps_used: {run_state.agent_step_count}",
+            f"- agent_steps_max: {limits.max_agent_steps}",
+            f"- agent_steps_remaining: {remaining_agent_steps}",
+            f"- tool_calls_used: {run_state.tool_call_count}",
+            f"- tool_calls_max: {limits.max_tool_calls}",
+            f"- tool_calls_remaining: {remaining_tool_calls}",
+            f"- build_attempts_used: {run_state.build_attempt_count}",
+            f"- build_attempts_max: {limits.max_build_attempts}",
+            f"- build_attempts_remaining: {remaining_build_attempts}",
+            "progress:",
+            f"- files_changed: {list(run_state.changed_files)}",
+            f"- build_attempted: {bool(run_state.build_results)}",
+            f"- consecutive_inspection_steps: {telemetry.consecutive_inspection_steps}",
+            f"- recent_inspection_tools: {list(telemetry.recent_inspection_tools)}",
+            f"- recent_inspected_paths: {list(telemetry.recent_inspected_paths)}",
+            f"- last_operational_progress_step: {telemetry.last_operational_progress_step}",
+            f"- escalation_state: {telemetry.action_pressure_level}",
+            "policy:",
+            *policy_lines,
+        ]
+        return ContextItem.from_text(
+            source="runtime",
+            priority=5,
+            label="action-transition-policy",
+            content="\n".join(content_lines),
+            metadata={
+                "phase": run_state.state.value,
+                "agent_steps_remaining": remaining_agent_steps,
+                "tool_calls_remaining": remaining_tool_calls,
+                "build_attempts_remaining": remaining_build_attempts,
+                "consecutive_inspection_steps": telemetry.consecutive_inspection_steps,
+                "escalation_state": telemetry.action_pressure_level,
+            },
+        )
+
+    def _action_policy_lines(self, run_state: RunState) -> tuple[str, ...]:
+        if run_state.state == RunStatus.DIAGNOSING:
+            phase_goal = "Investigate the build error only as needed to choose a concrete correction."
+            phase_rules = (
+                "- Use build errors as evidence for the next fix.",
+                "- Inspect only the files or symbols directly implicated by the failure.",
+                "- Once the cause is understood, correct it and return to build.",
+            )
+        elif run_state.state == RunStatus.CORRECTING:
+            phase_goal = "Apply the concrete correction suggested by the diagnosis and build again."
+            phase_rules = (
+                "- Make the smallest plausible change that addresses the verified cause.",
+                "- Prefer a quick build after the edit.",
+                "- Do not keep re-reading the same files without new evidence.",
+            )
+        elif run_state.state == RunStatus.EDITING:
+            phase_goal = "Make the concrete change implied by the gathered evidence."
+            phase_rules = (
+                "- Prefer an implementable edit over more exploration.",
+                "- Keep the change minimal and directly tied to the task.",
+                "- Build early after a plausible edit.",
+            )
+        else:
+            phase_goal = "Gather only enough evidence to choose and execute the next concrete action."
+            phase_rules = (
+                "- Inspect only what is directly required for the task.",
+                "- Do not repeat equivalent exploration without new evidence.",
+                "- Once evidence is sufficient, perform a concrete modification.",
+                "- Prefer an early build after a plausible implementation.",
+            )
+        return (
+            f"- current_phase: {run_state.state.value}",
+            f"- goal: {phase_goal}",
+            "- inspection alone is not progress.",
+            *phase_rules,
+            "- Use actual build errors as evidence for subsequent correction.",
+        )
+
     def _limits_usage(self, run_state: RunState, limits: ExecutionLimits) -> dict[str, int]:
         return {
             "agent_steps": run_state.agent_step_count,
@@ -457,6 +564,75 @@ class AgentRuntime:
                 run_state.state = RunStatus.FAILED
                 run_state.termination_reason = "repeated build failure"
                 return
+
+    def _record_action_telemetry(
+        self,
+        run_state: RunState,
+        *,
+        tool_calls: tuple[ToolCall, ...] = (),
+        tool_results: tuple[ToolResult, ...] = (),
+        build_result: BuildResult | None = None,
+    ) -> None:
+        progress_detected = False
+        if build_result is not None and build_result.success:
+            progress_detected = True
+            self._telemetry.last_operational_progress_step = run_state.agent_step_count
+        if tool_results and self._tool_results_have_change(tool_results):
+            progress_detected = True
+            self._telemetry.last_operational_progress_step = run_state.agent_step_count
+
+        inspection_only_step = bool(tool_calls) and all(call.tool_name in _INSPECTION_TOOLS for call in tool_calls)
+        if progress_detected:
+            self._telemetry.consecutive_inspection_steps = 0
+            self._telemetry.action_pressure_level = "normal"
+            return
+
+        if not inspection_only_step:
+            return
+
+        self._telemetry.consecutive_inspection_steps += 1
+        self._telemetry.recent_inspection_tools = self._tail_strings(
+            self._telemetry.recent_inspection_tools,
+            tuple(call.tool_name for call in tool_calls),
+            limit=_RECENT_HISTORY_LIMIT,
+        )
+        self._telemetry.recent_inspected_paths = self._tail_strings(
+            self._telemetry.recent_inspected_paths,
+            self._inspection_paths(tool_results),
+            limit=_RECENT_HISTORY_LIMIT,
+        )
+        if self._telemetry.consecutive_inspection_steps >= _ACTION_STALL_STEP:
+            self._telemetry.action_pressure_level = "stalled"
+            run_state.state = RunStatus.FAILED
+            run_state.termination_reason = "exploration stalled without operational progress"
+        elif self._telemetry.consecutive_inspection_steps >= _ACTION_ESCALATION_STEP:
+            self._telemetry.action_pressure_level = "action_required"
+        else:
+            self._telemetry.action_pressure_level = "normal"
+
+    def _inspection_paths(self, tool_results: tuple[ToolResult, ...]) -> tuple[str, ...]:
+        paths: list[str] = []
+        for result in tool_results:
+            output = result.output
+            if not isinstance(output, Mapping):
+                continue
+            if result.tool_name == "search_text":
+                raw_paths = output.get("paths", ())
+                if isinstance(raw_paths, Sequence) and not isinstance(raw_paths, (str, bytes, bytearray)):
+                    paths.extend(str(path) for path in raw_paths)
+                continue
+            path = output.get("path")
+            if path is not None:
+                paths.append(str(path))
+        return tuple(paths)
+
+    def _tail_strings(self, existing: tuple[str, ...], new_items: tuple[str, ...], *, limit: int) -> tuple[str, ...]:
+        if not new_items:
+            return existing
+        combined = (*existing, *new_items)
+        if len(combined) <= limit:
+            return combined
+        return combined[-limit:]
     def _tool_signature(self, tool_results: tuple[ToolResult, ...]) -> str:
         payload = [
             {
