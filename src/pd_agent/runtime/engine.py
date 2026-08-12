@@ -286,6 +286,8 @@ class AgentRuntime:
                 "model_config": self._safe_model_config(request.model_config),
             },
         )
+        run_state.record_logical_provider_request()
+        self._persist_state(run_state)
         try:
             return self.provider.execute(request)
         except ProviderError as exc:
@@ -409,6 +411,7 @@ class AgentRuntime:
     def _limits_usage(self, run_state: RunState, limits: ExecutionLimits) -> dict[str, int]:
         return {
             "agent_steps": run_state.agent_step_count,
+            "logical_provider_request_count": run_state.logical_provider_request_count,
             "tool_calls": run_state.tool_call_count,
             "build_attempts": run_state.build_attempt_count,
             "max_agent_steps": limits.max_agent_steps,

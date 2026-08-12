@@ -161,6 +161,7 @@ class RunState:
     changed_files: tuple[str, ...] = ()
     tool_call_count: int = 0
     agent_step_count: int = 0
+    logical_provider_request_count: int = 0
     build_attempt_count: int = 0
     build_results: tuple[BuildResult, ...] = ()
     artifact_result: ArtifactResult | None = None
@@ -189,6 +190,9 @@ class RunState:
 
     def record_agent_step(self) -> None:
         self.agent_step_count += 1
+
+    def record_logical_provider_request(self) -> None:
+        self.logical_provider_request_count += 1
 
     def record_tool_call(self) -> None:
         self.tool_call_count += 1
@@ -231,6 +235,7 @@ class RunState:
             "changed_files": list(self.changed_files),
             "tool_call_count": self.tool_call_count,
             "agent_step_count": self.agent_step_count,
+            "logical_provider_request_count": self.logical_provider_request_count,
             "build_attempt_count": self.build_attempt_count,
             "build_results": [item.to_dict() for item in self.build_results],
             "artifact_result": (
@@ -261,6 +266,7 @@ class RunState:
             changed_files=tuple(data.get("changed_files", ())),
             tool_call_count=int(data.get("tool_call_count", 0)),
             agent_step_count=int(data.get("agent_step_count", 0)),
+            logical_provider_request_count=int(data.get("logical_provider_request_count", 0)),
             build_attempt_count=int(data.get("build_attempt_count", 0)),
             build_results=tuple(
                 BuildResult.from_dict(item) for item in data.get("build_results", [])

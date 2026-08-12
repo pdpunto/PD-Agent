@@ -72,6 +72,10 @@ def _logical_tool_calls(events: Sequence[RunEvent]) -> tuple[tuple[str, str | No
     return tuple(ordered)
 
 
+def _model_call_count(events: Sequence[RunEvent]) -> int:
+    return sum(1 for event in events if event.event_type == RunEventType.MODEL_CALLED)
+
+
 def _trace_provenance_refs(trace: KnowledgeTrace) -> tuple[str, ...]:
     refs: list[str] = []
     for attempt in trace.source_attempts:
@@ -161,6 +165,7 @@ class BenchmarkCollection:
     tool_call_count: int | None = None
     tool_names: tuple[str, ...] = ()
     agent_step_count: int | None = None
+    logical_provider_request_count: int | None = None
     duration_seconds: float | None = None
     usage: Mapping[str, Any] | None = None
     provider_metadata: Mapping[str, Any] | None = None
@@ -223,6 +228,7 @@ class BenchmarkCollection:
             "tool_call_count": self.tool_call_count,
             "tool_names": list(self.tool_names),
             "agent_step_count": self.agent_step_count,
+            "logical_provider_request_count": self.logical_provider_request_count,
             "duration_seconds": self.duration_seconds,
             "usage": json_ready(dict(self.usage)) if self.usage is not None else None,
             "provider_metadata": (
@@ -281,6 +287,7 @@ class BenchmarkCollection:
             tool_call_count=data.get("tool_call_count"),
             tool_names=tuple(str(item) for item in data.get("tool_names", [])),
             agent_step_count=data.get("agent_step_count"),
+            logical_provider_request_count=data.get("logical_provider_request_count"),
             duration_seconds=data.get("duration_seconds"),
             usage=dict(data.get("usage", {})) if data.get("usage") is not None else None,
             provider_metadata=dict(data.get("provider_metadata", {})) if data.get("provider_metadata") is not None else None,
@@ -369,6 +376,7 @@ class BenchmarkCollector:
                 inconsistencies.append("artifact_contradiction")
 
         logical_tool_calls = _logical_tool_calls(events)
+        model_call_count = _model_call_count(events)
         tool_names = self._tool_names(logical_tool_calls)
         tool_call_count = run_state.tool_call_count if run_state is not None else None
         if tool_call_count is not None and logical_tool_calls:
@@ -376,6 +384,14 @@ class BenchmarkCollector:
                 inconsistencies.append("tool_call_mismatch")
         if run_state is not None and build_attempts and run_state.build_attempt_count != len(build_attempts):
             inconsistencies.append("build_count_mismatch")
+        logical_provider_request_count = run_state.logical_provider_request_count if run_state is not None else None
+        if (
+            run_state is not None
+            and logical_provider_request_count is not None
+            and logical_provider_request_count != model_call_count
+            and (logical_provider_request_count > 0 or model_call_count == 0)
+        ):
+            inconsistencies.append("logical_provider_request_mismatch")
 
         provider_metadata = self._provider_metadata(provider_response, events, run_state=run_state)
         usage = self._usage(provider_response, events)
@@ -421,6 +437,7 @@ class BenchmarkCollector:
             tool_call_count=tool_call_count,
             build_count=len(build_attempts) if build_attempts else None,
             agent_step_count=run_state.agent_step_count if run_state is not None else None,
+            logical_provider_request_count=logical_provider_request_count,
             input_tokens=usage.get("input_tokens") if usage is not None else None,
             output_tokens=usage.get("output_tokens") if usage is not None else None,
             total_tokens=usage.get("total_tokens") if usage is not None else None,
@@ -460,6 +477,7 @@ class BenchmarkCollector:
             tool_call_count=tool_call_count,
             tool_names=tool_names,
             agent_step_count=run_state.agent_step_count if run_state is not None else None,
+            logical_provider_request_count=logical_provider_request_count,
             duration_seconds=duration_seconds,
             usage=usage,
             provider_metadata=provider_metadata or None,

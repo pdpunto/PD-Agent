@@ -185,6 +185,7 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
         changed_files=("src/main/java/dev/p/A.java",),
         tool_call_count=2,
         agent_step_count=3,
+        logical_provider_request_count=1,
         build_attempt_count=1,
         build_results=(
             BuildResult(
@@ -219,7 +220,7 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
         build_attempts=run_state.build_results,
         final_build=run_state.build_results[-1],
         artifact=run_state.artifact_result,
-        limits_usage={"tool_calls": 2},
+        limits_usage={"tool_calls": 2, "logical_provider_request_count": 1},
         termination_reason="completed",
         evidence_refs=(),
         generated_at=_utc("2026-08-11T10:00:12"),
@@ -281,6 +282,7 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
     assert collection.tool_names == ("write_file", "read_file")
     assert collection.usage == {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
     assert collection.provider_metadata == {"provider": "gemini", "model": "gemini-3.1-flash-lite"}
+    assert collection.logical_provider_request_count == 1
     assert collection.retrieved_item_ids == ("yarn:item:1",)
     assert collection.selected_item_ids == ("yarn:item:1",)
     assert collection.injected_item_ids == ("yarn:item:1",)
@@ -289,6 +291,7 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
     assert collection.metrics.output_tokens == 7
     assert collection.metrics.total_tokens == 18
     assert collection.metrics.build_count == 1
+    assert collection.metrics.logical_provider_request_count == 1
     assert collection.minecraft_result is not None and collection.minecraft_result.passed
     assert collection.environment_identity is not None
     assert collection.environment_identity["detected_versions"]["minecraft"] == "1.21.11"
@@ -368,6 +371,65 @@ def test_collects_none_semantics_and_brain_off_zeroes(tmp_path: Path) -> None:
     assert collection.selected_count == 0
     assert collection.injected_count == 0
     assert collection.inconsistencies == ()
+
+
+def test_collects_legacy_model_called_without_logical_count_is_tolerated(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "22222222-2222-4222-8222-222222222223"
+    run_state = RunState(
+        run_id=run_id,
+        task="inspect",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T11:10:00"),
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="no-op",
+            generated_at=_utc("2026-08-11T11:10:01"),
+        )
+    )
+    writer = storage.event_writer(run_id)
+    writer.append(RunEvent(run_id=run_id, event_type=RunEventType.MODEL_CALLED, payload={"model_config": {}}))
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.logical_provider_request_count == 0
+    assert collection.inconsistencies == ()
+
+
+def test_logical_provider_request_mismatch_is_reported_for_non_legacy_evidence(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "22222222-2222-4222-8222-222222222224"
+    run_state = RunState(
+        run_id=run_id,
+        task="inspect",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T11:20:00"),
+        logical_provider_request_count=2,
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="no-op",
+            generated_at=_utc("2026-08-11T11:20:01"),
+        )
+    )
+    writer = storage.event_writer(run_id)
+    writer.append(RunEvent(run_id=run_id, event_type=RunEventType.MODEL_CALLED, payload={"model_config": {}}))
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.logical_provider_request_count == 2
+    assert "logical_provider_request_mismatch" in collection.inconsistencies
 
 
 def test_collects_contradictions_as_inconsistencies(tmp_path: Path) -> None:

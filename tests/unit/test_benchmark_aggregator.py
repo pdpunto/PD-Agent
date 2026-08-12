@@ -33,6 +33,7 @@ def _metrics(
     tool_calls: float | None = None,
     builds: float | None = None,
     steps: float | None = None,
+    logical_provider_requests: float | None = None,
     input_tokens: float | None = None,
     output_tokens: float | None = None,
     total_tokens: float | None = None,
@@ -43,6 +44,7 @@ def _metrics(
         tool_call_count=tool_calls,
         build_count=builds,
         agent_step_count=steps,
+        logical_provider_request_count=logical_provider_requests,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
@@ -80,12 +82,12 @@ def test_three_of_three_pass_and_complete_comparison() -> None:
     config_a = _config("cfg-off", seed=1)
     config_b = _config("cfg-on", seed=2)
     runs = [
-        _run(run_id="a-1", task_id="B001", task_version="1", config=config_a, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=10, tool_calls=2, builds=1, steps=3, total_tokens=100)),
-        _run(run_id="a-2", task_id="B001", task_version="1", config=config_a, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=12, tool_calls=3, builds=1, steps=4, total_tokens=110)),
-        _run(run_id="a-3", task_id="B001", task_version="1", config=config_a, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=14, tool_calls=4, builds=1, steps=5, total_tokens=120)),
-        _run(run_id="b-1", task_id="B001", task_version="1", config=config_b, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=11, tool_calls=2, builds=1, steps=3, total_tokens=100)),
-        _run(run_id="b-2", task_id="B001", task_version="1", config=config_b, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL, metrics=_metrics(duration=13, tool_calls=3, builds=1, steps=4, total_tokens=110)),
-        _run(run_id="b-3", task_id="B001", task_version="1", config=config_b, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL, metrics=_metrics(duration=15, tool_calls=4, builds=1, steps=5, total_tokens=120)),
+        _run(run_id="a-1", task_id="B001", task_version="1", config=config_a, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=10, tool_calls=2, builds=1, steps=3, logical_provider_requests=2, total_tokens=100)),
+        _run(run_id="a-2", task_id="B001", task_version="1", config=config_a, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=12, tool_calls=3, builds=1, steps=4, logical_provider_requests=3, total_tokens=110)),
+        _run(run_id="a-3", task_id="B001", task_version="1", config=config_a, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=14, tool_calls=4, builds=1, steps=5, logical_provider_requests=4, total_tokens=120)),
+        _run(run_id="b-1", task_id="B001", task_version="1", config=config_b, repetition_index=0, attempt_index=1, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.PASS, metrics=_metrics(duration=11, tool_calls=2, builds=1, steps=3, logical_provider_requests=2, total_tokens=100)),
+        _run(run_id="b-2", task_id="B001", task_version="1", config=config_b, repetition_index=1, attempt_index=2, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL, metrics=_metrics(duration=13, tool_calls=3, builds=1, steps=4, logical_provider_requests=3, total_tokens=110)),
+        _run(run_id="b-3", task_id="B001", task_version="1", config=config_b, repetition_index=2, attempt_index=3, status=BenchmarkExecutionStatus.COMPLETED, outcome=BenchmarkTaskOutcome.FAIL, metrics=_metrics(duration=15, tool_calls=4, builds=1, steps=5, logical_provider_requests=4, total_tokens=120)),
     ]
 
     comparison = BenchmarkAggregator().aggregate(
@@ -106,6 +108,8 @@ def test_three_of_three_pass_and_complete_comparison() -> None:
     assert comparison.aggregate_metadata["macro_success_rates"]["cfg-off:" + config_a.config_hash()]["macro_success_rate"] == 1.0
     assert comparison.aggregate_metadata["macro_success_rates"]["cfg-on:" + config_b.config_hash()]["macro_success_rate"] == 1 / 3
     assert comparison.aggregate_metadata["equal_macro_success_rate"] is False
+    assert comparison.cell_results[0].metrics is not None
+    assert comparison.cell_results[0].metrics.logical_provider_request_count == BenchmarkMetricSummary(median=3.0, minimum=2.0, maximum=4.0, observations=3)
     assert BenchmarkComparison.from_dict(comparison.to_dict()) == comparison
 
 

@@ -109,17 +109,19 @@ def _aggregate_metrics(runs: Sequence[BenchmarkRun]) -> BenchmarkAggregateMetric
     tool_calls = _metric_summary([run.metrics.tool_call_count if run.metrics is not None else None for run in runs])
     builds = _metric_summary([run.metrics.build_count if run.metrics is not None else None for run in runs])
     steps = _metric_summary([run.metrics.agent_step_count if run.metrics is not None else None for run in runs])
+    logical_requests = _metric_summary([run.metrics.logical_provider_request_count if run.metrics is not None else None for run in runs])
     input_tokens = _metric_summary([run.metrics.input_tokens if run.metrics is not None else None for run in runs])
     output_tokens = _metric_summary([run.metrics.output_tokens if run.metrics is not None else None for run in runs])
     total_tokens = _metric_summary([run.metrics.total_tokens if run.metrics is not None else None for run in runs])
     cost = _metric_summary([run.metrics.cost if run.metrics is not None else None for run in runs])
-    if all(summary is None for summary in (duration, tool_calls, builds, steps, input_tokens, output_tokens, total_tokens, cost)):
+    if all(summary is None for summary in (duration, tool_calls, builds, steps, logical_requests, input_tokens, output_tokens, total_tokens, cost)):
         return None
     return BenchmarkAggregateMetrics(
         duration_seconds=duration,
         tool_call_count=tool_calls,
         build_count=builds,
         agent_step_count=steps,
+        logical_provider_request_count=logical_requests,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
@@ -261,8 +263,8 @@ class BenchmarkAggregator:
                 lines.append(f"- `{config.config_id}` `{config.config_hash()}` provider=`{config.provider}` model=`{config.model}` brain=`{config.brain_enabled}`")
             lines.append("")
         lines.append("## Cells")
-        lines.append("| Task | Config | Attempted | Valid | Pass | Fail | Blocked | Invalid | Target | Complete | Success rate | Duration | Tool calls | Builds | Agent steps | Tokens | Cost |")
-        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |")
+        lines.append("| Task | Config | Attempted | Valid | Pass | Fail | Blocked | Invalid | Target | Complete | Success rate | Duration | Tool calls | Builds | Agent steps | Logical provider requests | Tokens | Cost |")
+        lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
         for cell in comparison.cell_results:
             metrics = cell.metrics
             lines.append(
@@ -284,6 +286,7 @@ class BenchmarkAggregator:
                         _format_summary(metrics.tool_call_count) if metrics is not None else "-",
                         _format_summary(metrics.build_count) if metrics is not None else "-",
                         _format_summary(metrics.agent_step_count) if metrics is not None else "-",
+                        _format_summary(metrics.logical_provider_request_count) if metrics is not None else "-",
                         _format_summary(metrics.total_tokens) if metrics is not None else "-",
                         _format_summary(metrics.cost) if metrics is not None else "-",
                     ]

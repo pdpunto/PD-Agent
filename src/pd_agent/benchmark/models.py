@@ -505,6 +505,7 @@ class BenchmarkMetrics:
     tool_call_count: int | None = None
     build_count: int | None = None
     agent_step_count: int | None = None
+    logical_provider_request_count: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
@@ -521,6 +522,7 @@ class BenchmarkMetrics:
             "tool_call_count": self.tool_call_count,
             "build_count": self.build_count,
             "agent_step_count": self.agent_step_count,
+            "logical_provider_request_count": self.logical_provider_request_count,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
@@ -536,6 +538,7 @@ class BenchmarkMetrics:
             tool_call_count=data.get("tool_call_count"),
             build_count=data.get("build_count"),
             agent_step_count=data.get("agent_step_count"),
+            logical_provider_request_count=data.get("logical_provider_request_count"),
             input_tokens=data.get("input_tokens"),
             output_tokens=data.get("output_tokens"),
             total_tokens=data.get("total_tokens"),
@@ -586,6 +589,7 @@ class BenchmarkAggregateMetrics:
     tool_call_count: BenchmarkMetricSummary | None = None
     build_count: BenchmarkMetricSummary | None = None
     agent_step_count: BenchmarkMetricSummary | None = None
+    logical_provider_request_count: BenchmarkMetricSummary | None = None
     input_tokens: BenchmarkMetricSummary | None = None
     output_tokens: BenchmarkMetricSummary | None = None
     total_tokens: BenchmarkMetricSummary | None = None
@@ -602,6 +606,7 @@ class BenchmarkAggregateMetrics:
             "tool_call_count": self.tool_call_count.to_dict() if self.tool_call_count is not None else None,
             "build_count": self.build_count.to_dict() if self.build_count is not None else None,
             "agent_step_count": self.agent_step_count.to_dict() if self.agent_step_count is not None else None,
+            "logical_provider_request_count": self.logical_provider_request_count.to_dict() if self.logical_provider_request_count is not None else None,
             "input_tokens": self.input_tokens.to_dict() if self.input_tokens is not None else None,
             "output_tokens": self.output_tokens.to_dict() if self.output_tokens is not None else None,
             "total_tokens": self.total_tokens.to_dict() if self.total_tokens is not None else None,
@@ -636,6 +641,11 @@ class BenchmarkAggregateMetrics:
             agent_step_count=(
                 BenchmarkMetricSummary.from_dict(dict(data["agent_step_count"]))
                 if data.get("agent_step_count") is not None
+                else None
+            ),
+            logical_provider_request_count=(
+                BenchmarkMetricSummary.from_dict(dict(data["logical_provider_request_count"]))
+                if data.get("logical_provider_request_count") is not None
                 else None
             ),
             input_tokens=(

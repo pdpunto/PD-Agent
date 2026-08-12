@@ -198,6 +198,44 @@ def test_model_response_usage_is_persisted_in_events(tmp_path: Path) -> None:
     assert model_events[0].payload["usage"] == {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
 
 
+def test_logical_provider_request_count_is_authoritative_and_persisted(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "logical-count", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="plan",
+                tool_calls=(),
+                usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                provider_metadata={"provider": "fake", "model": "fake-model"},
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "count requests")
+
+    assert run_state.logical_provider_request_count == 1
+    assert len(provider.requests) == 1
+    assert report.limits_usage is not None
+    assert report.limits_usage["logical_provider_request_count"] == 1
+    assert storage.read_run_state(run_state.run_id).logical_provider_request_count == 1
+
+
+def test_logical_provider_request_count_increments_before_provider_error(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "logical-error", build_state="pass")
+    provider = ScriptedProvider([ProviderError("boom", kind="protocol", provider="fake", retryable=False)])
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "provider fails")
+
+    assert run_state.state.value == "FAILED"
+    assert run_state.logical_provider_request_count == 1
+    assert len(provider.requests) == 1
+    assert report.limits_usage is not None
+    assert report.limits_usage["logical_provider_request_count"] == 1
+    assert storage.read_run_state(run_state.run_id).logical_provider_request_count == 1
+
+
 def test_build_fail_diagnose_correct_rebuild(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "repair", build_state="fail")
     provider = ScriptedProvider(

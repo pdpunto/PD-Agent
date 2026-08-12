@@ -162,6 +162,21 @@ def test_counters_and_limits() -> None:
         run_state.raise_if_limits_reached(limits)
 
 
+def test_logical_provider_request_counter_tracks_and_round_trips() -> None:
+    run_state = RunState()
+
+    assert run_state.logical_provider_request_count == 0
+
+    run_state.record_logical_provider_request()
+    run_state.record_logical_provider_request()
+
+    assert run_state.logical_provider_request_count == 2
+    payload = run_state.to_dict()
+
+    assert payload["logical_provider_request_count"] == 2
+    assert RunState.from_dict(payload).logical_provider_request_count == 2
+
+
 def test_serialization_round_trip() -> None:
     build_result = BuildResult(
         attempt=1,
@@ -188,6 +203,7 @@ def test_serialization_round_trip() -> None:
         changed_files=("src/Main.java", "README.md"),
         tool_call_count=3,
         agent_step_count=2,
+        logical_provider_request_count=4,
         build_attempt_count=1,
         build_results=(build_result,),
         artifact_result=artifact_result,
