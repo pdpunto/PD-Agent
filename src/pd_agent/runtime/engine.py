@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -46,8 +47,21 @@ class _LoopTelemetry:
     action_pressure_level: str = "normal"
 
 
+class ActionGateState(StrEnum):
+    """Gradual tool-exposure gate for exploration drift."""
+
+    NORMAL = "normal"
+    ACTION_REQUIRED = "action_required"
+    FOCUSED_ACTION = "focused_action"
+    ACTION_ONLY = "action_only"
+    STALLED = "stalled"
+
+
 _INSPECTION_TOOLS = frozenset({"list_directory", "read_file", "search_text"})
-_ACTION_ESCALATION_STEP = 4
+_BROAD_INSPECTION_TOOLS = frozenset({"list_directory", "search_text"})
+_ACTION_REQUIRED_STEP = 3
+_FOCUSED_ACTION_STEP = 5
+_ACTION_ONLY_STEP = 7
 _ACTION_STALL_STEP = 8
 _RECENT_HISTORY_LIMIT = 8
 
@@ -114,7 +128,7 @@ class AgentRuntime:
                 self._check_limits(run_state, limits)
 
                 if run_state.state in {RunStatus.PLANNING, RunStatus.DIAGNOSING, RunStatus.CORRECTING}:
-                    response = self._call_provider(
+                    response, offered_tool_names = self._call_provider(
                         run_state=run_state,
                         project_snapshot=project_snapshot,
                         limits=limits,
@@ -151,6 +165,7 @@ class AgentRuntime:
                         run_state=run_state,
                         project_snapshot=project_snapshot,
                         limits=limits,
+                        offered_tool_names=offered_tool_names,
                     )
                     if run_state.state.is_terminal():
                         self._persist_state(run_state)
@@ -286,8 +301,11 @@ class AgentRuntime:
         tool_calls: tuple[ToolCall, ...],
         tool_results: tuple[ToolResult, ...],
         provider_continuations: tuple[ProviderContinuation, ...],
-    ) -> Any:
-        policy_context = self._build_action_transition_context(run_state, limits)
+    ) -> tuple[Any, tuple[str, ...]]:
+        gate_state = self._action_gate_state(self._telemetry)
+        policy_context = self._build_action_transition_context(run_state, limits, gate_state)
+        tool_specs = tuple(self._tool_specs(gate_state))
+        offered_tool_names = tuple(spec["name"] for spec in tool_specs)
         bundle = self.context_manager.build_context(
             project_snapshot=project_snapshot,
             run_state=run_state,
@@ -301,22 +319,31 @@ class AgentRuntime:
             tool_calls=tool_calls,
             tool_results=tool_results,
             provider_continuations=provider_continuations,
-            tools=tuple(self._tool_specs()),
+            tools=tool_specs,
             model_config=self._model_config(run_state, limits),
         )
         self._emit(
             run_state.run_id,
             RunEventType.MODEL_CALLED,
             {
+                "phase": run_state.state.value,
                 "message_count": len(request.messages),
                 "tool_count": len(request.tools),
                 "model_config": self._safe_model_config(request.model_config),
+                "action_gate_state": gate_state.value,
+                "escalation_state": gate_state.value,
+                "action_required": gate_state != ActionGateState.NORMAL,
+                "consecutive_inspection_steps": self._telemetry.consecutive_inspection_steps,
+                "agent_steps_remaining": max(limits.max_agent_steps - run_state.agent_step_count, 0),
+                "tool_calls_remaining": max(limits.max_tool_calls - run_state.tool_call_count, 0),
+                "build_attempts_remaining": max(limits.max_build_attempts - run_state.build_attempt_count, 0),
+                "offered_tool_names": list(offered_tool_names),
             },
         )
         run_state.record_logical_provider_request()
         self._persist_state(run_state)
         try:
-            return self.provider.execute(request)
+            return self.provider.execute(request), offered_tool_names
         except ProviderError as exc:
             run_state.state = RunStatus.FAILED
             run_state.provider_error_kind = exc.kind
@@ -352,9 +379,11 @@ class AgentRuntime:
         run_state: RunState,
         project_snapshot: ProjectSnapshot,
         limits: ExecutionLimits,
+        offered_tool_names: tuple[str, ...],
     ) -> tuple[ToolResult, ...]:
         if not tool_calls:
             return ()
+        _ = offered_tool_names
         context = ToolExecutionContext(project_root=project_snapshot.project_root, limits=limits, run_id=run_state.run_id)
         results: list[ToolResult] = []
         for call in tool_calls:
@@ -400,8 +429,12 @@ class AgentRuntime:
             self._emit(run_state.run_id, RunEventType.RUN_FINISHED, {"final_state": run_state.state.value, "summary": summary})
         return run_state, report
 
-    def _tool_specs(self) -> Iterable[Mapping[str, Any]]:
+    def _tool_specs(self, gate_state: ActionGateState) -> Iterable[Mapping[str, Any]]:
         for tool in self.tool_executor._tools.values():  # noqa: SLF001
+            if gate_state == ActionGateState.FOCUSED_ACTION and tool.name in _BROAD_INSPECTION_TOOLS:
+                continue
+            if gate_state in {ActionGateState.ACTION_ONLY, ActionGateState.STALLED} and tool.name in _INSPECTION_TOOLS:
+                continue
             yield {
                 "name": tool.name,
                 "description": tool.description,
@@ -435,12 +468,12 @@ class AgentRuntime:
     def _summary(self, run_state: RunState) -> str:
         return f"state={run_state.state.value} steps={run_state.agent_step_count} tools={run_state.tool_call_count} builds={run_state.build_attempt_count}"
 
-    def _build_action_transition_context(self, run_state: RunState, limits: ExecutionLimits) -> ContextItem:
+    def _build_action_transition_context(self, run_state: RunState, limits: ExecutionLimits, gate_state: ActionGateState) -> ContextItem:
         telemetry = self._telemetry
         remaining_agent_steps = max(limits.max_agent_steps - run_state.agent_step_count, 0)
         remaining_tool_calls = max(limits.max_tool_calls - run_state.tool_call_count, 0)
         remaining_build_attempts = max(limits.max_build_attempts - run_state.build_attempt_count, 0)
-        policy_lines = self._action_policy_lines(run_state, telemetry)
+        policy_lines = self._action_policy_lines(run_state, telemetry, gate_state)
         content_lines = [
             f"phase: {run_state.state.value}",
             "budget:",
@@ -460,6 +493,7 @@ class AgentRuntime:
             f"- recent_inspection_tools: {list(telemetry.recent_inspection_tools)}",
             f"- recent_inspected_paths: {list(telemetry.recent_inspected_paths)}",
             f"- last_operational_progress_step: {telemetry.last_operational_progress_step}",
+            f"- action_gate_state: {gate_state.value}",
             f"- escalation_state: {telemetry.action_pressure_level}",
             "policy:",
             *policy_lines,
@@ -475,11 +509,13 @@ class AgentRuntime:
                 "tool_calls_remaining": remaining_tool_calls,
                 "build_attempts_remaining": remaining_build_attempts,
                 "consecutive_inspection_steps": telemetry.consecutive_inspection_steps,
+                "action_gate_state": gate_state.value,
                 "escalation_state": telemetry.action_pressure_level,
+                "action_required": gate_state != ActionGateState.NORMAL,
             },
         )
 
-    def _action_policy_lines(self, run_state: RunState, telemetry: _LoopTelemetry) -> tuple[str, ...]:
+    def _action_policy_lines(self, run_state: RunState, telemetry: _LoopTelemetry, gate_state: ActionGateState) -> tuple[str, ...]:
         if run_state.state == RunStatus.DIAGNOSING:
             phase_goal = "Investigate the build error only as needed to choose a concrete correction."
             phase_rules = (
@@ -509,7 +545,7 @@ class AgentRuntime:
                 "- Once evidence is sufficient, perform a concrete modification.",
                 "- Prefer an early build after a plausible implementation.",
             )
-        escalation_rules = self._escalation_policy_lines(telemetry)
+        escalation_rules = self._escalation_policy_lines(gate_state)
         return (
             f"- current_phase: {run_state.state.value}",
             f"- goal: {phase_goal}",
@@ -519,14 +555,22 @@ class AgentRuntime:
             *escalation_rules,
         )
 
-    def _escalation_policy_lines(self, telemetry: _LoopTelemetry) -> tuple[str, ...]:
-        if telemetry.action_pressure_level == "action_required":
+    def _escalation_policy_lines(self, gate_state: ActionGateState) -> tuple[str, ...]:
+        if gate_state == ActionGateState.ACTION_REQUIRED:
             return (
                 "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress.",
                 "Use the evidence already gathered to perform a concrete modification or other task-directed action now, unless a specific unresolved blocker requires further inspection.",
                 "If further inspection is required, identify the specific unresolved blocker and inspect only what is needed to resolve it.",
             )
-        if telemetry.action_pressure_level == "stalled":
+        if gate_state == ActionGateState.FOCUSED_ACTION:
+            return (
+                "FOCUSED ACTION: Broad exploration is no longer available. Read only a specific file if a concrete unresolved blocker requires it; otherwise modify the project or finish the turn so the runtime can attempt a build.",
+            )
+        if gate_state == ActionGateState.ACTION_ONLY:
+            return (
+                "ACTION ONLY: The investigation budget for this phase is exhausted. Make the best concrete task-directed modification supported by the evidence already gathered, or return no tool call so the runtime can validate the current state with a build.",
+            )
+        if gate_state == ActionGateState.STALLED:
             return (
                 "STALL WARNING: exploration has continued without operational progress.",
                 "Stop broad inspection and either act on the best evidence available or identify the specific blocker that still prevents action.",
@@ -602,7 +646,7 @@ class AgentRuntime:
         inspection_only_step = bool(tool_calls) and all(call.tool_name in _INSPECTION_TOOLS for call in tool_calls)
         if progress_detected:
             self._telemetry.consecutive_inspection_steps = 0
-            self._telemetry.action_pressure_level = "normal"
+            self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
             return
 
         if not inspection_only_step:
@@ -620,13 +664,17 @@ class AgentRuntime:
             limit=_RECENT_HISTORY_LIMIT,
         )
         if self._telemetry.consecutive_inspection_steps >= _ACTION_STALL_STEP:
-            self._telemetry.action_pressure_level = "stalled"
+            self._telemetry.action_pressure_level = ActionGateState.STALLED.value
             run_state.state = RunStatus.FAILED
             run_state.termination_reason = "exploration stalled without operational progress"
-        elif self._telemetry.consecutive_inspection_steps >= _ACTION_ESCALATION_STEP:
-            self._telemetry.action_pressure_level = "action_required"
+        elif self._telemetry.consecutive_inspection_steps >= _ACTION_ONLY_STEP:
+            self._telemetry.action_pressure_level = ActionGateState.ACTION_ONLY.value
+        elif self._telemetry.consecutive_inspection_steps >= _FOCUSED_ACTION_STEP:
+            self._telemetry.action_pressure_level = ActionGateState.FOCUSED_ACTION.value
+        elif self._telemetry.consecutive_inspection_steps >= _ACTION_REQUIRED_STEP:
+            self._telemetry.action_pressure_level = ActionGateState.ACTION_REQUIRED.value
         else:
-            self._telemetry.action_pressure_level = "normal"
+            self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
 
     def _inspection_paths(self, tool_results: tuple[ToolResult, ...]) -> tuple[str, ...]:
         paths: list[str] = []
@@ -654,7 +702,19 @@ class AgentRuntime:
 
     def _reset_action_pressure(self) -> None:
         self._telemetry.consecutive_inspection_steps = 0
-        self._telemetry.action_pressure_level = "normal"
+        self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
+
+    def _action_gate_state(self, telemetry: _LoopTelemetry) -> ActionGateState:
+        if telemetry.consecutive_inspection_steps >= _ACTION_STALL_STEP:
+            return ActionGateState.STALLED
+        if telemetry.consecutive_inspection_steps >= _ACTION_ONLY_STEP:
+            return ActionGateState.ACTION_ONLY
+        if telemetry.consecutive_inspection_steps >= _FOCUSED_ACTION_STEP:
+            return ActionGateState.FOCUSED_ACTION
+        if telemetry.consecutive_inspection_steps >= _ACTION_REQUIRED_STEP:
+            return ActionGateState.ACTION_REQUIRED
+        return ActionGateState.NORMAL
+
     def _tool_signature(self, tool_results: tuple[ToolResult, ...]) -> str:
         payload = [
             {

@@ -32,6 +32,7 @@ Ademas, la evidencia economica necesita distinguir de forma normativa:
 4. Mantener trazabilidad suficiente para estimar costes posteriormente.
 5. Mantener Brain OFF/ON, dataset, acceptance y repeticiones sin cambios.
 6. Dejar v0.4 listo para decidir viabilidad de quota sin una nueva decision arquitectonica.
+7. Introducir un Runtime Action Gate gradual, provider-neutral, que solo ajuste la exposicion de tools y la telemetry segura, sin modificar ToolExecutor, dataset ni semantics del benchmark.
 
 ## 3. No objetivos
 
@@ -237,6 +238,8 @@ Requisitos:
 - accounting de requests logicas;
 - no alterar Brain OFF/ON;
 - no confundir budget logico con cuota fisica garantizada.
+
+El pacing controla la cadencia; el Runtime Action Gate controla que categorias de tools se exponen en cada request segun el drift de exploracion. La evidencia persistida debe incluir la fase, el estado del gate y los nombres de tools ofrecidas, sin persistir prompts completos ni contenido completo de Brain.
 
 Persistencia cross-session y multi-day quedan fuera de este lote.
 

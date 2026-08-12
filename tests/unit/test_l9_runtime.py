@@ -12,12 +12,17 @@ import pytest
 
 from pd_agent import AgentRuntime, ContextManager, RunController
 from pd_agent.build import GradleBuildRunner
+from pd_agent.context import ContextItem
 from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ExecutionLimits, ProviderContinuation, ToolCall
 from pd_agent.core.errors import ProviderError
 from pd_agent.project import ProjectInspectionStatus
 from pd_agent.reporting import FinalReport, RunEventType, RunStorage
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
+
+
+def _tool_names(request: AgentRequest) -> tuple[str, ...]:
+    return tuple(str(tool["name"]) for tool in request.tools)
 
 
 def _write(path: Path, content: str) -> Path:
@@ -486,11 +491,13 @@ def test_action_transition_policy_escalates_explicitly_at_threshold(tmp_path: Pa
         assert "ACTION REQUIRED" not in provider.requests[index].messages[0].content
         assert "escalation_state: normal" in provider.requests[index].messages[0].content
     assert "consecutive_inspection_steps: 3" in provider.requests[3].messages[0].content
-    assert "escalation_state: normal" in provider.requests[3].messages[0].content
-    assert "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress." in provider.requests[4].messages[0].content
-    assert "Use the evidence already gathered to perform a concrete modification or other task-directed action now" in provider.requests[4].messages[0].content
-    assert "If further inspection is required, identify the specific unresolved blocker" in provider.requests[4].messages[0].content
+    assert "escalation_state: action_required" in provider.requests[3].messages[0].content
+    assert "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress." in provider.requests[3].messages[0].content
+    assert "Use the evidence already gathered to perform a concrete modification or other task-directed action now" in provider.requests[3].messages[0].content
+    assert "If further inspection is required, identify the specific unresolved blocker" in provider.requests[3].messages[0].content
+    assert "phase: PLANNING" in provider.requests[4].messages[0].content
     assert "escalation_state: action_required" in provider.requests[4].messages[0].content
+    assert "ACTION REQUIRED" in provider.requests[4].messages[0].content
     assert "phase: DIAGNOSING" in provider.requests[5].messages[0].content
     assert "escalation_state: normal" in provider.requests[5].messages[0].content
     assert "ACTION REQUIRED" not in provider.requests[5].messages[0].content
@@ -522,12 +529,133 @@ def test_action_transition_escalates_and_stops_before_exhaustion(tmp_path: Path)
     assert run_state.termination_reason == "exploration stalled without operational progress"
     assert run_state.agent_step_count == 8
     assert len(provider.requests) == 8
-    for index in range(4, 7):
+    for index in range(3, 5):
         assert "escalation_state: action_required" in provider.requests[index].messages[0].content
         assert "STALL WARNING" not in provider.requests[index].messages[0].content
+    for index in range(5, 7):
+        assert "escalation_state: focused_action" in provider.requests[index].messages[0].content
+        assert "FOCUSED ACTION" in provider.requests[index].messages[0].content
     assert "consecutive_inspection_steps: 4" in provider.requests[4].messages[0].content
+    assert "consecutive_inspection_steps: 5" in provider.requests[5].messages[0].content
     assert "consecutive_inspection_steps: 7" in provider.requests[7].messages[0].content
+    assert "escalation_state: action_only" in provider.requests[7].messages[0].content
+    assert "ACTION ONLY: The investigation budget for this phase is exhausted." in provider.requests[7].messages[0].content
+    offered = _tool_names(provider.requests[7])
+    assert "list_directory" not in offered
+    assert "read_file" not in offered
+    assert "search_text" not in offered
+    assert {"write_file", "create_file", "delete_file"}.issubset(set(offered))
     assert all("STALL WARNING" not in request.messages[0].content for request in provider.requests)
+
+
+def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "action-only-build", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "runtime", "paths": ["."], "max_results": 5}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
+            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="search_text", arguments={"query": "loader", "paths": ["."], "max_results": 5}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="list_directory", arguments={"path": "src"}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step8", tool_calls=()),
+        ]
+    )
+    controller, _storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=20, max_tool_calls=20, max_build_attempts=5))
+
+    run_state, report = controller.run(root, "action only zero tool call")
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert run_state.build_attempt_count >= 1
+    assert len(provider.requests) == 8
+    assert "escalation_state: action_only" in provider.requests[7].messages[0].content
+    assert "ACTION ONLY" in provider.requests[7].messages[0].content
+    offered = _tool_names(provider.requests[7])
+    assert "list_directory" not in offered
+    assert "read_file" not in offered
+    assert "search_text" not in offered
+    assert {"write_file", "create_file", "delete_file"}.issubset(set(offered))
+
+
+def test_provider_tool_call_not_offered_is_still_executed_by_tool_executor(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "unoffered-tool", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "runtime", "paths": ["."], "max_results": 5}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
+            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="search_text", arguments={"query": "loader", "paths": ["."], "max_results": 5}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="list_directory", arguments={"path": "src"}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step8", tool_calls=(ToolCall(call_id="8", tool_name="list_directory", arguments={"path": "."}),)),
+        ]
+    )
+    controller, storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=20, max_tool_calls=20, max_build_attempts=5))
+
+    run_state, _report = controller.run(root, "unoffered tool")
+    events = storage.read_events(run_state.run_id)
+    call_events = [event for event in events if event.event_type == RunEventType.TOOL_EXECUTED]
+
+    assert run_state.state.value == "FAILED"
+    assert run_state.termination_reason == "exploration stalled without operational progress"
+    assert any(event.payload["call"]["tool_name"] == "list_directory" for event in call_events)
+    assert "list_directory" not in _tool_names(provider.requests[7])
+
+
+def test_model_called_event_contains_safe_action_gate_telemetry(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "telemetry", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="plan",
+                tool_calls=(),
+                usage={"input_tokens": 4, "output_tokens": 1, "total_tokens": 5},
+                provider_metadata={"provider": "fake", "model": "fake-model"},
+            )
+        ]
+    )
+    controller, storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=9, max_tool_calls=11, max_build_attempts=3))
+
+    run_state, _report = controller.run(root, "telemetry")
+    events = storage.read_events(run_state.run_id)
+    called = next(event for event in events if event.event_type == RunEventType.MODEL_CALLED)
+
+    assert called.payload["phase"] == "PLANNING"
+    assert called.payload["action_gate_state"] == "normal"
+    assert called.payload["escalation_state"] == "normal"
+    assert called.payload["action_required"] is False
+    assert called.payload["consecutive_inspection_steps"] == 0
+    assert called.payload["agent_steps_remaining"] == 9
+    assert called.payload["tool_calls_remaining"] == 11
+    assert called.payload["build_attempts_remaining"] == 3
+    assert called.payload["offered_tool_names"] == ["list_directory", "read_file", "search_text", "write_file", "create_file", "delete_file"]
+
+
+def test_action_gate_policy_is_independent_of_external_context(tmp_path: Path) -> None:
+    root_off = _runtime_project(tmp_path / "external-off", build_state="pass")
+    root_on = _runtime_project(tmp_path / "external-on", build_state="pass")
+    provider_off = ScriptedProvider([AgentResponse(assistant_message="plan", tool_calls=())])
+    provider_on = ScriptedProvider([AgentResponse(assistant_message="plan", tool_calls=())])
+    controller_off, storage_off = _controller(root_off, provider_off)
+    controller_on, storage_on = _controller(root_on, provider_on)
+
+    run_state_off, _ = controller_off.run(root_off, "external gate off")
+    run_state_on, _ = controller_on.run(
+        root_on,
+        "external gate on",
+        external_context=(ContextItem.from_text(source="brain", priority=1, label="yarn", content="retrieved yarn"),),
+    )
+
+    off_event = next(event for event in storage_off.read_events(run_state_off.run_id) if event.event_type == RunEventType.MODEL_CALLED)
+    on_event = next(event for event in storage_on.read_events(run_state_on.run_id) if event.event_type == RunEventType.MODEL_CALLED)
+
+    assert off_event.payload["action_gate_state"] == "normal"
+    assert on_event.payload["action_gate_state"] == "normal"
+    assert off_event.payload["offered_tool_names"] == on_event.payload["offered_tool_names"]
+    assert _tool_names(provider_off.requests[0]) == _tool_names(provider_on.requests[0])
 
 
 def test_action_transition_reset_clears_pressure_before_diagnosing(tmp_path: Path) -> None:

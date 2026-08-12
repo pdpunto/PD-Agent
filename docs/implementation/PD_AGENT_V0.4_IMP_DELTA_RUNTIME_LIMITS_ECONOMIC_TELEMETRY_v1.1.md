@@ -28,6 +28,7 @@ Antes de modificar codigo, Codex debe auditar RFC/IMP contra el repositorio real
 8. No introducir scoring compuesto.
 9. Commit + push tras hitos definidos.
 10. Working tree limpio al cerrar cada hito.
+11. El Runtime Action Gate se implementa en el runtime filtrando `AgentRequest.tools` por request; `ToolExecutor` y su boundary de seguridad no cambian.
 
 ## 3. Archivos/modulos previstos
 
@@ -564,6 +565,7 @@ Cubrir:
 - no default 40 cuando benchmark declara 25.
 - logical provider request count survives success and provider error;
 - collector reads RunState without double counting MODEL_CALLED.
+- `MODEL_CALLED` persiste telemetry segura del gate: phase, action_gate_state/escalation_state, consecutive_inspection_steps, budgets restantes y offered_tool_names.
 
 ### Aceptacion
 
