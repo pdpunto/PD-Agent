@@ -45,6 +45,8 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     manifest = json.loads(_read(HARNESS_FIXTURE / "src" / "main" / "resources" / "fabric.mod.json"))
     config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
     runner_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
+    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
+    blocks_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessBlocks.java")
     identity_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "TargetIdentityProbe.java")
     result_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java")
     mod_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java")
@@ -69,10 +71,15 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "HarnessSignals.reset()" in mod_source
     assert "Registry.register" not in mod_source
     assert "registryKey" not in mod_source
-    assert "neighbor_update_probe" not in mod_source
-    assert "Blocks.OBSERVER" in runner_source
-    assert "ObserverBlock.POWERED" in runner_source
-    assert "FacingBlock.FACING" in runner_source
+    assert "neighbor_update_probe" in blocks_source
+    assert "Registry.register" in blocks_source
+    assert "NeighborUpdateProbeBlock" in blocks_source
+    assert "neighborUpdate(" in probe_source
+    assert "HarnessSignals.markNeighborUpdateTriggered()" in probe_source
+    assert "isClient()" in probe_source
+    assert "Blocks.OBSERVER" not in runner_source
+    assert "ObserverBlock.POWERED" not in runner_source
+    assert "FacingBlock.FACING" not in runner_source
     assert "expectNeighborUpdate" in config_source
     assert "neighborPass = !config.expectNeighborUpdate() || neighborTriggered" in runner_source
     assert "HarnessResult.pass(config, identity, neighborTriggered)" in runner_source
@@ -94,6 +101,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "target_sha_match" in result_source
     assert "functional_test_result" in result_source
     assert "shutdown_requested" in result_source
+    assert "AtomicBoolean" in signals_source
+    assert "reset()" in signals_source
+    assert "markNeighborUpdateTriggered()" in signals_source
+    assert "neighborUpdateTriggered()" in signals_source
     assert "Files.move" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
     assert "ATOMIC_MOVE" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
     assert "pd.agent.targetModId" in config_source
@@ -104,10 +115,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "SUPPORTED_TEST_IDS" in config_source
     assert "unsupported test id" in config_source
     assert "result path must be absolute" in config_source
-    assert "boundedNeighborWaitMillis" in runner_source
-    assert "NEIGHBOR_WAIT_CAP_MILLIS = 5_000L" in runner_source
-    assert "neighborWaitMillis = boundedNeighborWaitMillis(options.hangMillis())" in runner_source
-    assert "waitForObserverPowered(world, true, neighborWaitMillis)" in runner_source
+    assert "neighborUpdateProbe()" in runner_source
+    assert "HarnessSignals.neighborUpdateTriggered()" in runner_source
+    assert "waitForObserverPowered" not in runner_source
+    assert "boundedNeighborWaitMillis" not in runner_source
 
 
 def test_batch_b_harness_supports_signal_test_id_without_relaxing_validation() -> None:
@@ -138,11 +149,12 @@ def test_batch_b_built_jars_stay_separate() -> None:
 def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> None:
     target_source = _read(TARGET_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java")
     harness_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
+    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
     runtime_options_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRuntimeOptions.java")
 
     assert "Blocks.AIR.getDefaultState()" in harness_source
-    assert "Blocks.OBSERVER" in harness_source
-    assert "ObserverBlock.POWERED" in harness_source
+    assert "HarnessBlocks.neighborUpdateProbe()" in harness_source
+    assert "HarnessSignals.neighborUpdateTriggered()" in harness_source
     assert "ExampleMod.applyProbeState" in harness_source
     assert "expectedBlockState()" in runtime_options_source
     assert "FUNCTIONAL_FAIL" in runtime_options_source
@@ -150,3 +162,5 @@ def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> N
     assert "ServerWorld" in target_source
     assert "applyProbeState" in target_source
     assert "expectedProbeState" in target_source
+    assert "neighborUpdate(" in probe_source
+    assert "HarnessSignals.markNeighborUpdateTriggered()" in probe_source

@@ -3,11 +3,8 @@ package dev.pdpunto.l11harness;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.FacingBlock;
-import net.minecraft.block.ObserverBlock;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.BlockPos;
 
 import dev.pdpunto.l11.ExampleMod;
@@ -15,14 +12,12 @@ import dev.pdpunto.l11.ExampleMod;
 final class HarnessRunner {
     private static final BlockPos CONTROLLED_POS = new BlockPos(8, 64, 8);
     private static final BlockPos SIGNAL_POS = CONTROLLED_POS.east();
-    private static final long NEIGHBOR_WAIT_CAP_MILLIS = 5_000L;
 
     private HarnessRunner() {
     }
 
     static HarnessResult run(MinecraftServer server, HarnessConfig config, HarnessRuntimeOptions options) {
         HarnessIdentity identity = TargetIdentityProbe.inspect(config.targetModId(), config.targetSha256());
-        long neighborWaitMillis = boundedNeighborWaitMillis(options.hangMillis());
         if (!identity.targetLoaded()) {
             return HarnessResult.infraError(config, identity.reason(), identity);
         }
@@ -41,22 +36,14 @@ final class HarnessRunner {
         HarnessSignals.reset();
         world.setBlockState(
             SIGNAL_POS,
-            Blocks.OBSERVER.getDefaultState()
-                .with(FacingBlock.FACING, Direction.WEST)
-                .with(ObserverBlock.POWERED, false),
+            HarnessBlocks.neighborUpdateProbe().getDefaultState(),
             Block.NOTIFY_ALL
         );
         world.setBlockState(CONTROLLED_POS, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-        if (config.expectNeighborUpdate()) {
-            waitForObserverPowered(world, false, neighborWaitMillis);
-        }
         HarnessSignals.reset();
         boolean changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
         BlockState actual = world.getBlockState(CONTROLLED_POS);
-        boolean neighborTriggered = config.expectNeighborUpdate() && waitForObserverPowered(world, true, neighborWaitMillis);
-        if (neighborTriggered) {
-            HarnessSignals.markNeighborUpdateTriggered();
-        }
+        boolean neighborTriggered = config.expectNeighborUpdate() && HarnessSignals.neighborUpdateTriggered();
         boolean statePass = changed && actual.equals(options.expectedBlockState());
         boolean neighborPass = !config.expectNeighborUpdate() || neighborTriggered;
         boolean functionalPass = statePass && neighborPass;
@@ -76,11 +63,6 @@ final class HarnessRunner {
         return HarnessResult.pass(config, identity, neighborTriggered);
     }
 
-    private static long boundedNeighborWaitMillis(long requestedMillis) {
-        long bounded = Math.min(Math.max(requestedMillis, 250L), NEIGHBOR_WAIT_CAP_MILLIS);
-        return bounded;
-    }
-
     private static ServerWorld waitForOverworld(MinecraftServer server, long timeoutMillis) {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(1000L, timeoutMillis));
         while (System.nanoTime() < deadline) {
@@ -96,23 +78,5 @@ final class HarnessRunner {
             }
         }
         return null;
-    }
-
-    private static boolean waitForObserverPowered(ServerWorld world, boolean powered, long timeoutMillis) {
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(250L, timeoutMillis));
-        while (System.nanoTime() < deadline) {
-            BlockState signalState = world.getBlockState(SIGNAL_POS);
-            if (signalState.isOf(Blocks.OBSERVER) && signalState.get(ObserverBlock.POWERED) == powered) {
-                return true;
-            }
-            try {
-                Thread.sleep(50L);
-            } catch (InterruptedException exc) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("interrupted while waiting for observer state", exc);
-            }
-        }
-        BlockState signalState = world.getBlockState(SIGNAL_POS);
-        return signalState.isOf(Blocks.OBSERVER) && signalState.get(ObserverBlock.POWERED) == powered;
     }
 }
