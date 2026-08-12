@@ -116,6 +116,7 @@ def test_main_wires_real_brain_source_for_brain_on(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(runner, "BenchmarkExecutor", FakeExecutor)
     monkeypatch.setattr(runner, "BenchmarkExecutionRunner", FakeRunner)
     monkeypatch.setattr(runner, "_build_provider", lambda config: "provider")
+    monkeypatch.setattr(runner, "_wrap_provider_for_benchmark", lambda provider, pacer: provider)
 
     code = runner.main(
         [
@@ -140,4 +141,3 @@ def test_main_wires_real_brain_source_for_brain_on(monkeypatch: pytest.MonkeyPat
     assert len(FakeRunner.last_run["configs"]) == 2
     assert FakeRunner.last_run["configs"][0].brain_enabled is False
     assert FakeRunner.last_run["configs"][1].brain_enabled is True
-

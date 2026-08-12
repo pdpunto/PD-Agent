@@ -30,7 +30,7 @@ from pd_agent.brain import (
     KnowledgeType,
     SourceAuthority,
 )
-from pd_agent.core import ArtifactResult, BuildResult, RunState, RunStatus
+from pd_agent.core import ArtifactResult, BuildResult, ExecutionLimits, RunState, RunStatus
 from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.context.knowledge import KnowledgeRejection, KnowledgeSourceAttempt, KnowledgeTrace
@@ -104,6 +104,20 @@ def _config(*, brain_enabled: bool) -> BenchmarkConfig:
         brain_enabled=brain_enabled,
         model_config={"max_output_tokens": 512},
         provider_config={"timeout_seconds": 60},
+        knowledge_config={"offline": False},
+        target_repetition_count=1,
+    )
+
+
+def _config_with_limits(*, brain_enabled: bool, limits: ExecutionLimits) -> BenchmarkConfig:
+    return BenchmarkConfig(
+        config_id=f"cfg-{'on' if brain_enabled else 'off'}",
+        provider="gemini",
+        model="gemini-3.1-flash-lite",
+        brain_enabled=brain_enabled,
+        model_config={"max_output_tokens": 512},
+        provider_config={"timeout_seconds": 60, "provider_retry_limit": 3},
+        execution_limits=limits,
         knowledge_config={"offline": False},
         target_repetition_count=1,
     )
@@ -370,6 +384,46 @@ def test_executor_brain_on_injects_context_and_traces(monkeypatch: pytest.Monkey
     assert result.collection.knowledge_traces[0].retrieved_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].selected_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].context_item_ids == ("yarn:item:1",)
+
+
+@pytest.mark.parametrize("brain_enabled", [False, True])
+def test_executor_propagates_execution_limits_to_controller(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, brain_enabled: bool) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    limits = ExecutionLimits(
+        max_agent_steps=25,
+        max_tool_calls=50,
+        max_build_attempts=7,
+        provider_retry_limit=3,
+        process_timeout_seconds=601,
+        max_tool_output_bytes=1001,
+        max_context_bytes=2001,
+    )
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task()
+    config = _config_with_limits(brain_enabled=brain_enabled, limits=limits)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": f"attempt-limits-{brain_enabled}", "attempt_index": 1, "repetition_index": 0})()
+
+    executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+    )
+
+    applied = _FakeController.last_init["limits"]
+    assert applied == limits
+    assert applied.max_agent_steps == 25
+    assert applied.max_tool_calls == 50
+    assert applied.max_build_attempts == 7
+    assert applied.provider_retry_limit == 3
+    assert applied.process_timeout_seconds == 601
+    assert applied.max_tool_output_bytes == 1001
+    assert applied.max_context_bytes == 2001
 
 
 def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

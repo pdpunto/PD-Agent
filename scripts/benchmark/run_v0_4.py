@@ -7,9 +7,20 @@ from pathlib import Path
 from typing import Any
 
 from pd_agent import ArtifactValidator, GradleBuildRunner, YarnKnowledgeSource
-from pd_agent.benchmark import BenchmarkCatalog, BenchmarkConfig, BenchmarkExecutionRunner, BenchmarkExecutor
+from pd_agent.benchmark import (
+    BenchmarkCatalog,
+    BenchmarkConfig,
+    BenchmarkExecutionRunner,
+    BenchmarkExecutor,
+    BenchmarkPacedProvider,
+    BenchmarkRequestPacer,
+)
 from pd_agent.providers import GeminiProvider, OpenAIProvider
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
+
+
+MIN_PROVIDER_INTERVAL_SECONDS = 4.5
+GEMINI_DAILY_REQUEST_BUDGET = 500
 
 
 def _load_configs(path: Path) -> tuple[BenchmarkConfig, ...]:
@@ -95,6 +106,17 @@ def _build_provider(config: BenchmarkConfig) -> Any:
     raise ValueError(f"unsupported provider: {provider_name}")
 
 
+def _build_request_pacer() -> BenchmarkRequestPacer:
+    return BenchmarkRequestPacer(
+        min_interval_seconds=MIN_PROVIDER_INTERVAL_SECONDS,
+        daily_request_budget=GEMINI_DAILY_REQUEST_BUDGET,
+    )
+
+
+def _wrap_provider_for_benchmark(provider: Any, pacer: BenchmarkRequestPacer) -> BenchmarkPacedProvider:
+    return BenchmarkPacedProvider(provider=provider, pacer=pacer)
+
+
 def _build_knowledge_source(configs: tuple[BenchmarkConfig, ...]) -> YarnKnowledgeSource | None:
     if any(config.brain_enabled for config in configs):
         return YarnKnowledgeSource()
@@ -120,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     catalog = BenchmarkCatalog.load(args.catalog_root)
     configs = _load_configs(args.configs_json)
     canonical_config = _validate_configs(configs)
-    provider = _build_provider(canonical_config)
+    provider = _wrap_provider_for_benchmark(_build_provider(canonical_config), _build_request_pacer())
     knowledge_source = _build_knowledge_source(configs)
     executor = BenchmarkExecutor(
         provider=provider,

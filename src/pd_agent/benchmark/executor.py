@@ -14,7 +14,7 @@ from pd_agent.brain import FileKnowledgeCache, KnowledgeEnvironment, KnowledgeEn
 from pd_agent.brain.models import KnowledgeType
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager, ProjectContextSource, RunContextSource
-from pd_agent.core import ModelProvider, ProviderError, RunState
+from pd_agent.core import ExecutionLimits, ModelProvider, ProviderError, RunState
 from pd_agent.minecraft import MinecraftTestResult, MinecraftTestRunner, MinecraftTestSpec
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunStorage
@@ -76,6 +76,17 @@ def _default_context_manager(brain_enabled: bool) -> ContextManager:
     if brain_enabled:
         return ContextManager()
     return ContextManager(sources=(("project", ProjectContextSource()), ("run", RunContextSource())))
+
+
+def _benchmark_execution_limits(config: BenchmarkConfig) -> ExecutionLimits:
+    limits = config.execution_limits
+    if isinstance(limits, ExecutionLimits):
+        return limits
+    if limits is None:
+        return ExecutionLimits()
+    if isinstance(limits, Mapping):
+        return ExecutionLimits.from_dict(dict(limits))
+    raise TypeError("benchmark execution_limits must be an ExecutionLimits or mapping")
 
 
 def _task_knowledge_needs(task: BenchmarkTask, *, environment: KnowledgeEnvironment) -> tuple[KnowledgeNeed, ...]:
@@ -249,6 +260,7 @@ class BenchmarkExecutor:
 
             context_manager = self.context_manager_factory(config.brain_enabled)
             runtime_storage = RunStorage(run_root / "runtime")
+            execution_limits = _benchmark_execution_limits(config)
             controller = RunController(
                 provider=self.provider,
                 storage=runtime_storage,
@@ -256,6 +268,7 @@ class BenchmarkExecutor:
                 artifact_validator=self.artifact_validator,
                 context_manager=context_manager,
                 tool_executor=self.tool_executor,
+                limits=execution_limits,
                 model_config=dict(config.model_config),
             )
             run_state, final_report = controller.run(
