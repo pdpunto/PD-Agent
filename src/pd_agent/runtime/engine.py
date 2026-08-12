@@ -186,6 +186,7 @@ class AgentRuntime:
                     if run_state.state == RunStatus.PLANNING:
                         run_state.transition_to(RunStatus.EDITING)
                     elif run_state.state == RunStatus.DIAGNOSING:
+                        self._reset_action_pressure()
                         run_state.transition_to(RunStatus.CORRECTING if tool_results else RunStatus.FAILED)
                         if run_state.state == RunStatus.FAILED:
                             run_state.termination_reason = "diagnosis produced no correction"
@@ -219,6 +220,7 @@ class AgentRuntime:
                             run_state.state = RunStatus.LIMIT_REACHED
                             run_state.termination_reason = "max_build_attempts reached"
                             break
+                        self._reset_action_pressure()
                         run_state.transition_to(RunStatus.DIAGNOSING)
                         run_state.last_error = build_result.stderr_log or build_result.stdout_log or f"build failed with exit_code {build_result.exit_code}"
                     self._persist_state(run_state)
@@ -438,7 +440,7 @@ class AgentRuntime:
         remaining_agent_steps = max(limits.max_agent_steps - run_state.agent_step_count, 0)
         remaining_tool_calls = max(limits.max_tool_calls - run_state.tool_call_count, 0)
         remaining_build_attempts = max(limits.max_build_attempts - run_state.build_attempt_count, 0)
-        policy_lines = self._action_policy_lines(run_state)
+        policy_lines = self._action_policy_lines(run_state, telemetry)
         content_lines = [
             f"phase: {run_state.state.value}",
             "budget:",
@@ -477,7 +479,7 @@ class AgentRuntime:
             },
         )
 
-    def _action_policy_lines(self, run_state: RunState) -> tuple[str, ...]:
+    def _action_policy_lines(self, run_state: RunState, telemetry: _LoopTelemetry) -> tuple[str, ...]:
         if run_state.state == RunStatus.DIAGNOSING:
             phase_goal = "Investigate the build error only as needed to choose a concrete correction."
             phase_rules = (
@@ -507,13 +509,29 @@ class AgentRuntime:
                 "- Once evidence is sufficient, perform a concrete modification.",
                 "- Prefer an early build after a plausible implementation.",
             )
+        escalation_rules = self._escalation_policy_lines(telemetry)
         return (
             f"- current_phase: {run_state.state.value}",
             f"- goal: {phase_goal}",
             "- inspection alone is not progress.",
             *phase_rules,
             "- Use actual build errors as evidence for subsequent correction.",
+            *escalation_rules,
         )
+
+    def _escalation_policy_lines(self, telemetry: _LoopTelemetry) -> tuple[str, ...]:
+        if telemetry.action_pressure_level == "action_required":
+            return (
+                "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress.",
+                "Use the evidence already gathered to perform a concrete modification or other task-directed action now, unless a specific unresolved blocker requires further inspection.",
+                "If further inspection is required, identify the specific unresolved blocker and inspect only what is needed to resolve it.",
+            )
+        if telemetry.action_pressure_level == "stalled":
+            return (
+                "STALL WARNING: exploration has continued without operational progress.",
+                "Stop broad inspection and either act on the best evidence available or identify the specific blocker that still prevents action.",
+            )
+        return ()
 
     def _limits_usage(self, run_state: RunState, limits: ExecutionLimits) -> dict[str, int]:
         return {
@@ -633,6 +651,10 @@ class AgentRuntime:
         if len(combined) <= limit:
             return combined
         return combined[-limit:]
+
+    def _reset_action_pressure(self) -> None:
+        self._telemetry.consecutive_inspection_steps = 0
+        self._telemetry.action_pressure_level = "normal"
     def _tool_signature(self, tool_results: tuple[ToolResult, ...]) -> str:
         payload = [
             {

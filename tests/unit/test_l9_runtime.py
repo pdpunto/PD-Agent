@@ -459,23 +459,20 @@ def test_antiloop_stops_on_repeated_build_failure(tmp_path: Path) -> None:
     assert len(provider.requests) == 3
 
 
-def test_action_transition_policy_exposes_budget_and_streak(tmp_path: Path) -> None:
+def test_action_transition_policy_escalates_explicitly_at_threshold(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "policy", build_state="fail")
     provider = ScriptedProvider(
         [
             AgentResponse(
-                assistant_message="inspect",
-                tool_calls=(
-                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),
-                    ToolCall(call_id="2", tool_name="search_text", arguments={"query": "fail", "paths": ["build-state.txt"], "max_results": 5}),
-                ),
+                assistant_message="step1",
+                tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),),
             ),
-            AgentResponse(
-                assistant_message="act",
-                tool_calls=(
-                    ToolCall(call_id="3", tool_name="write_file", arguments={"path": "build-state.txt", "content": "pass\n"}),
-                ),
-            ),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "fail", "paths": ["build-state.txt"], "max_results": 5}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
+            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="write_file", arguments={"path": "build-state.txt", "content": "still fail\n"}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="write_file", arguments={"path": "build-state.txt", "content": "pass\n"}),)),
         ]
     )
     controller, _storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5))
@@ -484,16 +481,22 @@ def test_action_transition_policy_exposes_budget_and_streak(tmp_path: Path) -> N
 
     assert run_state.state.value == "COMPLETED"
     assert report.final_state.value == "COMPLETED"
-    assert len(provider.requests) == 2
-    first_request = provider.requests[0]
-    second_request = provider.requests[1]
-    assert "action-transition-policy" in first_request.messages[0].content
-    assert "'agent_steps_remaining': 10" in first_request.messages[0].content
-    assert "'tool_calls_remaining': 10" in first_request.messages[0].content
-    assert "'build_attempts_remaining': 5" in first_request.messages[0].content
-    assert "consecutive_inspection_steps: 1" in second_request.messages[0].content
-    assert "recent_inspection_tools: ['read_file', 'search_text']" in second_request.messages[0].content
-    assert "recent_inspected_paths:" in second_request.messages[0].content
+    assert len(provider.requests) == 7
+    for index in range(3):
+        assert "ACTION REQUIRED" not in provider.requests[index].messages[0].content
+        assert "escalation_state: normal" in provider.requests[index].messages[0].content
+    assert "consecutive_inspection_steps: 3" in provider.requests[3].messages[0].content
+    assert "escalation_state: normal" in provider.requests[3].messages[0].content
+    assert "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress." in provider.requests[4].messages[0].content
+    assert "Use the evidence already gathered to perform a concrete modification or other task-directed action now" in provider.requests[4].messages[0].content
+    assert "If further inspection is required, identify the specific unresolved blocker" in provider.requests[4].messages[0].content
+    assert "escalation_state: action_required" in provider.requests[4].messages[0].content
+    assert "phase: DIAGNOSING" in provider.requests[5].messages[0].content
+    assert "escalation_state: normal" in provider.requests[5].messages[0].content
+    assert "ACTION REQUIRED" not in provider.requests[5].messages[0].content
+    assert "phase: CORRECTING" in provider.requests[6].messages[0].content
+    assert "escalation_state: normal" in provider.requests[6].messages[0].content
+    assert "ACTION REQUIRED" not in provider.requests[6].messages[0].content
 
 
 def test_action_transition_escalates_and_stops_before_exhaustion(tmp_path: Path) -> None:
@@ -519,10 +522,40 @@ def test_action_transition_escalates_and_stops_before_exhaustion(tmp_path: Path)
     assert run_state.termination_reason == "exploration stalled without operational progress"
     assert run_state.agent_step_count == 8
     assert len(provider.requests) == 8
-    assert "escalation_state: action_required" in provider.requests[4].messages[0].content
-    assert "escalation_state: action_required" in provider.requests[7].messages[0].content
+    for index in range(4, 7):
+        assert "escalation_state: action_required" in provider.requests[index].messages[0].content
+        assert "STALL WARNING" not in provider.requests[index].messages[0].content
     assert "consecutive_inspection_steps: 4" in provider.requests[4].messages[0].content
     assert "consecutive_inspection_steps: 7" in provider.requests[7].messages[0].content
+    assert all("STALL WARNING" not in request.messages[0].content for request in provider.requests)
+
+
+def test_action_transition_reset_clears_pressure_before_diagnosing(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "diagnose-reset", build_state="fail")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "fail", "paths": ["build-state.txt"], "max_results": 5}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
+            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="write_file", arguments={"path": "build-state.txt", "content": "still fail\n"}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="write_file", arguments={"path": "build-state.txt", "content": "pass\n"}),)),
+        ]
+    )
+    controller, _storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=15, max_tool_calls=15, max_build_attempts=5))
+
+    run_state, report = controller.run(root, "diagnose reset")
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 7
+    assert "ACTION REQUIRED" in provider.requests[4].messages[0].content
+    assert "phase: DIAGNOSING" in provider.requests[5].messages[0].content
+    assert "escalation_state: normal" in provider.requests[5].messages[0].content
+    assert "consecutive_inspection_steps: 0" in provider.requests[5].messages[0].content
+    assert "ACTION REQUIRED" not in provider.requests[5].messages[0].content
+    assert "phase: CORRECTING" in provider.requests[6].messages[0].content
 
 
 def test_runtime_source_has_no_openai_imports() -> None:
