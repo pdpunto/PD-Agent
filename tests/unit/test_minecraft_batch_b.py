@@ -100,8 +100,19 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "pd.agent.targetSha256" in config_source
     assert "pd.agent.testId" in config_source
     assert "pd.agent.resultPath" in config_source
+    assert "block_state_probe_with_signal" in config_source
+    assert "SUPPORTED_TEST_IDS" in config_source
     assert "unsupported test id" in config_source
     assert "result path must be absolute" in config_source
+
+
+def test_batch_b_harness_supports_signal_test_id_without_relaxing_validation() -> None:
+    config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
+
+    assert "block_state_probe" in config_source
+    assert "block_state_probe_with_signal" in config_source
+    assert "SUPPORTED_TEST_IDS = Set.of(" in config_source
+    assert "unsupported test id" in config_source
 
 
 def test_batch_b_built_jars_stay_separate() -> None:

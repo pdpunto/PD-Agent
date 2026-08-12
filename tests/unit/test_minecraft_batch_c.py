@@ -217,3 +217,35 @@ def test_run_missing_result_timeout_and_crash_paths(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_crash)
     crash = runner.run(spec, run_id="run-crash", java_version="21", launch_mode="crash")
     assert crash.status is MinecraftTestStatus.CRASH
+
+
+def test_b003_signal_test_id_does_not_override_neighbor_flag(tmp_path: Path) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+
+    spec_true = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe_with_signal",
+        timeout_seconds=30,
+        expect_neighbor_update=True,
+    )
+    plan_true = runner.build_launch_plan(spec_true, run_id="run-signal-true", java_version="21")
+
+    spec_false = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe_with_signal",
+        timeout_seconds=30,
+        expect_neighbor_update=False,
+    )
+    plan_false = runner.build_launch_plan(spec_false, run_id="run-signal-false", java_version="21")
+
+    assert dict(plan_true.system_properties)["pd.agent.minecraft.test_id"] == "block_state_probe_with_signal"
+    assert dict(plan_true.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "true"
+    assert dict(plan_false.system_properties)["pd.agent.minecraft.test_id"] == "block_state_probe_with_signal"
+    assert dict(plan_false.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
