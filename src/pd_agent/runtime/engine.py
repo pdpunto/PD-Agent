@@ -41,6 +41,7 @@ class _LoopTelemetry:
     last_tool_signature: str | None = None
     tool_repeat_count: int = 0
     consecutive_inspection_steps: int = 0
+    consecutive_gate_violations: int = 0
     recent_inspection_tools: tuple[str, ...] = ()
     recent_inspected_paths: tuple[str, ...] = ()
     last_operational_progress_step: int = 0
@@ -155,6 +156,7 @@ class AgentRuntime:
                                 call.tool_name for call in response.tool_calls if call.tool_name not in set(offered_tool_names)
                             ],
                             "gate_violation": any(call.tool_name not in set(offered_tool_names) for call in response.tool_calls),
+                            "consecutive_gate_violations": self._telemetry.consecutive_gate_violations,
                             "usage": response.usage,
                             "provider_metadata": response.provider_metadata,
                         },
@@ -191,9 +193,15 @@ class AgentRuntime:
                         self._persist_state(run_state)
                         break
 
+                    gate_violation_detected = any(result.metadata.get("gate_violation") for result in tool_results)
+                    progress_detected = self._tool_results_have_change(tool_results)
                     pending_tool_calls = response.tool_calls
                     pending_tool_results = tool_results
                     pending_provider_continuations = response.provider_continuations
+
+                    if gate_violation_detected and not progress_detected:
+                        self._persist_state(run_state)
+                        continue
 
                     if (
                         run_state.state == RunStatus.PLANNING
@@ -340,6 +348,7 @@ class AgentRuntime:
                 "escalation_state": gate_state.value,
                 "action_required": gate_state != ActionGateState.NORMAL,
                 "consecutive_inspection_steps": self._telemetry.consecutive_inspection_steps,
+                "consecutive_gate_violations": self._telemetry.consecutive_gate_violations,
                 "agent_steps_remaining": max(limits.max_agent_steps - run_state.agent_step_count, 0),
                 "tool_calls_remaining": max(limits.max_tool_calls - run_state.tool_call_count, 0),
                 "build_attempts_remaining": max(limits.max_build_attempts - run_state.build_attempt_count, 0),
@@ -537,6 +546,7 @@ class AgentRuntime:
             f"- recent_inspection_tools: {list(telemetry.recent_inspection_tools)}",
             f"- recent_inspected_paths: {list(telemetry.recent_inspected_paths)}",
             f"- last_operational_progress_step: {telemetry.last_operational_progress_step}",
+            f"- consecutive_gate_violations: {telemetry.consecutive_gate_violations}",
             f"- action_gate_state: {gate_state.value}",
             f"- escalation_state: {telemetry.action_pressure_level}",
             "policy:",
@@ -553,6 +563,7 @@ class AgentRuntime:
                 "tool_calls_remaining": remaining_tool_calls,
                 "build_attempts_remaining": remaining_build_attempts,
                 "consecutive_inspection_steps": telemetry.consecutive_inspection_steps,
+                "consecutive_gate_violations": telemetry.consecutive_gate_violations,
                 "action_gate_state": gate_state.value,
                 "escalation_state": telemetry.action_pressure_level,
                 "action_required": gate_state != ActionGateState.NORMAL,
@@ -691,7 +702,15 @@ class AgentRuntime:
         inspection_only_step = bool(tool_calls) and all(call.tool_name in _INSPECTION_TOOLS for call in tool_calls) and not gate_violation
         if progress_detected:
             self._telemetry.consecutive_inspection_steps = 0
+            self._telemetry.consecutive_gate_violations = 0
             self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
+            return
+
+        if any(result.metadata.get("gate_violation") for result in tool_results):
+            self._telemetry.consecutive_gate_violations += 1
+            if self._telemetry.consecutive_gate_violations >= 2:
+                run_state.state = RunStatus.FAILED
+                run_state.termination_reason = "repeated action gate violation without operational progress"
             return
 
         if not inspection_only_step:
@@ -747,6 +766,7 @@ class AgentRuntime:
 
     def _reset_action_pressure(self) -> None:
         self._telemetry.consecutive_inspection_steps = 0
+        self._telemetry.consecutive_gate_violations = 0
         self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
 
     def _action_gate_state(self, telemetry: _LoopTelemetry) -> ActionGateState:

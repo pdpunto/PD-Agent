@@ -320,7 +320,11 @@ def test_invalid_tool_call_is_blocked_and_run_continues(tmp_path: Path) -> None:
             AgentResponse(
                 assistant_message="plan",
                 tool_calls=(ToolCall(call_id="1", tool_name="no_such_tool", arguments={}),),
-            )
+            ),
+            AgentResponse(
+                assistant_message="recover",
+                tool_calls=(),
+            ),
         ]
     )
     controller, storage = _controller(root, provider)
@@ -336,6 +340,7 @@ def test_invalid_tool_call_is_blocked_and_run_continues(tmp_path: Path) -> None:
     assert violation_events[0].payload["requested_tool_names"] == ["no_such_tool"]
     assert violation_events[0].payload["unavailable_tool_names"] == ["no_such_tool"]
     assert violation_events[0].payload["gate_violation"] is True
+    assert len(provider.requests) == 2
     assert storage.paths_for(run_state.run_id).final_report_json.exists()
 
 
@@ -533,10 +538,17 @@ def test_action_transition_escalates_and_stops_before_exhaustion(tmp_path: Path)
 
     assert run_state.state.value == "FAILED"
     assert report.final_state.value == "FAILED"
-    assert run_state.termination_reason == "internal error"
-    assert "IndexError: pop from empty list" in (run_state.last_error or "")
-    assert run_state.agent_step_count >= 9
-    assert len(provider.requests) >= 10
+    assert run_state.termination_reason == "repeated action gate violation without operational progress"
+    assert "IndexError" not in (run_state.last_error or "")
+    assert run_state.agent_step_count == 9
+    assert len(provider.requests) == 9
+    events = _storage.read_events(run_state.run_id)
+    violation_events = [event for event in events if event.event_type == RunEventType.ACTION_GATE_VIOLATION]
+    assert len(violation_events) == 2
+    assert violation_events[0].payload["requested_tool_names"] == ["read_file"]
+    assert violation_events[1].payload["requested_tool_names"] == ["read_file"]
+    assert all(event.payload["gate_violation"] is True for event in violation_events)
+    assert run_state.tool_call_count == 7
 
 
 def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
@@ -544,12 +556,12 @@ def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
     provider = ScriptedProvider(
         [
             AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
-            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "runtime", "paths": ["."], "max_results": 5}),)),
-            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
             AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
-            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="search_text", arguments={"query": "loader", "paths": ["."], "max_results": 5}),)),
-            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="list_directory", arguments={"path": "src"}),)),
-            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="read_file", arguments={"path": "build.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="read_file", arguments={"path": "src/main/resources/fabric.mod.json", "max_bytes": 128}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "max_bytes": 128}),)),
             AgentResponse(assistant_message="step8", tool_calls=()),
         ]
     )
@@ -563,45 +575,13 @@ def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
     assert len(provider.requests) == 8
     offered = _tool_names(provider.requests[7])
     assert "list_directory" not in offered
+    assert "read_file" not in offered
     assert "search_text" not in offered
     assert {"write_file", "create_file", "delete_file"}.issubset(set(offered))
 
 
 def test_action_gate_blocks_unoffered_tool_and_keeps_running(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "unoffered-tool", build_state="pass")
-    provider = ScriptedProvider(
-        [
-            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
-            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="search_text", arguments={"query": "runtime", "paths": ["."], "max_results": 5}),)),
-            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="list_directory", arguments={"path": "."}),)),
-            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
-            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="search_text", arguments={"query": "loader", "paths": ["."], "max_results": 5}),)),
-            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="list_directory", arguments={"path": "src"}),)),
-            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
-            AgentResponse(assistant_message="step8", tool_calls=(ToolCall(call_id="8", tool_name="list_directory", arguments={"path": "."}),)),
-            AgentResponse(assistant_message="step9", tool_calls=()),
-        ]
-    )
-    controller, storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=20, max_tool_calls=20, max_build_attempts=5))
-
-    run_state, report = controller.run(root, "unoffered tool")
-    events = storage.read_events(run_state.run_id)
-    violation_events = [event for event in events if event.event_type == RunEventType.ACTION_GATE_VIOLATION]
-    call_events = [event for event in events if event.event_type == RunEventType.TOOL_EXECUTED]
-    response_events = [event for event in events if event.event_type == RunEventType.MODEL_RESPONDED]
-
-    assert run_state.state.value == "COMPLETED"
-    assert report.final_state.value == "COMPLETED"
-    assert run_state.termination_reason == "completed"
-    assert run_state.build_attempt_count >= 1
-    assert run_state.tool_call_count == 6
-    assert any(event.payload["call"]["tool_name"] == "read_file" for event in call_events)
-    assert any(event.payload["call"]["tool_name"] == "list_directory" for event in call_events)
-    assert any(event.payload["action_gate_state"] in {"focused_action", "action_only"} for event in events if event.event_type == RunEventType.MODEL_CALLED)
-
-
-def test_action_only_unoffered_tool_then_zero_tools_advances_to_build(tmp_path: Path) -> None:
-    root = _runtime_project(tmp_path / "action-only-gate", build_state="pass")
     provider = ScriptedProvider(
         [
             AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
@@ -617,6 +597,44 @@ def test_action_only_unoffered_tool_then_zero_tools_advances_to_build(tmp_path: 
     )
     controller, storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=20, max_tool_calls=20, max_build_attempts=5))
 
+    run_state, report = controller.run(root, "unoffered tool")
+    events = storage.read_events(run_state.run_id)
+    violation_events = [event for event in events if event.event_type == RunEventType.ACTION_GATE_VIOLATION]
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert run_state.termination_reason == "completed"
+    assert run_state.build_attempt_count >= 1
+    assert run_state.tool_call_count == 7
+    assert len(provider.requests) == 9
+    assert violation_events
+    assert violation_events[0].payload["requested_tool_names"] == ["read_file"]
+    assert violation_events[0].payload["offered_tool_names"] == ["write_file", "create_file", "delete_file"]
+    assert violation_events[0].payload["unavailable_tool_names"] == ["read_file"]
+    assert violation_events[0].payload["gate_violation"] is True
+    assert "Tool 'read_file' is not available in the current action gate." in provider.requests[8].tool_results[0].error
+    assert provider.requests[8].tool_results[0].metadata["gate_violation"] is True
+    assert not any(event.payload["call"]["call_id"] == "8" for event in events if event.event_type == RunEventType.TOOL_EXECUTED)
+    assert any(event.payload["action_gate_state"] == "focused_action" for event in events if event.event_type == RunEventType.MODEL_CALLED)
+
+
+def test_action_only_unoffered_tool_then_zero_tools_advances_to_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "action-only-gate", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step5", tool_calls=(ToolCall(call_id="5", tool_name="read_file", arguments={"path": "build.gradle.kts", "max_bytes": 64}),)),
+            AgentResponse(assistant_message="step6", tool_calls=(ToolCall(call_id="6", tool_name="read_file", arguments={"path": "src/main/resources/fabric.mod.json", "max_bytes": 128}),)),
+            AgentResponse(assistant_message="step7", tool_calls=(ToolCall(call_id="7", tool_name="read_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "max_bytes": 128}),)),
+            AgentResponse(assistant_message="step8", tool_calls=(ToolCall(call_id="8", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step9", tool_calls=(ToolCall(call_id="9", tool_name="write_file", arguments={"path": "build-state.txt", "content": "pass\n"}),)),
+        ]
+    )
+    controller, storage = _controller(root, provider, limits=ExecutionLimits(max_agent_steps=20, max_tool_calls=20, max_build_attempts=5))
+
     run_state, report = controller.run(root, "action only gate")
     events = storage.read_events(run_state.run_id)
     violation_events = [event for event in events if event.event_type == RunEventType.ACTION_GATE_VIOLATION]
@@ -624,7 +642,7 @@ def test_action_only_unoffered_tool_then_zero_tools_advances_to_build(tmp_path: 
     assert run_state.state.value == "COMPLETED"
     assert report.final_state.value == "COMPLETED"
     assert run_state.termination_reason == "completed"
-    assert run_state.tool_call_count == 7
+    assert run_state.tool_call_count == 8
     assert run_state.build_attempt_count >= 1
     assert violation_events
     assert violation_events[0].payload["requested_tool_names"] == ["read_file"]
@@ -637,11 +655,10 @@ def test_action_only_unoffered_tool_then_zero_tools_advances_to_build(tmp_path: 
     assert provider.requests[8].tool_results[0].metadata["gate_violation"] is True
     assert "list_directory" not in _tool_names(provider.requests[7])
     assert "read_file" not in _tool_names(provider.requests[7])
-    assert "list_directory" not in _tool_names(provider.requests[8])
     response_events = [event for event in events if event.event_type == RunEventType.MODEL_RESPONDED]
     assert response_events[7].payload["requested_tool_names"] == ["read_file"]
     assert response_events[7].payload["gate_violation"] is True
-    assert response_events[8].payload["requested_tool_names"] == []
+    assert response_events[8].payload["requested_tool_names"] == ["write_file"]
     assert response_events[8].payload["gate_violation"] is False
 
 
