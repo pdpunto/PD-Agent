@@ -507,7 +507,10 @@ class BenchmarkMetrics:
     agent_step_count: int | None = None
     logical_provider_request_count: int | None = None
     input_tokens: int | None = None
+    cached_input_tokens: int | None = None
     output_tokens: int | None = None
+    reasoning_or_thinking_tokens: int | None = None
+    tool_use_prompt_tokens: int | None = None
     total_tokens: int | None = None
     cost: float | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
@@ -524,7 +527,10 @@ class BenchmarkMetrics:
             "agent_step_count": self.agent_step_count,
             "logical_provider_request_count": self.logical_provider_request_count,
             "input_tokens": self.input_tokens,
+            "cached_input_tokens": self.cached_input_tokens,
             "output_tokens": self.output_tokens,
+            "reasoning_or_thinking_tokens": self.reasoning_or_thinking_tokens,
+            "tool_use_prompt_tokens": self.tool_use_prompt_tokens,
             "total_tokens": self.total_tokens,
             "cost": self.cost,
             "extra": _json_ready(dict(self.extra)),
@@ -540,7 +546,10 @@ class BenchmarkMetrics:
             agent_step_count=data.get("agent_step_count"),
             logical_provider_request_count=data.get("logical_provider_request_count"),
             input_tokens=data.get("input_tokens"),
+            cached_input_tokens=data.get("cached_input_tokens"),
             output_tokens=data.get("output_tokens"),
+            reasoning_or_thinking_tokens=data.get("reasoning_or_thinking_tokens"),
+            tool_use_prompt_tokens=data.get("tool_use_prompt_tokens"),
             total_tokens=data.get("total_tokens"),
             cost=data.get("cost"),
             extra=dict(data.get("extra", {})),
@@ -591,7 +600,10 @@ class BenchmarkAggregateMetrics:
     agent_step_count: BenchmarkMetricSummary | None = None
     logical_provider_request_count: BenchmarkMetricSummary | None = None
     input_tokens: BenchmarkMetricSummary | None = None
+    cached_input_tokens: BenchmarkMetricSummary | None = None
     output_tokens: BenchmarkMetricSummary | None = None
+    reasoning_or_thinking_tokens: BenchmarkMetricSummary | None = None
+    tool_use_prompt_tokens: BenchmarkMetricSummary | None = None
     total_tokens: BenchmarkMetricSummary | None = None
     cost: BenchmarkMetricSummary | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
@@ -608,7 +620,10 @@ class BenchmarkAggregateMetrics:
             "agent_step_count": self.agent_step_count.to_dict() if self.agent_step_count is not None else None,
             "logical_provider_request_count": self.logical_provider_request_count.to_dict() if self.logical_provider_request_count is not None else None,
             "input_tokens": self.input_tokens.to_dict() if self.input_tokens is not None else None,
+            "cached_input_tokens": self.cached_input_tokens.to_dict() if self.cached_input_tokens is not None else None,
             "output_tokens": self.output_tokens.to_dict() if self.output_tokens is not None else None,
+            "reasoning_or_thinking_tokens": self.reasoning_or_thinking_tokens.to_dict() if self.reasoning_or_thinking_tokens is not None else None,
+            "tool_use_prompt_tokens": self.tool_use_prompt_tokens.to_dict() if self.tool_use_prompt_tokens is not None else None,
             "total_tokens": self.total_tokens.to_dict() if self.total_tokens is not None else None,
             "cost": self.cost.to_dict() if self.cost is not None else None,
             "extra": _json_ready(dict(self.extra)),
@@ -653,9 +668,24 @@ class BenchmarkAggregateMetrics:
                 if data.get("input_tokens") is not None
                 else None
             ),
+            cached_input_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["cached_input_tokens"]))
+                if data.get("cached_input_tokens") is not None
+                else None
+            ),
             output_tokens=(
                 BenchmarkMetricSummary.from_dict(dict(data["output_tokens"]))
                 if data.get("output_tokens") is not None
+                else None
+            ),
+            reasoning_or_thinking_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["reasoning_or_thinking_tokens"]))
+                if data.get("reasoning_or_thinking_tokens") is not None
+                else None
+            ),
+            tool_use_prompt_tokens=(
+                BenchmarkMetricSummary.from_dict(dict(data["tool_use_prompt_tokens"]))
+                if data.get("tool_use_prompt_tokens") is not None
                 else None
             ),
             total_tokens=(

@@ -111,10 +111,13 @@ def _aggregate_metrics(runs: Sequence[BenchmarkRun]) -> BenchmarkAggregateMetric
     steps = _metric_summary([run.metrics.agent_step_count if run.metrics is not None else None for run in runs])
     logical_requests = _metric_summary([run.metrics.logical_provider_request_count if run.metrics is not None else None for run in runs])
     input_tokens = _metric_summary([run.metrics.input_tokens if run.metrics is not None else None for run in runs])
+    cached_input_tokens = _metric_summary([run.metrics.cached_input_tokens if run.metrics is not None else None for run in runs])
     output_tokens = _metric_summary([run.metrics.output_tokens if run.metrics is not None else None for run in runs])
+    reasoning_or_thinking_tokens = _metric_summary([run.metrics.reasoning_or_thinking_tokens if run.metrics is not None else None for run in runs])
+    tool_use_prompt_tokens = _metric_summary([run.metrics.tool_use_prompt_tokens if run.metrics is not None else None for run in runs])
     total_tokens = _metric_summary([run.metrics.total_tokens if run.metrics is not None else None for run in runs])
     cost = _metric_summary([run.metrics.cost if run.metrics is not None else None for run in runs])
-    if all(summary is None for summary in (duration, tool_calls, builds, steps, logical_requests, input_tokens, output_tokens, total_tokens, cost)):
+    if all(summary is None for summary in (duration, tool_calls, builds, steps, logical_requests, input_tokens, cached_input_tokens, output_tokens, reasoning_or_thinking_tokens, tool_use_prompt_tokens, total_tokens, cost)):
         return None
     return BenchmarkAggregateMetrics(
         duration_seconds=duration,
@@ -123,7 +126,10 @@ def _aggregate_metrics(runs: Sequence[BenchmarkRun]) -> BenchmarkAggregateMetric
         agent_step_count=steps,
         logical_provider_request_count=logical_requests,
         input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
         output_tokens=output_tokens,
+        reasoning_or_thinking_tokens=reasoning_or_thinking_tokens,
+        tool_use_prompt_tokens=tool_use_prompt_tokens,
         total_tokens=total_tokens,
         cost=cost,
         extra={"observations": len(runs)},

@@ -253,7 +253,14 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
                 "assistant_message": "plan",
                 "tool_call_count": 1,
                 "provider_metadata": {"provider": "gemini", "model": "gemini-3.1-flash-lite"},
-                "usage": {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18},
+                "usage": {
+                    "input_tokens": 11,
+                    "cached_content_token_count": 2,
+                    "output_tokens": 7,
+                    "thoughts_token_count": 3,
+                    "tool_use_prompt_token_count": 4,
+                    "total_tokens": 18,
+                },
             },
         )
     )
@@ -280,7 +287,14 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
     assert collection.model == "gemini-3.1-flash-lite"
     assert collection.tool_call_count == 2
     assert collection.tool_names == ("write_file", "read_file")
-    assert collection.usage == {"input_tokens": 11, "output_tokens": 7, "total_tokens": 18}
+    assert collection.usage == {
+        "input_tokens": 11,
+        "cached_content_token_count": 2,
+        "output_tokens": 7,
+        "thoughts_token_count": 3,
+        "tool_use_prompt_token_count": 4,
+        "total_tokens": 18,
+    }
     assert collection.provider_metadata == {"provider": "gemini", "model": "gemini-3.1-flash-lite"}
     assert collection.logical_provider_request_count == 1
     assert collection.retrieved_item_ids == ("yarn:item:1",)
@@ -288,10 +302,14 @@ def test_collects_normalized_evidence_from_storage(tmp_path: Path) -> None:
     assert collection.injected_item_ids == ("yarn:item:1",)
     assert collection.provenance_refs == ("yarn|artifact|https://maven.fabricmc.net|build.6|abc123",)
     assert collection.metrics.input_tokens == 11
+    assert collection.metrics.cached_input_tokens == 2
     assert collection.metrics.output_tokens == 7
+    assert collection.metrics.reasoning_or_thinking_tokens == 3
+    assert collection.metrics.tool_use_prompt_tokens == 4
     assert collection.metrics.total_tokens == 18
     assert collection.metrics.build_count == 1
     assert collection.metrics.logical_provider_request_count == 1
+    assert collection.metrics.cost is None
     assert collection.minecraft_result is not None and collection.minecraft_result.passed
     assert collection.environment_identity is not None
     assert collection.environment_identity["detected_versions"]["minecraft"] == "1.21.11"
@@ -370,6 +388,97 @@ def test_collects_none_semantics_and_brain_off_zeroes(tmp_path: Path) -> None:
     assert collection.retrieved_count == 0
     assert collection.selected_count == 0
     assert collection.injected_count == 0
+    assert collection.metrics.input_tokens is None
+    assert collection.metrics.cached_input_tokens is None
+    assert collection.metrics.output_tokens is None
+    assert collection.metrics.reasoning_or_thinking_tokens is None
+    assert collection.metrics.tool_use_prompt_tokens is None
+    assert collection.metrics.total_tokens is None
+    assert collection.metrics.cost is None
+    assert collection.inconsistencies == ()
+
+
+def test_collects_multiple_model_responses_as_run_level_usage(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "22222222-2222-4222-8222-222222222225"
+    run_state = RunState(
+        run_id=run_id,
+        task="inspect",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T11:05:00"),
+        provider_error_kind="rate_limit",
+        provider_error_message="provider error",
+        termination_reason="provider error",
+        logical_provider_request_count=2,
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="provider error",
+            generated_at=_utc("2026-08-11T11:05:02"),
+        )
+    )
+    writer = storage.event_writer(run_id)
+    writer.append(RunEvent(run_id=run_id, event_type=RunEventType.MODEL_CALLED, payload={"model_config": {"model": "gemini-3.1-flash-lite"}}))
+    writer.append(
+        RunEvent(
+            run_id=run_id,
+            event_type=RunEventType.MODEL_RESPONDED,
+            payload={
+                "assistant_message": "first",
+                "provider_metadata": {"provider": "gemini", "model": "gemini-3.1-flash-lite"},
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_content_token_count": 1,
+                    "output_tokens": 5,
+                    "thoughts_token_count": 2,
+                    "tool_use_prompt_token_count": 1,
+                    "total_tokens": 15,
+                },
+            },
+        )
+    )
+    writer.append(RunEvent(run_id=run_id, event_type=RunEventType.MODEL_CALLED, payload={"model_config": {"model": "gemini-3.1-flash-lite"}}))
+    writer.append(
+        RunEvent(
+            run_id=run_id,
+            event_type=RunEventType.MODEL_RESPONDED,
+            payload={
+                "assistant_message": "second",
+                "provider_metadata": {"provider": "gemini", "model": "gemini-3.1-flash-lite"},
+                "usage": {
+                    "input_tokens": 3,
+                    "cached_content_token_count": 2,
+                    "output_tokens": 4,
+                    "thoughts_token_count": 1,
+                    "tool_use_prompt_token_count": 2,
+                    "total_tokens": 7,
+                },
+            },
+        )
+    )
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.usage == {
+        "input_tokens": 13,
+        "cached_content_token_count": 3,
+        "output_tokens": 9,
+        "thoughts_token_count": 3,
+        "tool_use_prompt_token_count": 3,
+        "total_tokens": 22,
+    }
+    assert collection.metrics.input_tokens == 13
+    assert collection.metrics.cached_input_tokens == 3
+    assert collection.metrics.output_tokens == 9
+    assert collection.metrics.reasoning_or_thinking_tokens == 3
+    assert collection.metrics.tool_use_prompt_tokens == 3
+    assert collection.metrics.total_tokens == 22
+    assert collection.logical_provider_request_count == 2
     assert collection.inconsistencies == ()
 
 

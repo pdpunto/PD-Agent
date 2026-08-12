@@ -76,6 +76,44 @@ def _model_call_count(events: Sequence[RunEvent]) -> int:
     return sum(1 for event in events if event.event_type == RunEventType.MODEL_CALLED)
 
 
+def _usage_from_event(event: RunEvent) -> dict[str, Any] | None:
+    if event.event_type != RunEventType.MODEL_RESPONDED:
+        return None
+    payload = event.payload
+    if not isinstance(payload, Mapping):
+        return None
+    usage = payload.get("usage")
+    if isinstance(usage, Mapping):
+        return dict(usage)
+    return None
+
+
+def _aggregate_usage(usages: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    aggregate: dict[str, Any] = {}
+    seen_usage = False
+    for usage in usages:
+        if not usage:
+            continue
+        seen_usage = True
+        for key, value in usage.items():
+            if value is None:
+                continue
+            existing = aggregate.get(key)
+            if isinstance(value, bool):
+                if key not in aggregate:
+                    aggregate[key] = value
+                continue
+            if isinstance(value, (int, float)):
+                if isinstance(existing, (int, float)) and not isinstance(existing, bool):
+                    aggregate[key] = existing + value
+                elif key not in aggregate:
+                    aggregate[key] = value
+                continue
+            if key not in aggregate:
+                aggregate[key] = value
+    return aggregate if seen_usage else None
+
+
 def _trace_provenance_refs(trace: KnowledgeTrace) -> tuple[str, ...]:
     refs: list[str] = []
     for attempt in trace.source_attempts:
@@ -432,15 +470,41 @@ class BenchmarkCollector:
         elif run_state is not None and run_state.build_results:
             duration_seconds = run_state.build_results[-1].duration_seconds
 
+        input_tokens = self._usage_value(usage, "input_tokens", "prompt_token_count", "input_token_count")
+        cached_input_tokens = self._usage_value(usage, "cached_input_tokens", "cached_content_token_count")
+        output_tokens = self._usage_value(
+            usage,
+            "output_tokens",
+            "candidates_token_count",
+            "output_token_count",
+            "response_token_count",
+        )
+        reasoning_or_thinking_tokens = self._usage_value(
+            usage,
+            "reasoning_or_thinking_tokens",
+            "reasoning_tokens",
+            "thinking_tokens",
+            "thoughts_token_count",
+        )
+        tool_use_prompt_tokens = self._usage_value(
+            usage,
+            "tool_use_prompt_tokens",
+            "tool_use_prompt_token_count",
+        )
+        total_tokens = self._usage_value(usage, "total_tokens", "total_token_count")
+
         metrics = BenchmarkMetrics(
             duration_seconds=duration_seconds,
             tool_call_count=tool_call_count,
             build_count=len(build_attempts) if build_attempts else None,
             agent_step_count=run_state.agent_step_count if run_state is not None else None,
             logical_provider_request_count=logical_provider_request_count,
-            input_tokens=usage.get("input_tokens") if usage is not None else None,
-            output_tokens=usage.get("output_tokens") if usage is not None else None,
-            total_tokens=usage.get("total_tokens") if usage is not None else None,
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            output_tokens=output_tokens,
+            reasoning_or_thinking_tokens=reasoning_or_thinking_tokens,
+            tool_use_prompt_tokens=tool_use_prompt_tokens,
+            total_tokens=total_tokens,
             cost=usage.get("cost") if usage is not None and isinstance(usage.get("cost"), (int, float)) else None,
             extra={
                 "provider": provider,
@@ -519,15 +583,24 @@ class BenchmarkCollector:
         return metadata
 
     def _usage(self, provider_response: AgentResponse | None, events: Sequence[RunEvent]) -> dict[str, Any] | None:
+        event_usages = tuple(usage for usage in (_usage_from_event(event) for event in events) if usage)
+        if event_usages:
+            return _aggregate_usage(event_usages)
         if provider_response is not None and provider_response.usage is not None:
             return dict(provider_response.usage)
-        for event in events:
-            if event.event_type == RunEventType.MODEL_RESPONDED:
-                payload = event.payload
-                if isinstance(payload, Mapping):
-                    usage = payload.get("usage")
-                    if isinstance(usage, Mapping):
-                        return dict(usage)
+        return None
+
+    def _usage_value(self, usage: Mapping[str, Any] | None, *keys: str) -> int | None:
+        if usage is None:
+            return None
+        for key in keys:
+            value = usage.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
         return None
 
     def _tool_names(self, logical_tool_calls: Sequence[tuple[str, str | None]]) -> tuple[str, ...]:
