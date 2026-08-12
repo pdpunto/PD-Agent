@@ -149,6 +149,12 @@ class AgentRuntime:
                         {
                             "assistant_message": response.assistant_message,
                             "tool_call_count": len(response.tool_calls),
+                            "requested_tool_names": [call.tool_name for call in response.tool_calls],
+                            "offered_tool_names": list(offered_tool_names),
+                            "unavailable_tool_names": [
+                                call.tool_name for call in response.tool_calls if call.tool_name not in set(offered_tool_names)
+                            ],
+                            "gate_violation": any(call.tool_name not in set(offered_tool_names) for call in response.tool_calls),
                             "usage": response.usage,
                             "provider_metadata": response.provider_metadata,
                         },
@@ -383,11 +389,49 @@ class AgentRuntime:
     ) -> tuple[ToolResult, ...]:
         if not tool_calls:
             return ()
-        _ = offered_tool_names
+        offered_tool_name_set = set(offered_tool_names)
+        requested_tool_names = tuple(call.tool_name for call in tool_calls)
+        unavailable_tool_names = tuple(
+            dict.fromkeys(call.tool_name for call in tool_calls if call.tool_name not in offered_tool_name_set)
+        )
+        if unavailable_tool_names:
+            self._emit(
+                run_state.run_id,
+                RunEventType.ACTION_GATE_VIOLATION,
+                {
+                    "requested_tool_names": list(requested_tool_names),
+                    "offered_tool_names": list(offered_tool_names),
+                    "unavailable_tool_names": list(unavailable_tool_names),
+                    "gate_violation": True,
+                    "message": (
+                        f"Tool(s) {list(unavailable_tool_names)!r} are not available in the current action gate. "
+                        "Choose one of the offered tools or return no tool call."
+                    ),
+                },
+            )
         context = ToolExecutionContext(project_root=project_snapshot.project_root, limits=limits, run_id=run_state.run_id)
         results: list[ToolResult] = []
         for call in tool_calls:
             self._check_limits(run_state, limits)
+            if call.tool_name not in offered_tool_name_set:
+                results.append(
+                    ToolResult(
+                        call_id=call.call_id,
+                        tool_name=call.tool_name,
+                        status=ToolResultStatus.ERROR,
+                        error=(
+                            f"Tool '{call.tool_name}' is not available in the current action gate. "
+                            "Choose one of the offered tools or return no tool call."
+                        ),
+                        metadata={
+                            "gate_violation": True,
+                            "requested_tool_names": list(requested_tool_names),
+                            "offered_tool_names": list(offered_tool_names),
+                            "unavailable_tool_names": list(unavailable_tool_names),
+                        },
+                    )
+                )
+                continue
             result = self.tool_executor.execute(call, context)
             results.append(result)
             run_state.record_tool_call()
@@ -643,7 +687,8 @@ class AgentRuntime:
             progress_detected = True
             self._telemetry.last_operational_progress_step = run_state.agent_step_count
 
-        inspection_only_step = bool(tool_calls) and all(call.tool_name in _INSPECTION_TOOLS for call in tool_calls)
+        gate_violation = any(result.metadata.get("gate_violation") for result in tool_results)
+        inspection_only_step = bool(tool_calls) and all(call.tool_name in _INSPECTION_TOOLS for call in tool_calls) and not gate_violation
         if progress_detected:
             self._telemetry.consecutive_inspection_steps = 0
             self._telemetry.action_pressure_level = ActionGateState.NORMAL.value

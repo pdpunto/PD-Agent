@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,7 +57,11 @@ def _as_mapping(value: object) -> dict[str, Any] | None:
 
 def _filesystem_safe_fragment(value: str) -> str:
     fragment = re.sub(r'[<>:"/\\|?*]+', "_", str(value)).strip(" .")
-    return fragment or "run"
+    if not fragment:
+        return "run"
+    if len(fragment) <= 24:
+        return fragment
+    return hashlib.sha256(fragment.encode("utf-8")).hexdigest()[:16]
 
 
 def _knowledge_need_from_mapping(data: Mapping[str, Any], *, environment: KnowledgeEnvironment) -> KnowledgeNeed:

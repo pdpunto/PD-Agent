@@ -18,6 +18,7 @@ from pd_agent.benchmark import (
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
 )
+from pd_agent.benchmark.executor import _filesystem_safe_fragment
 from pd_agent.brain import (
     CompatibilityStatus,
     KnowledgeEnvironment,
@@ -486,6 +487,13 @@ def test_executor_sanitizes_filesystem_run_fragment_on_windows(monkeypatch: pyte
     _, kwargs = fake_minecraft.calls[0]
     assert kwargs["run_id"] == result.workspace.run_id
     assert ":" not in kwargs["run_id"]
+
+
+def test_filesystem_safe_fragment_shortens_long_attempt_ids() -> None:
+    fragment = _filesystem_safe_fragment("B001:1:" + "x" * 200)
+
+    assert len(fragment) == 16
+    assert all(char in "0123456789abcdef" for char in fragment)
 
 
 @pytest.mark.parametrize(
