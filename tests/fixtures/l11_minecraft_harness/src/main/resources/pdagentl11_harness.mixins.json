@@ -1,0 +1,10 @@
+{
+  "required": true,
+  "package": "dev.pdpunto.l11harness.mixin",
+  "mixins": [
+    "BlockNeighborUpdateMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

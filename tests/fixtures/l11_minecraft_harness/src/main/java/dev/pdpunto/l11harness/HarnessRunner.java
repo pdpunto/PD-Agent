@@ -34,14 +34,16 @@ final class HarnessRunner {
         }
 
         HarnessSignals.reset();
-        world.setBlockState(
-            SIGNAL_POS,
-            HarnessBlocks.neighborUpdateProbe().getDefaultState(),
-            Block.NOTIFY_ALL
-        );
+        world.setBlockState(SIGNAL_POS, Blocks.DIAMOND_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(CONTROLLED_POS, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
         HarnessSignals.reset();
-        boolean changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
+        HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS);
+        boolean changed;
+        try {
+            changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
+        } finally {
+            HarnessSignals.disarmNeighborUpdateProbe();
+        }
         BlockState actual = world.getBlockState(CONTROLLED_POS);
         boolean neighborTriggered = config.expectNeighborUpdate() && HarnessSignals.neighborUpdateTriggered();
         boolean statePass = changed && actual.equals(options.expectedBlockState());

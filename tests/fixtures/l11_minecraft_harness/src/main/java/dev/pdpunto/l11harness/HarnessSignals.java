@@ -1,22 +1,38 @@
 package dev.pdpunto.l11harness;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-final class HarnessSignals {
+import net.minecraft.util.math.BlockPos;
+
+public final class HarnessSignals {
     private static final AtomicBoolean NEIGHBOR_UPDATE_TRIGGERED = new AtomicBoolean(false);
+    private static final AtomicReference<BlockPos> ARMED_NEIGHBOR_UPDATE_POS = new AtomicReference<>();
 
     private HarnessSignals() {
     }
 
-    static void reset() {
+    public static void reset() {
         NEIGHBOR_UPDATE_TRIGGERED.set(false);
+        ARMED_NEIGHBOR_UPDATE_POS.set(null);
     }
 
-    static void markNeighborUpdateTriggered() {
-        NEIGHBOR_UPDATE_TRIGGERED.set(true);
+    public static void armNeighborUpdateProbe(BlockPos pos) {
+        ARMED_NEIGHBOR_UPDATE_POS.set(pos.toImmutable());
     }
 
-    static boolean neighborUpdateTriggered() {
+    public static void disarmNeighborUpdateProbe() {
+        ARMED_NEIGHBOR_UPDATE_POS.set(null);
+    }
+
+    public static void markNeighborUpdateTriggered(BlockPos pos) {
+        BlockPos armedPos = ARMED_NEIGHBOR_UPDATE_POS.get();
+        if (armedPos != null && armedPos.equals(pos)) {
+            NEIGHBOR_UPDATE_TRIGGERED.set(true);
+        }
+    }
+
+    public static boolean neighborUpdateTriggered() {
         return NEIGHBOR_UPDATE_TRIGGERED.get();
     }
 }

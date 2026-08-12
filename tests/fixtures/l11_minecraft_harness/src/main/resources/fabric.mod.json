@@ -8,6 +8,9 @@
       "dev.pdpunto.l11harness.L11HarnessMod"
     ]
   },
+  "mixins": [
+    "pdagentl11_harness.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~1.21.11"

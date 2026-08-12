@@ -45,12 +45,12 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     manifest = json.loads(_read(HARNESS_FIXTURE / "src" / "main" / "resources" / "fabric.mod.json"))
     config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
     runner_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
-    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
-    blocks_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessBlocks.java")
     identity_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "TargetIdentityProbe.java")
     result_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java")
     mod_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java")
     signals_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessSignals.java")
+    mixin_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "mixin" / "BlockNeighborUpdateMixin.java")
+    mixin_json = _read(HARNESS_FIXTURE / "src" / "main" / "resources" / "pdagentl11_harness.mixins.json")
 
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
     assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' in build_file
@@ -60,6 +60,7 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert manifest["id"] == "pdagentl11_harness"
     assert manifest["environment"] == "server"
     assert manifest["entrypoints"]["server"] == ["dev.pdpunto.l11harness.L11HarnessMod"]
+    assert manifest["mixins"] == ["pdagentl11_harness.mixins.json"]
     assert 'minecraft("com.mojang:minecraft:${property("minecraft_version")}")' in build_file
     assert 'modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")' in build_file
     assert 'pd.agent.expectNeighborUpdate' in build_file
@@ -69,14 +70,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "ServerLifecycleEvents.SERVER_STARTED" not in mod_source
     assert "server.stop(false)" in mod_source
     assert "HarnessSignals.reset()" in mod_source
-    assert "Registry.register" not in mod_source
-    assert "registryKey" not in mod_source
-    assert "neighbor_update_probe" in blocks_source
-    assert "Registry.register" in blocks_source
-    assert "NeighborUpdateProbeBlock" in blocks_source
-    assert "neighborUpdate(" in probe_source
-    assert "HarnessSignals.markNeighborUpdateTriggered()" in probe_source
-    assert "isClient()" in probe_source
+    assert "HarnessBlocks" not in mod_source
+    assert "Blocks.DIAMOND_BLOCK.getDefaultState()" in runner_source
+    assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in runner_source
+    assert "HarnessSignals.disarmNeighborUpdateProbe()" in runner_source
     assert "Blocks.OBSERVER" not in runner_source
     assert "ObserverBlock.POWERED" not in runner_source
     assert "FacingBlock.FACING" not in runner_source
@@ -101,9 +98,17 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "target_sha_match" in result_source
     assert "functional_test_result" in result_source
     assert "shutdown_requested" in result_source
+    assert "BlockNeighborUpdateMixin" in mixin_source
+    assert "HarnessSignals.markNeighborUpdateTriggered(pos)" in mixin_source
+    assert "world.isClient()" in mixin_source
+    assert "AbstractBlock.class" in mixin_source
+    assert "BlockNeighborUpdateMixin" in mixin_json
     assert "AtomicBoolean" in signals_source
+    assert "AtomicReference" in signals_source
     assert "reset()" in signals_source
-    assert "markNeighborUpdateTriggered()" in signals_source
+    assert "armNeighborUpdateProbe" in signals_source
+    assert "disarmNeighborUpdateProbe" in signals_source
+    assert "markNeighborUpdateTriggered(" in signals_source
     assert "neighborUpdateTriggered()" in signals_source
     assert "Files.move" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
     assert "ATOMIC_MOVE" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
@@ -115,8 +120,8 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "SUPPORTED_TEST_IDS" in config_source
     assert "unsupported test id" in config_source
     assert "result path must be absolute" in config_source
-    assert "neighborUpdateProbe()" in runner_source
-    assert "HarnessSignals.neighborUpdateTriggered()" in runner_source
+    assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in runner_source
+    assert "HarnessSignals.disarmNeighborUpdateProbe()" in runner_source
     assert "waitForObserverPowered" not in runner_source
     assert "boundedNeighborWaitMillis" not in runner_source
 
@@ -149,11 +154,12 @@ def test_batch_b_built_jars_stay_separate() -> None:
 def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> None:
     target_source = _read(TARGET_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java")
     harness_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
-    probe_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java")
     runtime_options_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRuntimeOptions.java")
+    mixin_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "mixin" / "BlockNeighborUpdateMixin.java")
 
     assert "Blocks.AIR.getDefaultState()" in harness_source
-    assert "HarnessBlocks.neighborUpdateProbe()" in harness_source
+    assert "Blocks.DIAMOND_BLOCK.getDefaultState()" in harness_source
+    assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in harness_source
     assert "HarnessSignals.neighborUpdateTriggered()" in harness_source
     assert "ExampleMod.applyProbeState" in harness_source
     assert "expectedBlockState()" in runtime_options_source
@@ -162,5 +168,5 @@ def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> N
     assert "ServerWorld" in target_source
     assert "applyProbeState" in target_source
     assert "expectedProbeState" in target_source
-    assert "neighborUpdate(" in probe_source
-    assert "HarnessSignals.markNeighborUpdateTriggered()" in probe_source
+    assert "neighborUpdate(" in mixin_source
+    assert "HarnessSignals.markNeighborUpdateTriggered(pos)" in mixin_source

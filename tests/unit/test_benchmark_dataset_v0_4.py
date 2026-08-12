@@ -32,9 +32,9 @@ def _b003_accepts(target_source: str, harness_source: str) -> bool:
     harness_required = (
         "neighbor_update_triggered",
         "HarnessSignals",
-        "NeighborUpdateProbeBlock",
         "neighborUpdate(",
-        "HarnessSignals.markNeighborUpdateTriggered()",
+        "BlockNeighborUpdateMixin",
+        "HarnessSignals.markNeighborUpdateTriggered(pos)",
     )
     return all(item in target_source for item in target_required) and all(item in harness_source for item in harness_required)
 
@@ -163,8 +163,8 @@ def test_v0_4_b003_controls_and_harness_signal() -> None:
     harness_mod = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java").read_text(encoding="utf-8")
     harness_result = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java").read_text(encoding="utf-8")
     signals_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessSignals.java").read_text(encoding="utf-8")
-    probe_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "NeighborUpdateProbeBlock.java").read_text(encoding="utf-8")
-    blocks_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessBlocks.java").read_text(encoding="utf-8")
+    mixin_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "mixin" / "BlockNeighborUpdateMixin.java").read_text(encoding="utf-8")
+    mixin_json = (harness_root / "src" / "main" / "resources" / "pdagentl11_harness.mixins.json").read_text(encoding="utf-8")
     runner_source = (harness_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java").read_text(encoding="utf-8")
 
     baseline = target_source
@@ -178,5 +178,5 @@ def test_v0_4_b003_controls_and_harness_signal() -> None:
     assert _b003_accepts(baseline, harness_source) is False
     assert _b003_accepts(partial_registry.replace("Block.NOTIFY_ALL", "Block.NOTIFY_NEIGHBORS"), harness_source) is False
     assert _b003_accepts(partial_flag, harness_source) is False
-    harness_bundle = harness_source + harness_mod + harness_result + signals_source + probe_source + blocks_source + runner_source
+    harness_bundle = harness_source + harness_mod + harness_result + signals_source + mixin_source + mixin_json + runner_source
     assert _b003_accepts(correct, harness_bundle) is True

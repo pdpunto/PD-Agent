@@ -13,7 +13,6 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
     @Override
     public void onInitializeServer() {
         HarnessSignals.reset();
-        HarnessBlocks.neighborUpdateProbe();
         Thread waiter = Thread.ofPlatform().daemon().name("pd-agent-l11-harness").start(this::waitForServerStart);
         if (waiter == null) {
             throw new IllegalStateException("failed to start harness waiter thread");
