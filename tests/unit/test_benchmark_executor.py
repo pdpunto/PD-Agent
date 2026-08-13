@@ -138,8 +138,11 @@ def _build(project_root: Path) -> BuildResult:
 
 
 def _artifact(project_root: Path) -> ArtifactResult:
+    artifact_path = project_root / "build" / "libs" / "mod.jar"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("jar", encoding="utf-8")
     return ArtifactResult(
-        path=project_root / "build" / "libs" / "mod.jar",
+        path=artifact_path,
         size=123,
         timestamp=_utc("2026-08-11T10:00:11"),
         classification="VALID",
@@ -285,7 +288,8 @@ class _FakeKnowledgeSource:
 
 
 class _FakeMinecraftRunner:
-    def __init__(self) -> None:
+    def __init__(self, project_root: Path | None = None) -> None:
+        self.project_root = project_root or Path("C:/dev/project")
         self.calls: list[tuple[object, dict[str, object]]] = []
 
     def run(self, spec, **kwargs):
@@ -306,6 +310,16 @@ class _FakeMinecraftRunner:
             ),
             evidence_paths=MinecraftEvidencePaths(root=Path(kwargs["run_id"]) / "evidence"),
         )
+
+
+def _workspace_root(execution_root: Path, scheduled_attempt_id: str, attempt_index: int) -> Path:
+    return (
+        execution_root
+        / "workspaces"
+        / _filesystem_safe_fragment(scheduled_attempt_id)
+        / f"attempt-{attempt_index:03d}"
+        / _fixture_root().name
+    )
 
 
 def test_executor_brain_off_pass_and_cleans_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -436,7 +450,8 @@ def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: 
     )
     task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
     config = _config(brain_enabled=False)
-    fake_minecraft = _FakeMinecraftRunner()
+    workspace_root = _workspace_root(tmp_path / "exec", "attempt-6", 1)
+    fake_minecraft = _FakeMinecraftRunner(project_root=workspace_root)
     scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-6", "attempt_index": 1, "repetition_index": 0})()
 
     result = executor.execute(
@@ -451,7 +466,83 @@ def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: 
     assert fake_minecraft.calls
     spec, kwargs = fake_minecraft.calls[0]
     assert spec.expect_neighbor_update is True
+    assert spec.target_jar == Path("build/libs/mod.jar")
+    assert not spec.target_jar.is_absolute()
     assert kwargs["run_id"] == "attempt-6"
+
+
+def test_executor_blocks_when_minecraft_runner_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
+    config = _config(brain_enabled=False)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-missing-runner", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert result.classification.failure_origin == BenchmarkFailureOrigin.MINECRAFT_HARNESS
+    assert result.classification.failure_code == BenchmarkFailureCode.HARNESS_INFRA_ERROR
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.status == MinecraftTestStatus.INFRA_ERROR
+    assert "minecraft runner is required" in result.minecraft_result.reason
+    assert result.collection.inconsistencies == ()
+
+
+def test_executor_blocks_when_minecraft_target_escapes_runner_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class _ExternalArtifactController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+            run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
+            external_artifact = ArtifactResult(
+                path=tmp_path / "external" / "build" / "libs" / "mod.jar",
+                size=123,
+                timestamp=_utc("2026-08-11T10:00:11"),
+                classification="VALID",
+                metadata={"sha256": "abc"},
+            )
+            external_artifact.path.parent.mkdir(parents=True, exist_ok=True)
+            external_artifact.path.write_text("jar", encoding="utf-8")
+            run_state.artifact_result = external_artifact
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _ExternalArtifactController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
+    config = _config(brain_enabled=False)
+    fake_minecraft = _FakeMinecraftRunner(project_root=tmp_path / "exec" / "workspaces" / "attempt-external" / "attempt-001" / _fixture_root().name)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-external", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert result.classification.failure_origin == BenchmarkFailureOrigin.MINECRAFT_HARNESS
+    assert result.classification.failure_code == BenchmarkFailureCode.HARNESS_INFRA_ERROR
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.status == MinecraftTestStatus.INFRA_ERROR
+    assert "outside minecraft runner project_root" in result.minecraft_result.reason
+    assert fake_minecraft.calls == []
 
 
 def test_executor_sanitizes_filesystem_run_fragment_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -463,12 +554,14 @@ def test_executor_sanitizes_filesystem_run_fragment_on_windows(monkeypatch: pyte
     )
     task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
     config = _config(brain_enabled=False)
-    fake_minecraft = _FakeMinecraftRunner()
     scheduled_attempt = type(
         "Attempt",
         (),
         {"scheduled_attempt_id": "B001:1:cfg-off:abc:def:0:1", "attempt_index": 7, "repetition_index": 0},
     )()
+    fake_minecraft = _FakeMinecraftRunner(
+        project_root=_workspace_root(tmp_path / "exec", scheduled_attempt.scheduled_attempt_id, scheduled_attempt.attempt_index)
+    )
 
     result = executor.execute(
         task,

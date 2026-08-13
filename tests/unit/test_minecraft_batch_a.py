@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pd_agent.core import ToolValidationError
+from pd_agent.core import SecurityViolation, ToolValidationError
 from pd_agent.minecraft import (
     MinecraftEvidencePaths,
     MinecraftLaunchPlan,
@@ -126,6 +126,22 @@ def test_target_metadata_hash_and_paths(tmp_path: Path) -> None:
     assert metadata.loader_version == "0.19.3"
     assert metadata.java_version == "21"
     assert MinecraftTargetMetadata.from_dict(metadata.to_dict()) == metadata
+
+
+def test_target_absolute_path_is_rejected(tmp_path: Path) -> None:
+    jar = _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=jar,
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="batch-a",
+        timeout_seconds=90,
+    )
+
+    with pytest.raises(SecurityViolation):
+        runner.validate_target(spec, java_version="21")
 
 
 def test_target_missing_and_non_jar_are_rejected(tmp_path: Path) -> None:

@@ -16,7 +16,14 @@ from pd_agent.brain.models import KnowledgeType
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager, ProjectContextSource, RunContextSource
 from pd_agent.core import ExecutionLimits, ModelProvider, ProviderError, RunState
-from pd_agent.minecraft import MinecraftTestResult, MinecraftTestRunner, MinecraftTestSpec
+from pd_agent.minecraft import (
+    MinecraftEvidencePaths,
+    MinecraftTargetMetadata,
+    MinecraftTestResult,
+    MinecraftTestRunner,
+    MinecraftTestSpec,
+    MinecraftTestStatus,
+)
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
@@ -133,6 +140,57 @@ def _minecraft_spec_for_task(
         test_id=test_id,
         timeout_seconds=timeout_seconds,
         expect_neighbor_update=expect_neighbor_update,
+    )
+
+
+def _relative_minecraft_target_path(artifact_path: Path, project_root: Path) -> Path:
+    resolved_target = Path(artifact_path).resolve(strict=True)
+    resolved_root = Path(project_root).resolve(strict=True)
+    try:
+        return resolved_target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise BenchmarkWorkspaceError(
+            f"minecraft target jar is outside minecraft runner project_root: {resolved_target} not within {resolved_root}"
+        ) from exc
+
+
+def _minecraft_infra_error_result(
+    *,
+    task: BenchmarkTask,
+    artifact: Any,
+    run_id: str,
+    reason: str,
+    target_jar: Path,
+    evidence_root: Path,
+) -> MinecraftTestResult:
+    artifact_metadata = artifact.metadata if isinstance(artifact.metadata, Mapping) else {}
+    target_sha256 = str(artifact_metadata.get("sha256", "")) if isinstance(artifact_metadata, Mapping) else ""
+    spec = _minecraft_spec_for_task(
+        task,
+        artifact_path=target_jar,
+        artifact_sha256=target_sha256,
+    )
+    target = MinecraftTargetMetadata(
+        path=Path(artifact.path) if artifact.path is not None else target_jar,
+        size_bytes=int(getattr(artifact, "size", 0)),
+        sha256=target_sha256,
+        mod_id=spec.target_mod_id,
+        minecraft_version=spec.minecraft_version,
+        loader_version=spec.loader_version,
+        java_version=task.environment.java_version,
+    )
+    now = datetime.now(timezone.utc)
+    return MinecraftTestResult(
+        run_id=run_id,
+        status=MinecraftTestStatus.INFRA_ERROR,
+        reason=reason,
+        spec=spec,
+        target=target,
+        evidence_paths=MinecraftEvidencePaths(root=evidence_root / run_id),
+        started_at=now,
+        finished_at=now,
+        duration_seconds=0.0,
+        metadata={"phase": "preflight", "reason": reason},
     )
 
 
@@ -384,15 +442,34 @@ class BenchmarkExecutor:
         if not task.validation.minecraft:
             return None
         runner = minecraft_runner
-        if runner is None:
-            return None
         final_build = final_report.final_build or (run_state.build_results[-1] if run_state.build_results else None)
         artifact = final_report.artifact or run_state.artifact_result
         if final_build is None or artifact is None or artifact.path is None:
             return None
+        target_root = Path(runner.project_root) if runner is not None else workspace.workspace_root
+        try:
+            target_jar = _relative_minecraft_target_path(artifact.path, target_root)
+        except (BenchmarkWorkspaceError, FileNotFoundError, OSError) as exc:
+            return _minecraft_infra_error_result(
+                task=task,
+                artifact=artifact,
+                run_id=filesystem_run_id,
+                reason=str(exc),
+                target_jar=artifact.path,
+                evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+            )
+        if runner is None:
+            return _minecraft_infra_error_result(
+                task=task,
+                artifact=artifact,
+                run_id=filesystem_run_id,
+                reason="minecraft runner is required for minecraft validation",
+                target_jar=target_jar,
+                evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+            )
         spec = _minecraft_spec_for_task(
             task,
-            artifact_path=artifact.path,
+            artifact_path=target_jar,
             artifact_sha256=str(artifact.metadata.get("sha256", "")) if isinstance(artifact.metadata, Mapping) else "",
         )
         expected_sha256 = None
