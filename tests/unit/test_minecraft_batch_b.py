@@ -53,7 +53,7 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     mixin_json = _read(HARNESS_FIXTURE / "src" / "main" / "resources" / "pdagentl11_harness.mixins.json")
 
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
-    assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' in build_file
+    assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' not in build_file
     assert "fabric_api_version" not in build_file
     assert "fabric-api" not in build_file
     assert 'id("fabric-loom") version "1.13.3"' in build_file
@@ -81,6 +81,7 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "neighborPass = !config.expectNeighborUpdate() || neighborTriggered" in runner_source
     assert "HarnessResult.pass(config, identity, neighborTriggered)" in runner_source
     assert "HarnessResult.fail(config, identity, reason, neighborTriggered)" in runner_source
+    assert "TargetBridge.applyProbeState" in runner_source
     assert "FabricLoader.getInstance()" in identity_source
     assert "getModContainer" in identity_source
     assert "getOrigin" in identity_source
@@ -110,10 +111,18 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "disarmNeighborUpdateProbe" in signals_source
     assert "markNeighborUpdateTriggered(" in signals_source
     assert "neighborUpdateTriggered()" in signals_source
+    target_bridge_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "TargetBridge.java")
+    assert "Class.forName" in target_bridge_source
+    assert "getDeclaredMethod" in target_bridge_source
+    assert "Modifier.isStatic" in target_bridge_source
+    assert "target entrypoint class not found" in target_bridge_source
+    assert "target bridge method missing" in target_bridge_source
+    assert "target bridge method signature mismatch" in target_bridge_source
     assert "Files.move" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
     assert "ATOMIC_MOVE" in _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResultWriter.java")
     assert "pd.agent.targetModId" in config_source
     assert "pd.agent.targetSha256" in config_source
+    assert "pd.agent.targetEntrypointClass" in config_source
     assert "pd.agent.testId" in config_source
     assert "pd.agent.resultPath" in config_source
     assert "block_state_probe_with_signal" in config_source
@@ -136,19 +145,18 @@ def test_batch_b_harness_supports_signal_test_id_without_relaxing_validation() -
 
 
 def test_batch_b_built_jars_stay_separate() -> None:
-    target_jar = TARGET_FIXTURE / "build" / "libs" / "pd-agent-l11-fixture.jar"
-    harness_jar = HARNESS_FIXTURE / "build" / "libs" / "pd-agent-l11-harness.jar"
+    target_source = _read(TARGET_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java")
+    harness_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "L11HarnessMod.java")
+    target_manifest = json.loads(_read(TARGET_FIXTURE / "src" / "main" / "resources" / "fabric.mod.json"))
+    harness_manifest = json.loads(_read(HARNESS_FIXTURE / "src" / "main" / "resources" / "fabric.mod.json"))
+    build_file = _read(HARNESS_FIXTURE / "build.gradle.kts")
 
-    assert target_jar.exists(), f"missing target jar: {target_jar}"
-    assert harness_jar.exists(), f"missing harness jar: {harness_jar}"
-
-    target_entries = _jar_entries(target_jar)
-    harness_entries = _jar_entries(harness_jar)
-
-    assert "dev/pdpunto/l11/ExampleMod.class" in target_entries
-    assert "dev/pdpunto/l11harness/L11HarnessMod.class" not in target_entries
-    assert "dev/pdpunto/l11harness/L11HarnessMod.class" in harness_entries
-    assert "dev/pdpunto/l11/ExampleMod.class" not in harness_entries
+    assert target_manifest["entrypoints"]["main"] == ["dev.pdpunto.l11.ExampleMod"]
+    assert harness_manifest["entrypoints"]["server"] == ["dev.pdpunto.l11harness.L11HarnessMod"]
+    assert "ExampleMod" in target_source
+    assert "L11HarnessMod" in harness_source
+    assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' not in build_file
+    assert "pd.agent.targetEntrypointClass" in build_file
 
 
 def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> None:
@@ -156,12 +164,13 @@ def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> N
     harness_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
     runtime_options_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRuntimeOptions.java")
     mixin_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "mixin" / "BlockNeighborUpdateMixin.java")
+    build_file = _read(HARNESS_FIXTURE / "build.gradle.kts")
 
     assert "Blocks.AIR.getDefaultState()" in harness_source
     assert "Blocks.DIAMOND_BLOCK.getDefaultState()" in harness_source
     assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in harness_source
     assert "HarnessSignals.neighborUpdateTriggered()" in harness_source
-    assert "ExampleMod.applyProbeState" in harness_source
+    assert "TargetBridge.applyProbeState" in harness_source
     assert "expectedBlockState()" in runtime_options_source
     assert "FUNCTIONAL_FAIL" in runtime_options_source
     assert "world.getBlockState" in harness_source
@@ -170,3 +179,4 @@ def test_batch_b_target_and_harness_sources_encode_functional_state_probe() -> N
     assert "expectedProbeState" in target_source
     assert "neighborUpdate(" in mixin_source
     assert "HarnessSignals.markNeighborUpdateTriggered(pos)" in mixin_source
+    assert "pd.agent.targetEntrypointClass" in build_file

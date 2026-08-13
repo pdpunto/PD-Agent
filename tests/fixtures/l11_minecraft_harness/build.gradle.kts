@@ -18,7 +18,6 @@ dependencies {
     minecraft("com.mojang:minecraft:${property("minecraft_version")}")
     mappings("net.fabricmc:yarn:${property("mappings_version")}:v2")
     modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")
-    compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))
 }
 
 java {
@@ -57,6 +56,7 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     programArgs.add("--nogui")
     jvmArgs.add("-Dpd.agent.targetModId=${providers.gradleProperty("pd.agent.targetModId").get()}")
     jvmArgs.add("-Dpd.agent.targetSha256=${providers.gradleProperty("pd.agent.targetSha256").get()}")
+    jvmArgs.add("-Dpd.agent.targetEntrypointClass=${providers.gradleProperty("pd.agent.targetEntrypointClass").get()}")
     jvmArgs.add("-Dpd.agent.testId=${providers.gradleProperty("pd.agent.testId").get()}")
     jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")
     jvmArgs.add("-Dpd.agent.resultMode=${providers.gradleProperty("pd.agent.resultMode").orElse("pass").get()}")

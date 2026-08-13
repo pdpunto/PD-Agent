@@ -5,9 +5,17 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-record HarnessConfig(String targetModId, String targetSha256, String testId, Path resultPath, boolean expectNeighborUpdate) {
+record HarnessConfig(
+    String targetModId,
+    String targetSha256,
+    String targetEntrypointClass,
+    String testId,
+    Path resultPath,
+    boolean expectNeighborUpdate
+) {
     static final String PROP_TARGET_MOD_ID = "pd.agent.targetModId";
     static final String PROP_TARGET_SHA256 = "pd.agent.targetSha256";
+    static final String PROP_TARGET_ENTRYPOINT_CLASS = "pd.agent.targetEntrypointClass";
     static final String PROP_TEST_ID = "pd.agent.testId";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
@@ -19,10 +27,12 @@ record HarnessConfig(String targetModId, String targetSha256, String testId, Pat
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
+    private static final Pattern JAVA_CLASS_RE = Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*$");
 
     HarnessConfig {
         targetModId = normalizeModId(targetModId);
         targetSha256 = normalizeSha256(targetSha256);
+        targetEntrypointClass = normalizeEntrypointClass(targetEntrypointClass);
         testId = normalizeTestId(testId);
         resultPath = normalizeResultPath(resultPath);
     }
@@ -31,6 +41,7 @@ record HarnessConfig(String targetModId, String targetSha256, String testId, Pat
         return new HarnessConfig(
             requireText(PROP_TARGET_MOD_ID),
             requireText(PROP_TARGET_SHA256),
+            requireText(PROP_TARGET_ENTRYPOINT_CLASS),
             requireText(PROP_TEST_ID),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
@@ -57,6 +68,13 @@ record HarnessConfig(String targetModId, String targetSha256, String testId, Pat
             throw new IllegalArgumentException("invalid target sha256: " + value);
         }
         return value.toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeEntrypointClass(String value) {
+        if (!JAVA_CLASS_RE.matcher(value).matches()) {
+            throw new IllegalArgumentException("invalid target entrypoint class: " + value);
+        }
+        return value;
     }
 
     private static String normalizeTestId(String value) {

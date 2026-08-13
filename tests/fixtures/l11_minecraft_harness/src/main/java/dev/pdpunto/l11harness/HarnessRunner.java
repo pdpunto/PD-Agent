@@ -7,8 +7,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 
-import dev.pdpunto.l11.ExampleMod;
-
 final class HarnessRunner {
     private static final BlockPos CONTROLLED_POS = new BlockPos(8, 64, 8);
     private static final BlockPos SIGNAL_POS = CONTROLLED_POS.east();
@@ -40,7 +38,7 @@ final class HarnessRunner {
         HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS);
         boolean changed;
         try {
-            changed = ExampleMod.applyProbeState(world, CONTROLLED_POS);
+            changed = TargetBridge.applyProbeState(config.targetEntrypointClass(), world, CONTROLLED_POS);
         } finally {
             HarnessSignals.disarmNeighborUpdateProbe();
         }

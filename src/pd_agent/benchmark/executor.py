@@ -24,6 +24,7 @@ from pd_agent.minecraft import (
     MinecraftTestSpec,
     MinecraftTestStatus,
 )
+from pd_agent.minecraft.errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
@@ -480,12 +481,22 @@ class BenchmarkExecutor:
         expected_sha256 = None
         if isinstance(task.acceptance.spec, Mapping):
             expected_sha256 = task.acceptance.spec.get("expected_sha256")
-        return runner.run(
-            spec,
-            run_id=filesystem_run_id,
-            java_version=task.environment.java_version,
-            expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
-        )
+        try:
+            return runner.run(
+                spec,
+                run_id=filesystem_run_id,
+                java_version=task.environment.java_version,
+                expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+            )
+        except (MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError) as exc:
+            return _minecraft_infra_error_result(
+                task=task,
+                artifact=artifact,
+                run_id=filesystem_run_id,
+                reason=str(exc),
+                target_jar=target_jar,
+                evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+            )
 
     def _benchmark_run(
         self,

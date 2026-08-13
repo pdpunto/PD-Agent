@@ -61,6 +61,24 @@ def _read_manifest(path: Path) -> Mapping[str, Any]:
     return data
 
 
+def _target_entrypoint_class(manifest: Mapping[str, Any], *, target_path: Path) -> str:
+    entrypoints = manifest.get("entrypoints")
+    if not isinstance(entrypoints, Mapping):
+        raise MinecraftTestValidationError(f"target fabric.mod.json is missing entrypoints: {target_path}")
+    main = entrypoints.get("main")
+    if isinstance(main, str):
+        candidates = (main,)
+    elif isinstance(main, Sequence) and not isinstance(main, (str, bytes, bytearray)):
+        candidates = tuple(str(item).strip() for item in main if str(item).strip())
+    else:
+        raise MinecraftTestValidationError(f"target fabric.mod.json is missing main entrypoint: {target_path}")
+    if not candidates:
+        raise MinecraftTestValidationError(f"target fabric.mod.json main entrypoint is empty: {target_path}")
+    if len(candidates) != 1:
+        raise MinecraftTestValidationError(f"target fabric.mod.json main entrypoint is ambiguous: {target_path}")
+    return candidates[0]
+
+
 def _non_empty_set(values: Sequence[str] | None) -> frozenset[str]:
     if values is None:
         return frozenset()
@@ -178,12 +196,14 @@ class MinecraftTestRunner:
     ) -> MinecraftLaunchPlan:
         run_id = self._resolve_run_id(run_id)
         target = self.validate_target(spec, java_version=java_version)
+        target_entrypoint_class = _target_entrypoint_class(_read_manifest(target.path), target_path=target.path)
         evidence_paths = self.build_evidence_paths(run_id, create=True)
         run_dir = evidence_paths.root / "runtime"
         system_properties = (
             ("pd.agent.minecraft.run_id", run_id),
             ("pd.agent.minecraft.target_mod_id", spec.target_mod_id),
             ("pd.agent.minecraft.expected_sha256", target.sha256),
+            ("pd.agent.targetEntrypointClass", target_entrypoint_class),
             ("pd.agent.minecraft.test_id", spec.test_id),
             ("pd.agent.minecraft.expect_neighbor_update", str(spec.expect_neighbor_update).lower()),
             ("pd.agent.minecraft.result_path", evidence_paths.harness_result_json.as_posix()),
@@ -342,6 +362,7 @@ class MinecraftTestRunner:
         target = result.target
         expected_block_state_id = "air" if launch_mode == "functional_fail" else "diamond_block"
         expected_sha256 = expected_sha256 or target.sha256
+        target_entrypoint_class = _target_entrypoint_class(_read_manifest(target.path), target_path=target.path)
         result_mode = launch_mode
         hang_millis = str(max(int((result.duration_seconds or 0) * 1000) + 60_000, 600_000))
         if launch_mode != "hang":
@@ -350,6 +371,7 @@ class MinecraftTestRunner:
             f"-Ppd.agent.targetJar={target.path}",
             f"-Ppd.agent.targetModId={target.mod_id}",
             f"-Ppd.agent.targetSha256={expected_sha256}",
+            f"-Ppd.agent.targetEntrypointClass={target_entrypoint_class}",
             f"-Ppd.agent.testId={result.spec.test_id}",
             f"-Ppd.agent.resultPath={result.evidence_paths.harness_result_json}",
             f"-Ppd.agent.runDir={result.evidence_paths.root / 'runtime'}",

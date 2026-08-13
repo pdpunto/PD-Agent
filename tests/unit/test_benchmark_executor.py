@@ -34,6 +34,7 @@ from pd_agent.brain import (
 )
 from pd_agent.core import ArtifactResult, BuildResult, ExecutionLimits, RunState, RunStatus
 from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
+from pd_agent.minecraft.errors import MinecraftTestValidationError
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.context.knowledge import KnowledgeRejection, KnowledgeSourceAttempt, KnowledgeTrace
 
@@ -541,6 +542,39 @@ def test_executor_blocks_when_minecraft_runner_missing(monkeypatch: pytest.Monke
     assert result.minecraft_result.status == MinecraftTestStatus.INFRA_ERROR
     assert "minecraft runner is required" in result.minecraft_result.reason
     assert result.collection.inconsistencies == ()
+
+
+def test_executor_blocks_when_minecraft_runner_rejects_target_contract(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    class _RejectingMinecraftRunner(_FakeMinecraftRunner):
+        def run(self, spec, **kwargs):  # noqa: ANN001
+            raise MinecraftTestValidationError("target fabric.mod.json is missing main entrypoint")
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, expected_neighbor_update=True, test_id="block_state_probe_with_signal")
+    config = _config(brain_enabled=False)
+    fake_minecraft = _RejectingMinecraftRunner(project_root=tmp_path / "exec" / "workspaces" / "attempt-reject" / "attempt-001" / _fixture_root().name)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-reject", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert result.classification.failure_origin == BenchmarkFailureOrigin.MINECRAFT_HARNESS
+    assert result.classification.failure_code == BenchmarkFailureCode.HARNESS_INFRA_ERROR
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.status == MinecraftTestStatus.INFRA_ERROR
+    assert "missing main entrypoint" in result.minecraft_result.reason
 
 
 def test_executor_blocks_when_minecraft_target_escapes_runner_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

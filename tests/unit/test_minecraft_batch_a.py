@@ -32,6 +32,9 @@ def _make_jar(root: Path, name: str = "target.jar") -> Path:
                 "id": "pdagentl11",
                 "version": "1.0.0",
                 "environment": "*",
+                "entrypoints": {
+                    "main": ["dev.pdpunto.l11.ExampleMod"],
+                },
             }
         ),
     )
@@ -202,6 +205,7 @@ def test_launch_plan_serialization(tmp_path: Path) -> None:
     assert plan.run_id == "run-a"
     assert plan.evidence_paths.root.name == "run-a"
     assert dict(plan.system_properties)["pd.agent.minecraft.target_mod_id"] == "pdagentl11"
+    assert dict(plan.system_properties)["pd.agent.targetEntrypointClass"] == "dev.pdpunto.l11.ExampleMod"
     assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
     assert MinecraftLaunchPlan.from_dict(plan.to_dict()) == plan
 

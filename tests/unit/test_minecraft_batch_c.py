@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, MinecraftTestStatus
-from tests.fixtures.artifact_projects import write_manifest_jar
+from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, MinecraftTestStatus, MinecraftTestValidationError
+from tests.fixtures.artifact_projects import write_jar, write_manifest_jar
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,8 +24,18 @@ def _make_jar(root: Path, name: str = "target.jar") -> Path:
                 "id": "pdagentl11",
                 "version": "1.0.0",
                 "environment": "*",
+                "entrypoints": {
+                    "main": ["dev.pdpunto.l11.ExampleMod"],
+                },
             }
         ),
+    )
+
+
+def _make_manifest_jar(root: Path, manifest: dict[str, object], name: str = "target.jar") -> Path:
+    return write_manifest_jar(
+        root / "build" / "libs" / name,
+        manifest=json.dumps(manifest),
     )
 
 
@@ -402,9 +412,91 @@ def test_b003_signal_test_id_does_not_override_neighbor_flag(tmp_path: Path) -> 
     plan_false = runner.build_launch_plan(spec_false, run_id="run-signal-false", java_version="21")
 
     assert dict(plan_true.system_properties)["pd.agent.minecraft.test_id"] == "block_state_probe_with_signal"
+    assert dict(plan_true.system_properties)["pd.agent.targetEntrypointClass"] == "dev.pdpunto.l11.ExampleMod"
     assert dict(plan_true.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "true"
     assert dict(plan_false.system_properties)["pd.agent.minecraft.test_id"] == "block_state_probe_with_signal"
+    assert dict(plan_false.system_properties)["pd.agent.targetEntrypointClass"] == "dev.pdpunto.l11.ExampleMod"
     assert dict(plan_false.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
+
+
+def test_runner_rejects_missing_or_ambiguous_main_entrypoint(tmp_path: Path) -> None:
+    runner = _runner(tmp_path)
+    _make_manifest_jar(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "id": "pdagentl11",
+            "version": "1.0.0",
+            "environment": "*",
+            "entrypoints": {},
+        },
+        name="missing-main.jar",
+    )
+    _make_manifest_jar(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "id": "pdagentl11",
+            "version": "1.0.0",
+            "environment": "*",
+            "entrypoints": {
+                "main": ["dev.pdpunto.l11.ExampleMod", "dev.pdpunto.l11.OtherMod"],
+            },
+        },
+        name="ambiguous-main.jar",
+    )
+    missing_manifest = write_jar(
+        tmp_path / "build" / "libs" / "missing-manifest.jar",
+        files={"README.txt": "no manifest here"},
+    )
+    malformed_manifest = write_jar(
+        tmp_path / "build" / "libs" / "malformed-manifest.jar",
+        files={
+            "fabric.mod.json": "{not-json",
+        },
+    )
+
+    missing_spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/missing-main.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+    )
+    missing_manifest_spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/missing-manifest.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+    )
+    malformed_manifest_spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/malformed-manifest.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+    )
+    ambiguous_spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/ambiguous-main.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+    )
+
+    with pytest.raises(MinecraftTestValidationError, match="missing fabric.mod.json"):
+        runner.build_launch_plan(missing_manifest_spec, run_id="missing-manifest", java_version="21")
+    with pytest.raises(MinecraftTestValidationError, match="fabric.mod.json is not valid JSON"):
+        runner.build_launch_plan(malformed_manifest_spec, run_id="malformed-manifest", java_version="21")
+    with pytest.raises(MinecraftTestValidationError, match="main entrypoint"):
+        runner.build_launch_plan(missing_spec, run_id="missing-main", java_version="21")
+    with pytest.raises(MinecraftTestValidationError, match="main entrypoint"):
+        runner.build_launch_plan(ambiguous_spec, run_id="ambiguous-main", java_version="21")
 
 
 def test_run_propagates_gradle_user_home_to_harness_wrapper(tmp_path: Path) -> None:

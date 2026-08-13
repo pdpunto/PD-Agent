@@ -5,8 +5,6 @@ import java.util.Locale;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 
-import dev.pdpunto.l11.ExampleMod;
-
 record HarnessRuntimeOptions(ResultMode resultMode, String expectedBlockStateId, long hangMillis) {
     static final String PROP_RESULT_MODE = "pd.agent.resultMode";
     static final String PROP_EXPECTED_BLOCK_STATE_ID = "pd.agent.expectedBlockStateId";
@@ -51,7 +49,7 @@ record HarnessRuntimeOptions(ResultMode resultMode, String expectedBlockStateId,
     BlockState expectedBlockState() {
         return switch (expectedBlockStateId) {
             case "air" -> Blocks.AIR.getDefaultState();
-            case "diamond_block" -> ExampleMod.expectedProbeState();
+            case "diamond_block" -> Blocks.DIAMOND_BLOCK.getDefaultState();
             default -> throw new IllegalArgumentException("unsupported expected block state id: " + expectedBlockStateId);
         };
     }
