@@ -84,7 +84,8 @@ class BenchmarkGradleSeedComponent:
     sha256: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "path", str(self.path))
+        normalized_path = str(self.path).replace("\\", "/")
+        object.__setattr__(self, "path", normalized_path)
         object.__setattr__(self, "size_bytes", int(self.size_bytes))
         object.__setattr__(self, "sha256", str(self.sha256))
 
@@ -97,9 +98,10 @@ class BenchmarkGradleSeedComponent:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkGradleSeedComponent":
+        size_bytes = data.get("size_bytes", data.get("size"))
         return cls(
-            path=str(data["path"]),
-            size_bytes=int(data["size_bytes"]),
+            path=str(data["path"]).replace("\\", "/"),
+            size_bytes=int(size_bytes),
             sha256=str(data["sha256"]),
         )
 
@@ -162,14 +164,24 @@ class BenchmarkGradleSeedManifest:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkGradleSeedManifest":
+        raw_components = data.get("components")
+        if raw_components is None:
+            raw_components = data.get("entries", [])
+        total_size_value = data.get("total_size_bytes", data.get("total_bytes", 0))
+        created_at_value = data.get("created_at", datetime.now(timezone.utc).isoformat())
         return cls(
             schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
             seed_id=str(data.get("seed_id", DEFAULT_SEED_ID)),
             seed_version=str(data.get("seed_version", DEFAULT_SEED_VERSION)),
             source_root=data.get("source_root"),
-            components=tuple(BenchmarkGradleSeedComponent.from_dict(item) for item in data.get("components", [])),
-            total_size_bytes=int(data.get("total_size_bytes", 0)),
-            created_at=datetime.fromisoformat(str(data.get("created_at", datetime.now(timezone.utc).isoformat()))),
+            components=tuple(
+                sorted(
+                    (BenchmarkGradleSeedComponent.from_dict(item) for item in raw_components),
+                    key=lambda component: component.path.casefold(),
+                )
+            ),
+            total_size_bytes=int(total_size_value),
+            created_at=datetime.fromisoformat(str(created_at_value)),
             identity_hash=data.get("identity_hash"),
         )
 
@@ -196,6 +208,7 @@ class BenchmarkGradleSeedManifest:
                     sha256=_sha256_file(file_path),
                 )
             )
+        components.sort(key=lambda component: component.path.casefold())
         return cls(
             seed_id=seed_id,
             seed_version=seed_version,
@@ -376,7 +389,7 @@ class BenchmarkGradleEnvironment:
         candidate = seed_manifest_path
         if candidate is None or not candidate.exists():
             return None
-        data = json.loads(candidate.read_text(encoding="utf-8"))
+        data = json.loads(candidate.read_text(encoding="utf-8-sig"))
         if not isinstance(data, Mapping):
             raise BenchmarkGradleEnvironmentError(f"seed manifest must be an object: {candidate}")
         manifest = BenchmarkGradleSeedManifest.from_dict(dict(data))
