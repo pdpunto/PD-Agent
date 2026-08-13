@@ -363,6 +363,105 @@ def test_security_rejection_fails(tmp_path: Path) -> None:
     assert run_state.termination_reason == "tool rejected"
 
 
+def test_first_file_exists_can_recover_to_write_and_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "file-exists-recover", build_state="fail")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="plan",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={"path": "build-state.txt", "content": "pass\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="recover",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="write_file",
+                        arguments={"path": "build-state.txt", "content": "pass\n"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(
+        root,
+        provider,
+        limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5),
+    )
+
+    run_state, report = controller.run(root, "recover from file exists")
+    events = storage.read_events(run_state.run_id)
+    model_called_events = [event for event in events if event.event_type == RunEventType.MODEL_CALLED]
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert run_state.termination_reason == "completed"
+    assert run_state.build_attempt_count == 1
+    assert len(provider.requests) == 2
+    assert provider.requests[1].tool_results[0].status.value == "rejected"
+    assert provider.requests[1].tool_results[0].metadata["rejection_code"] == "file_exists"
+    assert provider.requests[1].tool_results[0].metadata["recoverable"] is True
+    assert "use write_file" in (provider.requests[1].tool_results[0].error or "")
+    assert "consecutive_recoverable_rejections: 1" in provider.requests[1].messages[0].content
+    assert any(event.payload["consecutive_recoverable_rejections"] == 1 for event in model_called_events)
+
+
+def test_repeated_file_exists_rejection_fails_controlled(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "file-exists-repeat", build_state="fail")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="plan",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={"path": "build-state.txt", "content": "pass\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="retry",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="create_file",
+                        arguments={"path": "build-state.txt", "content": "pass\n"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(
+        root,
+        provider,
+        limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5),
+    )
+
+    run_state, report = controller.run(root, "repeat file exists")
+    events = storage.read_events(run_state.run_id)
+
+    assert run_state.state.value == "FAILED"
+    assert report.final_state.value == "FAILED"
+    assert run_state.termination_reason == "repeated recoverable tool rejection without operational progress"
+    assert report.termination_reason == "repeated recoverable tool rejection without operational progress"
+    assert len(provider.requests) == 2
+    assert run_state.build_attempt_count == 0
+    assert provider.requests[1].tool_results[0].metadata["rejection_code"] == "file_exists"
+    assert provider.requests[1].tool_results[0].metadata["recoverable"] is True
+    assert any(
+        event.payload["consecutive_recoverable_rejections"] == 1
+        for event in events
+        if event.event_type == RunEventType.MODEL_CALLED
+    )
+
+
 def test_provider_failure_fails_and_reports(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "provider", build_state="pass")
     provider = ScriptedProvider([ProviderError("boom", kind="protocol", provider="fake", retryable=False)])
@@ -506,6 +605,9 @@ def test_action_transition_policy_escalates_explicitly_at_threshold(tmp_path: Pa
     assert "ACTION REQUIRED: Investigation has consumed several consecutive steps without operational progress." in provider.requests[3].messages[0].content
     assert "Use the evidence already gathered to perform a concrete modification or other task-directed action now" in provider.requests[3].messages[0].content
     assert "If further inspection is required, identify the specific unresolved blocker" in provider.requests[3].messages[0].content
+    assert "existing path or observed existing file -> write_file" in provider.requests[0].messages[0].content
+    assert "genuinely new/nonexistent path -> create_file" in provider.requests[0].messages[0].content
+    assert "recent_inspected_paths" in provider.requests[0].messages[0].content
     assert "phase: PLANNING" in provider.requests[4].messages[0].content
     assert "escalation_state: action_required" in provider.requests[4].messages[0].content
     assert "ACTION REQUIRED" in provider.requests[4].messages[0].content

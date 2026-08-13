@@ -238,6 +238,7 @@ def test_run_summary_exposes_budget_and_phase(tmp_path: Path) -> None:
     assert "tool_calls_remaining: 5" in text
     assert "build_attempts_remaining: 3" in text
     assert "logical_provider_request_count" in text
+    assert "consecutive_recoverable_rejections" in text
 
 
 def test_utf8_truncation_is_explicit_and_valid(tmp_path: Path) -> None:

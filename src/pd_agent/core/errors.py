@@ -23,6 +23,13 @@ class ToolValidationError(PDAgentError):
     """Tool input or schema invalid."""
 
 
+class FileExistsToolValidationError(ToolValidationError):
+    """Recoverable create-file precondition failure."""
+
+    rejection_code = "file_exists"
+    recoverable = True
+
+
 class ToolExecutionError(PDAgentError):
     """Tool execution failed."""
 

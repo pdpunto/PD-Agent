@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from pd_agent.core import (
+    FileExistsToolValidationError,
     Tool,
     ToolExecutionError,
     ToolResult,
@@ -248,7 +249,7 @@ class SearchTextTool:
 
 class WriteFileTool:
     name = "write_file"
-    description = "Write text to existing file within project_root."
+    description = "Modify or replace an existing text file."
     input_schema = _schema(
         {
             "path": {"type": "string", "minLength": 1},
@@ -286,7 +287,7 @@ class WriteFileTool:
 
 class CreateFileTool:
     name = "create_file"
-    description = "Create new text file within project_root."
+    description = "Create a new text file that does not already exist."
     input_schema = _schema(
         {
             "path": {"type": "string", "minLength": 1},
@@ -300,7 +301,9 @@ class CreateFileTool:
         target, _parent = resolver.resolve_parent_for_creation(arguments["path"])
         resolver.reject_protected_mutation(target)
         if target.exists():
-            raise ToolValidationError(f"file already exists: {target}")
+            raise FileExistsToolValidationError(
+                f"file already exists: {target}. create_file is only for new paths. use write_file to modify existing file."
+            )
         content = str(arguments["content"])
         if len(content.encode("utf-8")) > context.limits.max_tool_output_bytes:
             raise ToolValidationError("content too large")

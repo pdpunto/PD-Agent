@@ -42,6 +42,7 @@ class _LoopTelemetry:
     tool_repeat_count: int = 0
     consecutive_inspection_steps: int = 0
     consecutive_gate_violations: int = 0
+    consecutive_recoverable_rejections: int = 0
     recent_inspection_tools: tuple[str, ...] = ()
     recent_inspected_paths: tuple[str, ...] = ()
     last_operational_progress_step: int = 0
@@ -179,7 +180,9 @@ class AgentRuntime:
                         self._persist_state(run_state)
                         break
 
-                    if self._tool_results_have_rejection(tool_results):
+                    recoverable_rejection = self._tool_results_have_recoverable_rejection(tool_results)
+                    fatal_rejection = self._tool_results_have_fatal_rejection(tool_results)
+                    if fatal_rejection:
                         run_state.state = RunStatus.FAILED
                         run_state.termination_reason = "tool rejected"
                         break
@@ -203,6 +206,16 @@ class AgentRuntime:
                         self._persist_state(run_state)
                         continue
 
+                    if recoverable_rejection and not progress_detected:
+                        self._telemetry.consecutive_recoverable_rejections += 1
+                        run_state.consecutive_recoverable_rejections = self._telemetry.consecutive_recoverable_rejections
+                        if self._telemetry.consecutive_recoverable_rejections >= 2:
+                            run_state.state = RunStatus.FAILED
+                            run_state.termination_reason = "repeated recoverable tool rejection without operational progress"
+                            break
+                        self._persist_state(run_state)
+                        continue
+
                     if (
                         run_state.state == RunStatus.PLANNING
                         and tool_results
@@ -215,7 +228,7 @@ class AgentRuntime:
                     if run_state.state == RunStatus.PLANNING:
                         run_state.transition_to(RunStatus.EDITING)
                     elif run_state.state == RunStatus.DIAGNOSING:
-                        self._reset_action_pressure()
+                        self._reset_action_pressure(run_state)
                         run_state.transition_to(RunStatus.CORRECTING if tool_results else RunStatus.FAILED)
                         if run_state.state == RunStatus.FAILED:
                             run_state.termination_reason = "diagnosis produced no correction"
@@ -249,7 +262,7 @@ class AgentRuntime:
                             run_state.state = RunStatus.LIMIT_REACHED
                             run_state.termination_reason = "max_build_attempts reached"
                             break
-                        self._reset_action_pressure()
+                        self._reset_action_pressure(run_state)
                         run_state.transition_to(RunStatus.DIAGNOSING)
                         run_state.last_error = build_result.stderr_log or build_result.stdout_log or f"build failed with exit_code {build_result.exit_code}"
                     self._persist_state(run_state)
@@ -348,6 +361,7 @@ class AgentRuntime:
                 "escalation_state": gate_state.value,
                 "action_required": gate_state != ActionGateState.NORMAL,
                 "consecutive_inspection_steps": self._telemetry.consecutive_inspection_steps,
+                "consecutive_recoverable_rejections": self._telemetry.consecutive_recoverable_rejections,
                 "consecutive_gate_violations": self._telemetry.consecutive_gate_violations,
                 "agent_steps_remaining": max(limits.max_agent_steps - run_state.agent_step_count, 0),
                 "tool_calls_remaining": max(limits.max_tool_calls - run_state.tool_call_count, 0),
@@ -445,7 +459,11 @@ class AgentRuntime:
             results.append(result)
             run_state.record_tool_call()
             self._persist_state(run_state)
-            self._observe_progress(run_state, tool_results=(result,))
+            self._observe_progress(
+                run_state,
+                tool_results=(result,),
+                recoverable_rejection=result.status == ToolResultStatus.REJECTED and result.metadata.get("rejection_code") == "file_exists",
+            )
             if run_state.state.is_terminal():
                 break
         return tuple(results)
@@ -511,6 +529,18 @@ class AgentRuntime:
     def _tool_results_have_rejection(self, tool_results: tuple[ToolResult, ...]) -> bool:
         return any(result.status == ToolResultStatus.REJECTED for result in tool_results)
 
+    def _tool_results_have_recoverable_rejection(self, tool_results: tuple[ToolResult, ...]) -> bool:
+        return any(
+            result.status == ToolResultStatus.REJECTED and result.metadata.get("rejection_code") == "file_exists"
+            for result in tool_results
+        )
+
+    def _tool_results_have_fatal_rejection(self, tool_results: tuple[ToolResult, ...]) -> bool:
+        return any(
+            result.status == ToolResultStatus.REJECTED and result.metadata.get("rejection_code") != "file_exists"
+            for result in tool_results
+        )
+
     def _tool_results_have_change(self, tool_results: tuple[ToolResult, ...]) -> bool:
         return any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results)
 
@@ -545,6 +575,7 @@ class AgentRuntime:
             f"- consecutive_inspection_steps: {telemetry.consecutive_inspection_steps}",
             f"- recent_inspection_tools: {list(telemetry.recent_inspection_tools)}",
             f"- recent_inspected_paths: {list(telemetry.recent_inspected_paths)}",
+            f"- consecutive_recoverable_rejections: {telemetry.consecutive_recoverable_rejections}",
             f"- last_operational_progress_step: {telemetry.last_operational_progress_step}",
             f"- consecutive_gate_violations: {telemetry.consecutive_gate_violations}",
             f"- action_gate_state: {gate_state.value}",
@@ -563,6 +594,7 @@ class AgentRuntime:
                 "tool_calls_remaining": remaining_tool_calls,
                 "build_attempts_remaining": remaining_build_attempts,
                 "consecutive_inspection_steps": telemetry.consecutive_inspection_steps,
+                "consecutive_recoverable_rejections": telemetry.consecutive_recoverable_rejections,
                 "consecutive_gate_violations": telemetry.consecutive_gate_violations,
                 "action_gate_state": gate_state.value,
                 "escalation_state": telemetry.action_pressure_level,
@@ -600,12 +632,20 @@ class AgentRuntime:
                 "- Once evidence is sufficient, perform a concrete modification.",
                 "- Prefer an early build after a plausible implementation.",
             )
+        mutation_rules = (
+            "- File mutation tool selection:",
+            "- existing path or observed existing file -> write_file",
+            "- genuinely new/nonexistent path -> create_file",
+            "- never use create_file to replace an existing file",
+            "- use recent_inspected_paths as guidance, but treat only an observed file as an existing target.",
+        )
         escalation_rules = self._escalation_policy_lines(gate_state)
         return (
             f"- current_phase: {run_state.state.value}",
             f"- goal: {phase_goal}",
             "- inspection alone is not progress.",
             *phase_rules,
+            *mutation_rules,
             "- Use actual build errors as evidence for subsequent correction.",
             *escalation_rules,
         )
@@ -649,8 +689,11 @@ class AgentRuntime:
         *,
         tool_results: tuple[ToolResult, ...] = (),
         build_result: BuildResult | None = None,
+        recoverable_rejection: bool = False,
     ) -> None:
         if tool_results:
+            if recoverable_rejection:
+                return
             if any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results):
                 self._telemetry.last_tool_signature = None
                 self._telemetry.tool_repeat_count = 0
@@ -703,6 +746,8 @@ class AgentRuntime:
         if progress_detected:
             self._telemetry.consecutive_inspection_steps = 0
             self._telemetry.consecutive_gate_violations = 0
+            self._telemetry.consecutive_recoverable_rejections = 0
+            run_state.consecutive_recoverable_rejections = 0
             self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
             return
 
@@ -764,9 +809,12 @@ class AgentRuntime:
             return combined
         return combined[-limit:]
 
-    def _reset_action_pressure(self) -> None:
+    def _reset_action_pressure(self, run_state: RunState | None = None) -> None:
         self._telemetry.consecutive_inspection_steps = 0
         self._telemetry.consecutive_gate_violations = 0
+        self._telemetry.consecutive_recoverable_rejections = 0
+        if run_state is not None:
+            run_state.consecutive_recoverable_rejections = 0
         self._telemetry.action_pressure_level = ActionGateState.NORMAL.value
 
     def _action_gate_state(self, telemetry: _LoopTelemetry) -> ActionGateState:

@@ -92,6 +92,9 @@ def test_valid_read_write_create_search_delete_and_events(tmp_path: Path) -> Non
     assert search_result.output["matches"]
     assert delete_result.status == ToolResultStatus.SUCCESS
     assert not (root / "empty.txt").exists()
+    tools = {tool.name: tool for tool in create_filesystem_tools()}
+    assert "existing" in tools["write_file"].description.lower()
+    assert "does not already exist" in tools["create_file"].description.lower()
 
     events = [
         json.loads(line)
@@ -174,12 +177,43 @@ def test_invalid_input_unknown_tool_and_noop_write_rejections(tmp_path: Path) ->
     assert unknown_tool.status == ToolResultStatus.REJECTED
     assert create_exists.status == ToolResultStatus.REJECTED
     assert write_missing.status == ToolResultStatus.REJECTED
+    assert create_exists.metadata["recoverable"] is True
+    assert create_exists.metadata["rejection_code"] == "file_exists"
+    assert write_missing.metadata["recoverable"] is False
+    assert "rejection_code" not in write_missing.metadata
 
     event_types = [
         json.loads(line)["event_type"]
         for line in storage.paths_for(run_id).events_jsonl.read_text(encoding="utf-8").splitlines()
     ]
     assert "TOOL_REJECTED" in event_types
+
+
+def test_file_exists_rejection_is_structured_and_emits_metadata(tmp_path: Path) -> None:
+    root = _prepare_project(tmp_path)
+    executor, context, storage, run_id = _make_executor(root)
+
+    result = executor.execute(
+        ToolCall(
+            call_id="20",
+            tool_name="create_file",
+            arguments={"path": "existing.txt", "content": "replacement"},
+        ),
+        context,
+    )
+
+    assert result.status == ToolResultStatus.REJECTED
+    assert result.metadata["recoverable"] is True
+    assert result.metadata["rejection_code"] == "file_exists"
+    assert "write_file" in (result.error or "")
+    assert (root / "existing.txt").read_text(encoding="utf-8") == "old content"
+
+    event = json.loads(
+        storage.paths_for(run_id).events_jsonl.read_text(encoding="utf-8").splitlines()[-1]
+    )
+    assert event["event_type"] == "TOOL_REJECTED"
+    assert event["payload"]["rejection_code"] == "file_exists"
+    assert event["payload"]["recoverable"] is True
 
 
 def test_internal_exception_becomes_error(tmp_path: Path) -> None:

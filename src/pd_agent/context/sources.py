@@ -217,6 +217,7 @@ def _run_state_summary(run_state, limits: ExecutionLimits | None) -> str:
         f"agent_step_count: {run_state.agent_step_count}",
         f"logical_provider_request_count: {run_state.logical_provider_request_count}",
         f"build_attempt_count: {run_state.build_attempt_count}",
+        f"consecutive_recoverable_rejections: {getattr(run_state, 'consecutive_recoverable_rejections', 0)}",
         f"last_error: {run_state.last_error}",
         f"termination_reason: {run_state.termination_reason}",
     ]

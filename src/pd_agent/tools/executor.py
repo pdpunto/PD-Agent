@@ -163,16 +163,22 @@ class ToolExecutor:
                 )
             return result
         except (ToolValidationError, SecurityViolation) as exc:
+            rejection_metadata = self._rejection_metadata(exc)
             self._emit(
                 context,
                 RunEventType.TOOL_REJECTED,
-                {"call": call.to_dict(), "reason": str(exc)},
+                {
+                    "call": call.to_dict(),
+                    "reason": str(exc),
+                    **rejection_metadata,
+                },
             )
             return ToolResult(
                 call_id=call.call_id,
                 tool_name=call.tool_name,
                 status=ToolResultStatus.REJECTED,
                 error=str(exc),
+                metadata=rejection_metadata,
             )
         except ToolExecutionError as exc:
             result = ToolResult(
@@ -217,6 +223,15 @@ class ToolExecutor:
                 payload=dict(payload),
             )
         )
+
+    @staticmethod
+    def _rejection_metadata(exc: Exception) -> dict[str, Any]:
+        rejection_code = getattr(exc, "rejection_code", None)
+        recoverable = bool(getattr(exc, "recoverable", False))
+        metadata: dict[str, Any] = {"recoverable": recoverable}
+        if rejection_code is not None:
+            metadata["rejection_code"] = str(rejection_code)
+        return metadata
 
 
 def build_tool_executor(

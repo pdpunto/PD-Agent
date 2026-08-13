@@ -163,6 +163,7 @@ class RunState:
     agent_step_count: int = 0
     logical_provider_request_count: int = 0
     build_attempt_count: int = 0
+    consecutive_recoverable_rejections: int = 0
     build_results: tuple[BuildResult, ...] = ()
     artifact_result: ArtifactResult | None = None
     last_error: str | None = None
@@ -237,6 +238,7 @@ class RunState:
             "agent_step_count": self.agent_step_count,
             "logical_provider_request_count": self.logical_provider_request_count,
             "build_attempt_count": self.build_attempt_count,
+            "consecutive_recoverable_rejections": self.consecutive_recoverable_rejections,
             "build_results": [item.to_dict() for item in self.build_results],
             "artifact_result": (
                 self.artifact_result.to_dict() if self.artifact_result is not None else None
@@ -268,6 +270,7 @@ class RunState:
             agent_step_count=int(data.get("agent_step_count", 0)),
             logical_provider_request_count=int(data.get("logical_provider_request_count", 0)),
             build_attempt_count=int(data.get("build_attempt_count", 0)),
+            consecutive_recoverable_rejections=int(data.get("consecutive_recoverable_rejections", 0)),
             build_results=tuple(
                 BuildResult.from_dict(item) for item in data.get("build_results", [])
             ),
