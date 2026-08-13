@@ -47,7 +47,23 @@ def _fixture_root() -> Path:
     return Path("tests/fixtures/l11_fabric_fixture").resolve()
 
 
-def _task(*, minecraft: bool = False, expected_neighbor_update: bool = False, test_id: str = "l8") -> BenchmarkTask:
+def _task(
+    *,
+    minecraft: bool = False,
+    expected_neighbor_update: bool = False,
+    test_id: str = "l8",
+    timeout_seconds: int | None = 30,
+) -> BenchmarkTask:
+    spec: dict[str, object] = {
+        "kind": "registry_lookup",
+        "target_mod_id": "pdagentl11",
+        "minecraft_version": "1.21.11",
+        "loader_version": "0.19.3",
+        "test_id": test_id,
+        "expected_neighbor_update": expected_neighbor_update,
+    }
+    if timeout_seconds is not None:
+        spec["timeout_seconds"] = timeout_seconds
     return BenchmarkTask.from_dict(
         {
             "schema_version": 1,
@@ -72,15 +88,7 @@ def _task(*, minecraft: bool = False, expected_neighbor_update: bool = False, te
             "acceptance": {
                 "schema_version": 1,
                 "acceptance_type": "minecraft_harness",
-                "spec": {
-                    "kind": "registry_lookup",
-                    "target_mod_id": "pdagentl11",
-                    "minecraft_version": "1.21.11",
-                    "loader_version": "0.19.3",
-                    "test_id": test_id,
-                    "timeout_seconds": 30,
-                    "expected_neighbor_update": expected_neighbor_update,
-                },
+                "spec": spec,
                 "notes": [],
             },
             "environment": {
@@ -484,6 +492,90 @@ def test_executor_propagates_execution_limits_to_controller(monkeypatch: pytest.
     assert applied.process_timeout_seconds == 601
     assert applied.max_tool_output_bytes == 1001
     assert applied.max_context_bytes == 2001
+
+
+@pytest.mark.parametrize("brain_enabled", [False, True])
+def test_executor_uses_execution_limits_for_minecraft_timeout_when_task_omits_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    brain_enabled: bool,
+) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    limits = ExecutionLimits(
+        max_agent_steps=25,
+        max_tool_calls=50,
+        max_build_attempts=7,
+        provider_retry_limit=3,
+        process_timeout_seconds=123,
+        max_tool_output_bytes=1001,
+        max_context_bytes=2001,
+    )
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, timeout_seconds=None)
+    config = _config_with_limits(brain_enabled=brain_enabled, limits=limits)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": f"attempt-timeout-{brain_enabled}", "attempt_index": 1, "repetition_index": 0})()
+    fake_minecraft = _FakeMinecraftRunner(
+        project_root=_workspace_root(tmp_path / "exec", scheduled_attempt.scheduled_attempt_id, scheduled_attempt.attempt_index)
+    )
+
+    executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert fake_minecraft.calls
+    spec, _ = fake_minecraft.calls[0]
+    assert spec.timeout_seconds == 123
+
+
+@pytest.mark.parametrize("brain_enabled", [False, True])
+def test_executor_prefers_explicit_minecraft_timeout_override_over_execution_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    brain_enabled: bool,
+) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    limits = ExecutionLimits(
+        max_agent_steps=25,
+        max_tool_calls=50,
+        max_build_attempts=7,
+        provider_retry_limit=3,
+        process_timeout_seconds=600,
+        max_tool_output_bytes=1001,
+        max_context_bytes=2001,
+    )
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(minecraft=True, timeout_seconds=42)
+    config = _config_with_limits(brain_enabled=brain_enabled, limits=limits)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": f"attempt-explicit-{brain_enabled}", "attempt_index": 1, "repetition_index": 0})()
+    fake_minecraft = _FakeMinecraftRunner(
+        project_root=_workspace_root(tmp_path / "exec", scheduled_attempt.scheduled_attempt_id, scheduled_attempt.attempt_index)
+    )
+
+    executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert fake_minecraft.calls
+    spec, _ = fake_minecraft.calls[0]
+    assert spec.timeout_seconds == 42
 
 
 def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

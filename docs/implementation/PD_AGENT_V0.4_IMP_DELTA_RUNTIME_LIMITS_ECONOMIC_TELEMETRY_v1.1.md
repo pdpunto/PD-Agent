@@ -530,6 +530,7 @@ Pipeline:
 - Minecraft runner normal;
 - `BenchmarkExecutor` MUST pasar explicitamente `config.execution_limits` al `RunController`;
 - `AgentRuntime` remains authority for `logical_provider_request_count`;
+- `MinecraftTestSpec.timeout_seconds` debe salir de `acceptance.spec.timeout_seconds` cuando exista; si no existe, debe heredar `config.execution_limits.process_timeout_seconds` de la misma BenchmarkConfig;
 - no logica especifica B001 hardcodeada en executor.
 
 ### Brain OFF
@@ -563,6 +564,8 @@ Cubrir:
 - fixture isolation;
 - propagation de execution limits al runtime;
 - no default 40 cuando benchmark declara 25.
+- Minecraft timeout hereda de execution_limits cuando la task no lo fija explicitamente;
+- override task-specific de `acceptance.spec.timeout_seconds` conserva prioridad;
 - logical provider request count survives success and provider error;
 - collector reads RunState without double counting MODEL_CALLED.
 - `MODEL_CALLED` persiste telemetry segura del gate: phase, action_gate_state/escalation_state, consecutive_inspection_steps, budgets restantes y offered_tool_names.

@@ -126,13 +126,14 @@ def _minecraft_spec_for_task(
     *,
     artifact_path: Path,
     artifact_sha256: str,
+    default_timeout_seconds: int,
 ) -> MinecraftTestSpec:
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
     target_mod_id = str(spec.get("target_mod_id") or spec.get("mod_id") or task.task_id).strip()
     test_id = str(spec.get("test_id") or f"{task.task_id}:{task.task_version}").strip()
     minecraft_version = str(spec.get("minecraft_version") or task.environment.minecraft_version or "").strip()
     loader_version = str(spec.get("loader_version") or task.environment.loader_version or "").strip()
-    timeout_seconds = int(spec.get("timeout_seconds", 60))
+    timeout_seconds = int(spec.get("timeout_seconds", default_timeout_seconds))
     expect_neighbor_update = bool(spec.get("expected_neighbor_update", spec.get("expect_neighbor_update", False)))
     return MinecraftTestSpec(
         target_jar=artifact_path,
@@ -164,6 +165,7 @@ def _minecraft_infra_error_result(
     reason: str,
     target_jar: Path,
     evidence_root: Path,
+    default_timeout_seconds: int,
 ) -> MinecraftTestResult:
     artifact_metadata = artifact.metadata if isinstance(artifact.metadata, Mapping) else {}
     target_sha256 = str(artifact_metadata.get("sha256", "")) if isinstance(artifact_metadata, Mapping) else ""
@@ -171,6 +173,7 @@ def _minecraft_infra_error_result(
         task,
         artifact_path=target_jar,
         artifact_sha256=target_sha256,
+        default_timeout_seconds=default_timeout_seconds,
     )
     target = MinecraftTargetMetadata(
         path=Path(artifact.path) if artifact.path is not None else target_jar,
@@ -453,6 +456,7 @@ class BenchmarkExecutor:
         if final_build is None or artifact is None or artifact.path is None:
             return None
         target_root = Path(runner.project_root) if runner is not None else workspace.workspace_root
+        execution_limits = _benchmark_execution_limits(config)
         try:
             target_jar = _relative_minecraft_target_path(artifact.path, target_root)
         except (BenchmarkWorkspaceError, FileNotFoundError, OSError) as exc:
@@ -463,6 +467,7 @@ class BenchmarkExecutor:
                 reason=str(exc),
                 target_jar=artifact.path,
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
         if runner is None:
             return _minecraft_infra_error_result(
@@ -472,11 +477,13 @@ class BenchmarkExecutor:
                 reason="minecraft runner is required for minecraft validation",
                 target_jar=target_jar,
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
         spec = _minecraft_spec_for_task(
             task,
             artifact_path=target_jar,
             artifact_sha256=str(artifact.metadata.get("sha256", "")) if isinstance(artifact.metadata, Mapping) else "",
+            default_timeout_seconds=execution_limits.process_timeout_seconds,
         )
         expected_sha256 = None
         if isinstance(task.acceptance.spec, Mapping):
@@ -496,6 +503,7 @@ class BenchmarkExecutor:
                 reason=str(exc),
                 target_jar=target_jar,
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
 
     def _benchmark_run(

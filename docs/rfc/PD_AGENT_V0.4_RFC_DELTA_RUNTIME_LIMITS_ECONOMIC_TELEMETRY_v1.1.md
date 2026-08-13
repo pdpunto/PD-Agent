@@ -96,6 +96,8 @@ son equivalentes.
 
 Para v0.4, `max_agent_steps` permanece en **25** en la configuracion benchmark. El runtime no debe caer en el default 40 por omision de wiring.
 
+Para Minecraft, el timeout del harness NO debe tener un default oculto independiente de 60s en el camino benchmark. Si `acceptance.spec.timeout_seconds` existe, ese valor manda. Si no existe, el valor efectivo debe derivarse de `BenchmarkConfig.execution_limits.process_timeout_seconds` de la configuracion concreta.
+
 ## 6. Provider request accounting
 
 ### 6.1 Autoridad normativa
