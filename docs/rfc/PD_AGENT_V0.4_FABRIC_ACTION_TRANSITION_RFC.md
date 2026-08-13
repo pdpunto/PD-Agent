@@ -346,7 +346,42 @@ No cambia:
 - security boundary;
 - `max_agent_steps` en la configuracion benchmark.
 
-## 19. Criterio de aceptacion RFC
+## 19. Action Tool Selection Contract
+
+Este contrato refina la seleccion de herramientas de mutacion para evitar
+reintentos innecesarios cuando el archivo ya existe.
+
+### write_file
+
+Semantica visible:
+
+- modificar o reemplazar el contenido de un archivo EXISTENTE;
+- usarla para paths ya existentes;
+- si el archivo fue leido u observado como existente, preferir `write_file`;
+- no crea archivos nuevos.
+
+### create_file
+
+Semantica visible:
+
+- crear exclusivamente un path NUEVO;
+- el target no debe existir;
+- nunca usarla para modificar o reemplazar un archivo existente;
+- si el target existe, usar `write_file`.
+
+### Observed path guidance
+
+`recent_inspected_paths` constituye evidencia operacional de que esos paths han
+sido observados dentro del workspace.
+
+La policy debe decir explicitamente:
+
+- un archivo observado como existente debe tratarse como existing target;
+- no usar `create_file` sobre un existing observed file.
+
+No convertir esto en una base de datos persistente compleja.
+
+## 20. Criterio de aceptacion RFC
 
 El fix queda aceptado cuando:
 
@@ -367,3 +402,45 @@ El fix queda aceptado cuando:
 
 B001 no tiene que dar PASS funcional.
 
+## 21. Recoverable rejection contract
+
+La distincion entre rejection fatal y recoverable debe ser estructurada, no por
+parsing de texto.
+
+Para v0.4, solo se autoriza recovery especifico de:
+
+- `create_file` sobre un path que ya existe.
+
+La normalizacion minima recomendada puede vivir en `ToolExecutor` y/o en la
+metadata estructurada del `ToolResult`, por ejemplo con un
+`rejection_code = "file_exists"`.
+
+La tool sigue rechazando la operacion y no sobrescribe nada. El runtime puede
+usar ese codigo para permitir una unica request de correccion en lugar de
+terminar la run de inmediato.
+
+Siguen siendo fatales:
+
+- `SecurityViolation`;
+- traversal;
+- absolute/external path;
+- protected mutation;
+- schema invalido;
+- unknown tool;
+- otras validation failures que no tengan recovery explicito.
+
+La policy de `action_only` no cambia sus thresholds. Si ocurre `FILE_EXISTS`:
+
+- mantener `action_only` durante la oportunidad de recovery;
+- `create_file` y `write_file` siguen ofrecidas;
+- inspection tools siguen no disponibles;
+- la primera rejection recuperable no cuenta como progreso;
+- una mutacion valida posterior resetea la recovery y permite build;
+- repetir `FILE_EXISTS` sin progreso termina de forma controlada con una razon
+  explicita.
+
+La razon recomendada es:
+
+- `repeated recoverable tool rejection without operational progress`
+
+No introducir heuristica por texto si puede evitarse.

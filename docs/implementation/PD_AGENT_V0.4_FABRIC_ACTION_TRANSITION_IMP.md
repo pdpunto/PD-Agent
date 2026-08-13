@@ -1,7 +1,7 @@
 # PD Agent v0.4 - Fabric Agent Action Transition IMP Delta
 
-**Status:** DRAFT - pending repository audit  
-**Version:** 1.0  
+**Status:** READY FOR IMPLEMENTATION  
+**Version:** 1.1  
 **Milestone:** PD Agent v0.4 - Benchmark Foundation  
 **Depends on:** RFC Delta Fabric Action Transition  
 **Audited baseline before planning:** `b95411714180c09e9a334c0767d00dca4a0b4da2`
@@ -280,6 +280,115 @@ Despues de smoke:
 - commit y push;
 - volver al milestone de Benchmarks.
 
+### A10 - Mutation Tool Selection + FILE_EXISTS Recovery
+
+Objetivo:
+
+Evitar que una seleccion erronea de `create_file` sobre un path ya existente
+termine la run antes de que el agente pueda corregir la eleccion a `write_file`.
+
+#### A10.1 Tool descriptions
+
+Modificar:
+
+- `src/pd_agent/tools/filesystem.py`
+
+Descriptions de:
+
+- `create_file`;
+- `write_file`.
+
+La redaccion debe dejar inequivoco que:
+
+- `write_file` modifica un archivo existente;
+- `create_file` crea solo paths nuevos.
+
+#### A10.2 Action policy
+
+Modificar:
+
+- `src/pd_agent/runtime/engine.py`
+
+La policy debe decir explicitamente:
+
+- existing -> `write_file`;
+- new -> `create_file`;
+- `recent_inspected_paths` guia la decision sobre si un target observado ya
+  debe tratarse como existing target.
+
+No hardcodear B001 ni `ExampleMod`.
+
+#### A10.3 Structured FILE_EXISTS
+
+Auditar el lugar minimo para representar el rechazo recuperable:
+
+- `ToolValidationError` o el punto donde `ToolExecutor` normaliza el rechazo;
+- `ToolResult.metadata`;
+- runtime.
+
+Preferencia:
+
+- `ToolExecutor` sigue siendo la frontera y emite `TOOL_REJECTED`;
+- la estructuracion minima del rechazo vive en metadata del resultado, por
+  ejemplo `rejection_code = "file_exists"`.
+
+El runtime decide si ese rechazo concreto es recuperable.
+
+#### A10.4 Recovery runtime
+
+Primera `FILE_EXISTS`:
+
+- no termina la run;
+- queda feedback estructurado disponible para la siguiente request;
+- la fase y el gate se mantienen;
+- se permite la siguiente request del provider para corregir la seleccion.
+
+Segunda `FILE_EXISTS` consecutiva sin progreso:
+
+- termina de forma controlada.
+
+Mutacion real:
+
+- resetea el contador de recovery;
+- el flujo normal sigue hacia build.
+
+#### A10.5 Fatal rejection regression
+
+Confirmar que siguen siendo fatales:
+
+- `SecurityViolation`;
+- cualquier `ToolValidationError` no recuperable;
+- path traversal;
+- absolute/external path;
+- protected mutation;
+- action gate violation.
+
+#### A10.6 Offline tests
+
+Tests obligatorios:
+
+1. descriptions new/existing claras;
+2. policy contiene semantica create/write;
+3. `recent_inspected_paths` aparece en policy/context;
+4. `read existing -> create same` produce rechazo estructurado `FILE_EXISTS`;
+5. el archivo original queda sin cambios;
+6. la primera `FILE_EXISTS` no mata la run;
+7. el feedback llega al provider en la siguiente request;
+8. `write_file` posterior funciona;
+9. mutacion valida -> build;
+10. repetir `FILE_EXISTS` -> failure controlado;
+11. `create_file` sobre path nuevo sigue PASS;
+12. `write_file` sobre inexistente sigue rechazado o fatal segun el contrato actual;
+13. traversal fatal;
+14. protected mutation fatal;
+15. action gate violation sin regresion;
+16. Brain OFF/ON usan la misma policy;
+17. no hardcodes:
+   - B001;
+   - `ExampleMod`;
+   - `Registries.BLOCK`;
+18. suite completa PASS.
+
 ## 6. Auditoria tecnica contra el repo
 
 ### 6.1 `_LoopTelemetry`
@@ -462,4 +571,3 @@ Resultado de la auditoria sobre el repo real:
 Veredicto del documento:
 
 `GO`
-
