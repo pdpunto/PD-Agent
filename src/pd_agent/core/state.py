@@ -201,6 +201,14 @@ class RunState:
     def record_build_attempt(self) -> None:
         self.build_attempt_count += 1
 
+    def record_changed_file(self, path: Path | str) -> None:
+        normalized = Path(path).as_posix()
+        if not normalized:
+            return
+        if normalized in self.changed_files:
+            return
+        self.changed_files = (*self.changed_files, normalized)
+
     def record_build_result(self, result: BuildResult) -> None:
         self.build_results = (*self.build_results, result)
 

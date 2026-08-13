@@ -179,6 +179,38 @@ def test_edit_build_artifact_valid(tmp_path: Path) -> None:
     assert "project_root" in provider.requests[0].messages[0].content
     assert provider.requests[0].tool_results == ()
     assert any("BUILD SUCCESSFUL" in line for line in paths.events_jsonl.read_text(encoding="utf-8").splitlines()) is False
+    assert run_state.changed_files == ("src/main/java/com/example/ExampleMod.java",)
+    assert report.files_changed == ("src/main/java/com/example/ExampleMod.java",)
+
+
+def test_create_file_records_changed_file(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "create-file", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="create",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={
+                            "path": "src/main/java/com/example/NewFile.java",
+                            "content": "package com.example; class NewFile {}\n",
+                        },
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "create file")
+    paths = storage.paths_for(run_state.run_id)
+
+    assert run_state.state.value == "COMPLETED"
+    assert run_state.changed_files == ("src/main/java/com/example/NewFile.java",)
+    assert report.files_changed == ("src/main/java/com/example/NewFile.java",)
+    assert paths.final_report_json.exists()
 
 
 def test_model_response_usage_is_persisted_in_events(tmp_path: Path) -> None:
@@ -361,6 +393,7 @@ def test_security_rejection_fails(tmp_path: Path) -> None:
     assert run_state.state.value == "FAILED"
     assert report.final_state.value == "FAILED"
     assert run_state.termination_reason == "tool rejected"
+    assert run_state.changed_files == ()
 
 
 def test_first_file_exists_can_recover_to_write_and_build(tmp_path: Path) -> None:

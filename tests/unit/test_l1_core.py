@@ -177,6 +177,20 @@ def test_logical_provider_request_counter_tracks_and_round_trips() -> None:
     assert RunState.from_dict(payload).logical_provider_request_count == 2
 
 
+def test_changed_files_record_deduplicates_and_round_trips() -> None:
+    run_state = RunState()
+
+    run_state.record_changed_file("src/Main.java")
+    run_state.record_changed_file(Path("src/Main.java"))
+    run_state.record_changed_file("README.md")
+
+    assert run_state.changed_files == ("src/Main.java", "README.md")
+    payload = run_state.to_dict()
+
+    assert payload["changed_files"] == ["src/Main.java", "README.md"]
+    assert RunState.from_dict(payload).changed_files == ("src/Main.java", "README.md")
+
+
 def test_serialization_round_trip() -> None:
     build_result = BuildResult(
         attempt=1,

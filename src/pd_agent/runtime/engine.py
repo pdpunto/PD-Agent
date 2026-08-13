@@ -458,6 +458,7 @@ class AgentRuntime:
             result = self.tool_executor.execute(call, context)
             results.append(result)
             run_state.record_tool_call()
+            self._record_changed_files(run_state, result)
             self._persist_state(run_state)
             self._observe_progress(
                 run_state,
@@ -467,6 +468,18 @@ class AgentRuntime:
             if run_state.state.is_terminal():
                 break
         return tuple(results)
+
+    def _record_changed_files(self, run_state: RunState, result: ToolResult) -> None:
+        if result.status != ToolResultStatus.SUCCESS:
+            return
+        if not result.metadata.get("changed"):
+            return
+        path = result.metadata.get("path")
+        if path is None and isinstance(result.output, Mapping):
+            path = result.output.get("path")
+        if path is None:
+            return
+        run_state.record_changed_file(path)
 
     def _finish(
         self,
