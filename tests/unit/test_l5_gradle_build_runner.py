@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 import subprocess
 from pathlib import Path
 
@@ -158,3 +159,53 @@ def test_windows_and_posix_argv_and_multimodule_task(tmp_path: Path) -> None:
     assert posix_invocation.argv[0] == "./gradlew"
     assert multi_invocation.argv[-1] == ":mod-a:build"
     assert multi_invocation.cwd == multi_root.resolve()
+
+
+def test_environment_overrides_reach_gradle_wrapper(tmp_path: Path) -> None:
+    root = make_build_runner_simple_project(tmp_path / "env", mode="success")
+    sentinel = root / "gradle-user-home.txt"
+    probe = root / "env_probe.py"
+    probe.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import os",
+                "import sys",
+                "from pathlib import Path",
+                "sentinel = Path(sys.argv[1])",
+                "sentinel.write_text(os.environ.get('GRADLE_USER_HOME', ''), encoding='utf-8')",
+                "print('stdout:env')",
+                "raise SystemExit(0)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (root / "gradlew.bat").write_text(
+        "\n".join(
+            [
+                "@echo off",
+                f"\"{sys.executable}\" \"{probe}\" \"{sentinel}\" %*",
+                "exit /b %ERRORLEVEL%",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    storage = RunStorage(root / "runs")
+    state = RunState(project_root=root, task="build")
+    runner = GradleBuildRunner(
+        reporting=storage,
+        environment_overrides={"GRADLE_USER_HOME": str(tmp_path / "isolated-gradle-home")},
+    )
+
+    result = runner.run(_inspect(root), state, ExecutionLimits(process_timeout_seconds=10))
+
+    assert result.success is True
+    assert sentinel.read_text(encoding="utf-8") == str(tmp_path / "isolated-gradle-home")
+    events = [
+        json.loads(line)
+        for line in storage.paths_for(state.run_id).events_jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["payload"]["environment_overrides"]["GRADLE_USER_HOME"] == str(tmp_path / "isolated-gradle-home")

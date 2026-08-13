@@ -81,6 +81,7 @@ class MinecraftTestRunner:
     evidence_root: Path | None = None
     harness_root: Path | None = None
     production_task: str = DEFAULT_PRODUCTION_TASK
+    environment_overrides: Mapping[str, str] = field(default_factory=dict)
     supported_minecraft_versions: frozenset[str] = field(
         default_factory=lambda: frozenset({"1.21.11"})
     )
@@ -101,6 +102,11 @@ class MinecraftTestRunner:
             )
         else:
             object.__setattr__(self, "harness_root", Path(self.harness_root).resolve(strict=False))
+        object.__setattr__(
+            self,
+            "environment_overrides",
+            {str(key): str(value) for key, value in dict(self.environment_overrides).items()},
+        )
         object.__setattr__(
             self,
             "supported_minecraft_versions",
@@ -261,6 +267,7 @@ class MinecraftTestRunner:
                 "task": self.production_task,
                 "run_dir": str(preflight.launch_plan.run_dir) if preflight.launch_plan else None,
                 "command_display": process["command_display"],
+                "environment_overrides": dict(self.environment_overrides),
             },
         )
         preflight.evidence_paths.stdout_log.write_text(process["stdout"], encoding="utf-8")
@@ -291,6 +298,7 @@ class MinecraftTestRunner:
                 **runtime_evidence.metadata,
                 **runtime_metadata,
                 "harness_result_path": str(runtime_evidence.harness_result_path) if runtime_evidence.harness_result_path else None,
+                "environment_overrides": dict(self.environment_overrides),
             },
         )
         final_result = MinecraftTestResult(
@@ -318,6 +326,7 @@ class MinecraftTestRunner:
                 "latest_log_path": str(runtime_evidence.latest_log_path) if runtime_evidence.latest_log_path else None,
                 "crash_reports_dir": str(runtime_evidence.crash_reports_dir) if runtime_evidence.crash_reports_dir else None,
                 "launch_properties": list(launch_props),
+                "environment_overrides": dict(self.environment_overrides),
             },
         )
         _write_json(preflight.evidence_paths.result_json, final_result.to_dict())
@@ -375,6 +384,8 @@ class MinecraftTestRunner:
         started_at = datetime.now(timezone.utc)
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         preexec_fn = None if os.name == "nt" else os.setsid
+        env = os.environ.copy()
+        env.update(self.environment_overrides)
         proc = subprocess.Popen(
             list(command),
             cwd=str(cwd),
@@ -387,6 +398,7 @@ class MinecraftTestRunner:
             shell=False,
             creationflags=creationflags,
             preexec_fn=preexec_fn,
+            env=env,
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout_seconds)

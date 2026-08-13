@@ -10,6 +10,7 @@ import pytest
 from pd_agent.benchmark import (
     BenchmarkConfig,
     BenchmarkCollector,
+    BenchmarkGradleEnvironment,
     BenchmarkExecutionStatus,
     BenchmarkExecutor,
     BenchmarkFailureCode,
@@ -322,6 +323,14 @@ def _workspace_root(execution_root: Path, scheduled_attempt_id: str, attempt_ind
     )
 
 
+def _gradle_seed(root: Path) -> Path:
+    (root / "wrapper").mkdir(parents=True, exist_ok=True)
+    (root / "caches" / "marker.txt").parent.mkdir(parents=True, exist_ok=True)
+    (root / "wrapper" / "seed.txt").write_text("wrapper", encoding="utf-8")
+    (root / "caches" / "marker.txt").write_text("cache", encoding="utf-8")
+    return root
+
+
 def test_executor_brain_off_pass_and_cleans_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
     executor = BenchmarkExecutor(
@@ -399,6 +408,41 @@ def test_executor_brain_on_injects_context_and_traces(monkeypatch: pytest.Monkey
     assert result.collection.knowledge_traces[0].retrieved_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].selected_item_ids == ("yarn:item:1",)
     assert result.collection.knowledge_traces[0].context_item_ids == ("yarn:item:1",)
+
+
+def test_executor_records_gradle_environment_snapshot(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    seed_root = _gradle_seed(tmp_path / "seed")
+    execution_root = tmp_path / "exec"
+    execution_root.mkdir()
+    gradle_environment = BenchmarkGradleEnvironment.prepare(
+        seed_root=seed_root,
+        execution_root=execution_root,
+    )
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+        gradle_environment=gradle_environment,
+    )
+    task = _task()
+    config = _config(brain_enabled=False)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-gradle-env", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=execution_root,
+    )
+
+    environment_snapshot = result.benchmark_run.environment_snapshot["gradle_environment"]
+    assert environment_snapshot["bootstrap_status"] == "READY"
+    assert environment_snapshot["offline"] is True
+    assert environment_snapshot["gradle_user_home"].endswith("gradle-user-home")
+    assert environment_snapshot["seed_manifest"]["seed_id"] == "gradle-wrapper-caches"
+    assert environment_snapshot["seed_manifest"]["identity_hash"] is not None
 
 
 @pytest.mark.parametrize("brain_enabled", [False, True])

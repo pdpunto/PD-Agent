@@ -12,9 +12,11 @@ from pd_agent.benchmark import (
     BenchmarkConfig,
     BenchmarkExecutionRunner,
     BenchmarkExecutor,
+    BenchmarkGradleEnvironment,
     BenchmarkPacedProvider,
     BenchmarkRequestPacer,
 )
+from pd_agent.minecraft import MinecraftTestRunner
 from pd_agent.providers import GeminiProvider, OpenAIProvider
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 
@@ -130,6 +132,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-version", required=True)
     parser.add_argument("--configs-json", required=True, type=Path)
     parser.add_argument("--execution-root", required=True, type=Path)
+    parser.add_argument("--gradle-seed-root", required=True, type=Path)
+    parser.add_argument("--gradle-seed-manifest", required=False, type=Path, default=None)
     parser.add_argument("--pd-agent-commit", default=None)
     parser.add_argument("--target-valid-repetitions", type=int, default=3)
     parser.add_argument("--max-attempts-per-cell", type=int, default=5)
@@ -142,14 +146,29 @@ def main(argv: list[str] | None = None) -> int:
     catalog = BenchmarkCatalog.load(args.catalog_root)
     configs = _load_configs(args.configs_json)
     canonical_config = _validate_configs(configs)
+    args.execution_root.mkdir(parents=True, exist_ok=True)
+    gradle_environment = BenchmarkGradleEnvironment.prepare(
+        seed_root=args.gradle_seed_root,
+        execution_root=args.execution_root,
+        seed_manifest_path=args.gradle_seed_manifest,
+        offline=True,
+    )
     provider = _wrap_provider_for_benchmark(_build_provider(canonical_config), _build_request_pacer())
     knowledge_source = _build_knowledge_source(configs)
+    repo_root = Path(__file__).resolve().parents[2]
+    minecraft_runner = MinecraftTestRunner(
+        project_root=args.execution_root,
+        harness_root=repo_root / "tests" / "fixtures" / "l11_minecraft_harness",
+        environment_overrides=gradle_environment.environment_overrides,
+    )
     executor = BenchmarkExecutor(
         provider=provider,
-        build_runner=GradleBuildRunner(),
+        build_runner=GradleBuildRunner(environment_overrides=gradle_environment.environment_overrides),
         artifact_validator=ArtifactValidator(),
         tool_executor=ToolExecutor(tools=create_filesystem_tools()),
         knowledge_source=knowledge_source,
+        minecraft_runner=minecraft_runner,
+        gradle_environment=gradle_environment,
     )
     runner = BenchmarkExecutionRunner(
         executor=executor,

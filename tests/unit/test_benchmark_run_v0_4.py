@@ -43,6 +43,14 @@ def _write_configs(path: Path, *configs: BenchmarkConfig) -> None:
     path.write_text(json.dumps([config.to_dict() for config in configs], ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _write_seed(root: Path) -> Path:
+    (root / "wrapper").mkdir(parents=True, exist_ok=True)
+    (root / "caches" / "artifact.txt").parent.mkdir(parents=True, exist_ok=True)
+    (root / "wrapper" / "seed.txt").write_text("wrapper", encoding="utf-8")
+    (root / "caches" / "artifact.txt").write_text("cache", encoding="utf-8")
+    return root
+
+
 def test_validate_configs_accepts_brain_off_and_on_variants() -> None:
     runner = _load_runner()
     off = _config(config_id="cfg-off", brain_enabled=False)
@@ -80,6 +88,7 @@ def test_main_wires_real_brain_source_for_brain_on(monkeypatch: pytest.MonkeyPat
     on = _config(config_id="cfg-on", brain_enabled=True)
     configs_json = tmp_path / "configs.json"
     _write_configs(configs_json, off, on)
+    seed_root = _write_seed(tmp_path / "gradle-seed")
 
     catalog = SimpleNamespace(
         dataset_for=lambda dataset_id, dataset_version: SimpleNamespace(dataset_id=dataset_id, dataset_version=dataset_version),
@@ -130,6 +139,8 @@ def test_main_wires_real_brain_source_for_brain_on(monkeypatch: pytest.MonkeyPat
             str(configs_json),
             "--execution-root",
             str(tmp_path / "executions"),
+            "--gradle-seed-root",
+            str(seed_root),
         ]
     )
 
@@ -137,6 +148,8 @@ def test_main_wires_real_brain_source_for_brain_on(monkeypatch: pytest.MonkeyPat
     assert code == 0
     assert "comparison.json" in captured.out
     assert FakeExecutor.last_init["knowledge_source"] is not None
+    assert FakeExecutor.last_init["gradle_environment"] is not None
+    assert FakeExecutor.last_init["build_runner"].environment_overrides["GRADLE_USER_HOME"].endswith("gradle-user-home")
     assert "context_manager_factory" not in FakeExecutor.last_init
     assert len(FakeRunner.last_run["configs"]) == 2
     assert FakeRunner.last_run["configs"][0].brain_enabled is False

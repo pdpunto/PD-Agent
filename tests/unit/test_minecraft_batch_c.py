@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -30,6 +31,67 @@ def _make_jar(root: Path, name: str = "target.jar") -> Path:
 
 def _runner(root: Path) -> MinecraftTestRunner:
     return MinecraftTestRunner(project_root=root, harness_root=HARNESS_ROOT)
+
+
+def _env_harness(root: Path, sentinel: Path) -> Path:
+    harness = root / "harness"
+    harness.mkdir(parents=True, exist_ok=True)
+    probe = harness / "gradle_env_probe.py"
+    probe.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import json",
+                "import os",
+                "import sys",
+                "from pathlib import Path",
+                "def _arg(prefix: str) -> str:",
+                "    for value in sys.argv[1:]:",
+                "        if value.startswith(prefix):",
+                "            return value.split('=', 1)[1]",
+                "    raise SystemExit(f'missing {prefix}')",
+                "result_path = Path(_arg('-Ppd.agent.resultPath='))",
+                "run_dir = Path(_arg('-Ppd.agent.runDir='))",
+                "target_path = _arg('-Ppd.agent.targetJar=')",
+                "target_sha = _arg('-Ppd.agent.targetSha256=')",
+                f"Path(r'{sentinel}').write_text(os.environ.get('GRADLE_USER_HOME', ''), encoding='utf-8')",
+                "(run_dir / 'logs').mkdir(parents=True, exist_ok=True)",
+                "(run_dir / 'logs' / 'latest.log').write_text('latest log', encoding='utf-8')",
+                "result_path.write_text(",
+                "    json.dumps({",
+                "        'schema_version': 1,",
+                "        'target_loaded': True,",
+                "        'target_origin_resolved': True,",
+                "        'runtime_target_path': target_path,",
+                "        'runtime_target_sha256': target_sha,",
+                "        'target_sha_match': True,",
+                "        'server_started': True,",
+                "        'functional_test_result': 'PASS',",
+                "        'reason': 'ok',",
+                "        'shutdown_requested': True,",
+                "    }),",
+                "    encoding='utf-8'",
+                ")",
+                "print('harness ok')",
+                "raise SystemExit(0)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (harness / "gradlew.bat").write_text(
+        "\n".join(
+            [
+                "@echo off",
+                f"\"{sys.executable}\" \"{probe}\" %*",
+                "exit /b %ERRORLEVEL%",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (harness / "gradlew").write_text("#!/bin/sh\n", encoding="utf-8")
+    return harness
 
 
 def _spec() -> dict[str, object]:
@@ -343,3 +405,22 @@ def test_b003_signal_test_id_does_not_override_neighbor_flag(tmp_path: Path) -> 
     assert dict(plan_true.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "true"
     assert dict(plan_false.system_properties)["pd.agent.minecraft.test_id"] == "block_state_probe_with_signal"
     assert dict(plan_false.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
+
+
+def test_run_propagates_gradle_user_home_to_harness_wrapper(tmp_path: Path) -> None:
+    _make_jar(tmp_path)
+    sentinel = tmp_path / "gradle-user-home.txt"
+    harness_root = _env_harness(tmp_path, sentinel)
+    runner = MinecraftTestRunner(
+        project_root=tmp_path,
+        harness_root=harness_root,
+        environment_overrides={"GRADLE_USER_HOME": str(tmp_path / "isolated-gradle-home")},
+    )
+    spec = MinecraftTestSpec(target_jar=Path("build/libs/target.jar"), **_spec())
+
+    result = runner.run(spec, run_id="run-env", java_version="21")
+
+    assert result.status is MinecraftTestStatus.PASS
+    assert sentinel.read_text(encoding="utf-8") == str(tmp_path / "isolated-gradle-home")
+    assert result.process_evidence is not None
+    assert result.process_evidence.metadata["environment_overrides"]["GRADLE_USER_HOME"] == str(tmp_path / "isolated-gradle-home")

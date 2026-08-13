@@ -136,9 +136,14 @@ class GradleBuildRunner:
         self,
         reporting: RunStorage | None = None,
         platform_override: str | None = None,
+        environment_overrides: Mapping[str, str] | None = None,
     ) -> None:
         self.reporting = reporting
         self.platform_override = platform_override
+        self.environment_overrides = {
+            str(key): str(value)
+            for key, value in dict(environment_overrides or {}).items()
+        }
 
     def build_invocation(
         self,
@@ -183,6 +188,7 @@ class GradleBuildRunner:
                 "target_subproject": str(project_snapshot.target_subproject)
                 if project_snapshot.target_subproject is not None
                 else None,
+                "environment_overrides": dict(self.environment_overrides),
             },
         )
         started_at = datetime.now(timezone.utc)
@@ -223,6 +229,7 @@ class GradleBuildRunner:
                 "stderr_log_path": str(log_paths.stderr),
                 "stdout_bytes": len(stdout_text.encode("utf-8")),
                 "stderr_bytes": len(stderr_text.encode("utf-8")),
+                "environment_overrides": dict(self.environment_overrides),
             },
         )
         return result
@@ -267,6 +274,7 @@ class GradleBuildRunner:
         limits: ExecutionLimits,
     ) -> tuple[str, str, int, bool]:
         env = os.environ.copy()
+        env.update(self.environment_overrides)
         env.setdefault("CI", "true")
         creationflags = 0
         preexec_fn = None

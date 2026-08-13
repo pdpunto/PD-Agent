@@ -6,6 +6,12 @@ from .classifier import BenchmarkClassification, BenchmarkClassifier
 from .aggregator import BenchmarkAggregator, render_comparison_markdown
 from .collector import BenchmarkCollection, BenchmarkCollector
 from .catalog import BenchmarkCatalog, BenchmarkCatalogError
+from .environment import (
+    BenchmarkGradleEnvironment,
+    BenchmarkGradleEnvironmentError,
+    BenchmarkGradleSeedComponent,
+    BenchmarkGradleSeedManifest,
+)
 from .executor import BenchmarkExecutionResult, BenchmarkExecutor
 from .pacing import BenchmarkPacedProvider, BenchmarkRequestPacer
 from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionRunner
@@ -54,6 +60,10 @@ __all__ = [
     "BenchmarkCollector",
     "BenchmarkCatalog",
     "BenchmarkCatalogError",
+    "BenchmarkGradleEnvironment",
+    "BenchmarkGradleEnvironmentError",
+    "BenchmarkGradleSeedComponent",
+    "BenchmarkGradleSeedManifest",
     "render_comparison_markdown",
     "BenchmarkExecutionBatch",
     "BenchmarkExecutionManifest",

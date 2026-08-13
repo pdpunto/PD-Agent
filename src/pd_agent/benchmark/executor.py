@@ -28,6 +28,7 @@ from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectS
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
 
+from .environment import BenchmarkGradleEnvironment
 from .classifier import BenchmarkClassifier, BenchmarkClassification
 from .collector import BenchmarkCollection, BenchmarkCollector
 from .models import (
@@ -202,6 +203,7 @@ def _execution_environment_snapshot(
     project_snapshot: ProjectSnapshot,
     resolution: Mapping[str, Any] | None,
     knowledge_needs: Sequence[KnowledgeNeed],
+    gradle_environment: BenchmarkGradleEnvironment | None = None,
     fixture_hash_after: str | None = None,
 ) -> dict[str, Any]:
     snapshot = {
@@ -216,6 +218,8 @@ def _execution_environment_snapshot(
     }
     if resolution is not None:
         snapshot["knowledge_environment"] = resolution
+    if gradle_environment is not None:
+        snapshot["gradle_environment"] = gradle_environment.to_dict()
     if fixture_hash_after is not None:
         snapshot["fixture_integrity"] = {
             "canonical_hash_before": workspace.canonical_hash_before,
@@ -259,6 +263,7 @@ class BenchmarkExecutor:
     knowledge_environment_resolver: KnowledgeEnvironmentResolver = field(default_factory=KnowledgeEnvironmentResolver)
     knowledge_source: Any | None = None
     minecraft_runner: MinecraftTestRunner | None = None
+    gradle_environment: BenchmarkGradleEnvironment | None = None
     collector: BenchmarkCollector = field(default_factory=BenchmarkCollector)
     classifier: BenchmarkClassifier = field(default_factory=BenchmarkClassifier)
 
@@ -517,6 +522,7 @@ class BenchmarkExecutor:
             project_snapshot=project_snapshot,
             resolution=env_resolution,
             knowledge_needs=knowledge_needs,
+            gradle_environment=self.gradle_environment,
             fixture_hash_after=fixture_hash_after,
         )
         return BenchmarkRun(
