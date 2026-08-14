@@ -3,8 +3,10 @@ package dev.pdpunto.l11harness;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 
 final class HarnessRunner {
@@ -31,6 +33,19 @@ final class HarnessRunner {
             return HarnessResult.infraError(config, "overworld not available", identity);
         }
 
+        if (HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(config.observationType())) {
+            return runRegistryObservation(config, identity);
+        }
+
+        return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runLegacyBlockStateObservation(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world,
+        HarnessRuntimeOptions options
+    ) {
         HarnessSignals.reset();
         world.setBlockState(SIGNAL_POS, Blocks.DIAMOND_BLOCK.getDefaultState(), Block.NOTIFY_ALL);
         world.setBlockState(CONTROLLED_POS, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
@@ -57,10 +72,45 @@ final class HarnessRunner {
             } else {
                 reason = "neighbor update was not observed";
             }
-            return HarnessResult.fail(config, identity, reason, neighborTriggered);
+            return HarnessResult.failLegacy(config, identity, reason, neighborTriggered);
         }
 
-        return HarnessResult.pass(config, identity, neighborTriggered);
+        return HarnessResult.passLegacy(config, identity, neighborTriggered);
+    }
+
+    private static HarnessResult runRegistryObservation(HarnessConfig config, HarnessIdentity identity) {
+        Identifier identifier = parseIdentifier(config.observationIdentifier());
+        boolean present = isRegistryEntryPresent(config.observationRegistryKind(), identifier);
+        String observedIdentifier = identifier.toString();
+        if (!present) {
+            return HarnessResult.failRegistry(
+                config,
+                identity,
+                config.observationRegistryKind(),
+                observedIdentifier,
+                "registry entry was not observed: " + config.observationRegistryKind() + " " + observedIdentifier
+            );
+        }
+        return HarnessResult.passRegistry(config, identity, config.observationRegistryKind(), observedIdentifier);
+    }
+
+    private static boolean isRegistryEntryPresent(String registryKind, Identifier identifier) {
+        return switch (registryKind) {
+            case "block" -> Registries.BLOCK.getOrEmpty(identifier).isPresent();
+            case "item" -> Registries.ITEM.getOrEmpty(identifier).isPresent();
+            default -> throw new IllegalArgumentException("unsupported registry kind: " + registryKind);
+        };
+    }
+
+    private static Identifier parseIdentifier(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("observation identifier cannot be empty");
+        }
+        String[] parts = value.trim().split(":", 2);
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            throw new IllegalArgumentException("invalid observation identifier: " + value);
+        }
+        return Identifier.of(parts[0].trim(), parts[1].trim());
     }
 
     private static ServerWorld waitForOverworld(MinecraftServer server, long timeoutMillis) {

@@ -79,8 +79,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "FacingBlock.FACING" not in runner_source
     assert "expectNeighborUpdate" in config_source
     assert "neighborPass = !config.expectNeighborUpdate() || neighborTriggered" in runner_source
-    assert "HarnessResult.pass(config, identity, neighborTriggered)" in runner_source
-    assert "HarnessResult.fail(config, identity, reason, neighborTriggered)" in runner_source
+    assert "HarnessResult.passLegacy(config, identity, neighborTriggered)" in runner_source
+    assert "HarnessResult.failLegacy(config, identity, reason, neighborTriggered)" in runner_source
+    assert "HarnessResult.passRegistry(" in runner_source
+    assert "HarnessResult.failRegistry(" in runner_source
     assert "TargetBridge.applyProbeState" in runner_source
     assert "FabricLoader.getInstance()" in identity_source
     assert "getModContainer" in identity_source
@@ -124,12 +126,18 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "pd.agent.targetSha256" in config_source
     assert "pd.agent.targetEntrypointClass" in config_source
     assert "pd.agent.testId" in config_source
+    assert "pd.agent.observationType" in config_source
+    assert "pd.agent.observationRegistryKind" in config_source
+    assert "pd.agent.observationIdentifier" in config_source
     assert "pd.agent.resultPath" in config_source
     assert "normalizeTestId(String value)" in config_source
     assert "test id cannot be empty" in config_source
     assert "SUPPORTED_TEST_IDS" not in config_source
     assert "unsupported test id" not in config_source
     assert "result path must be absolute" in config_source
+    assert "HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT" in runner_source
+    assert "Registries.BLOCK.getOrEmpty(identifier).isPresent()" in runner_source
+    assert "Registries.ITEM.getOrEmpty(identifier).isPresent()" in runner_source
     assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in runner_source
     assert "HarnessSignals.disarmNeighborUpdateProbe()" in runner_source
     assert "waitForObserverPowered" not in runner_source

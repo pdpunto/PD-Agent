@@ -53,6 +53,8 @@ def _task(
     minecraft: bool = False,
     expected_neighbor_update: bool = False,
     test_id: str = "l8",
+    observation_type: str = "LEGACY_BLOCK_STATE",
+    observation_params: dict[str, object] | None = None,
     timeout_seconds: int | None = 30,
 ) -> BenchmarkTask:
     spec: dict[str, object] = {
@@ -61,8 +63,11 @@ def _task(
         "minecraft_version": "1.21.11",
         "loader_version": "0.19.3",
         "test_id": test_id,
+        "observation_type": observation_type,
         "expected_neighbor_update": expected_neighbor_update,
     }
+    if observation_params is not None:
+        spec["observation_params"] = observation_params
     if timeout_seconds is not None:
         spec["timeout_seconds"] = timeout_seconds
     return BenchmarkTask.from_dict(
@@ -645,6 +650,45 @@ def test_executor_carries_neighbor_expectation_into_minecraft_spec(monkeypatch: 
     assert spec.target_jar == Path("build/libs/mod.jar")
     assert not spec.target_jar.is_absolute()
     assert kwargs["run_id"] == "attempt-6"
+
+
+def test_executor_carries_registry_observation_into_minecraft_spec(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(
+        minecraft=True,
+        test_id="server_registry_presence",
+        observation_type="REGISTRY_ENTRY_PRESENT",
+        observation_params={"registry_kind": "block", "identifier": "minecraft:diamond_block"},
+    )
+    config = _config(brain_enabled=False)
+    workspace_root = _workspace_root(tmp_path / "exec", "attempt-registry", 1)
+    fake_minecraft = _FakeMinecraftRunner(project_root=workspace_root)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-registry", "attempt_index": 1, "repetition_index": 0})()
+
+    executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert fake_minecraft.calls
+    spec, kwargs = fake_minecraft.calls[0]
+    assert spec.observation_type.value == "REGISTRY_ENTRY_PRESENT"
+    assert spec.observation_params == {"registry_kind": "block", "identifier": "minecraft:diamond_block"}
+    assert spec.expect_neighbor_update is False
+    assert spec.target_jar == Path("build/libs/mod.jar")
+    assert kwargs["run_id"] == "attempt-registry"
 
 
 def test_executor_blocks_when_minecraft_runner_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

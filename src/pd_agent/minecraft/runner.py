@@ -19,6 +19,7 @@ from .contracts import (
     MinecraftEvidencePaths,
     MinecraftLaunchPlan,
     MinecraftProcessEvidence,
+    MinecraftObservationType,
     MinecraftRuntimeEvidence,
     MinecraftTargetMetadata,
     MinecraftTestResult,
@@ -77,6 +78,36 @@ def _target_entrypoint_class(manifest: Mapping[str, Any], *, target_path: Path) 
     if len(candidates) != 1:
         raise MinecraftTestValidationError(f"target fabric.mod.json main entrypoint is ambiguous: {target_path}")
     return candidates[0]
+
+
+def _observation_params(data: Mapping[str, Any] | None) -> dict[str, Any]:
+    if data is None:
+        return {}
+    return {str(key): value for key, value in dict(data).items()}
+
+
+def _registry_identifier_from_params(params: Mapping[str, Any]) -> str | None:
+    raw = params.get("identifier")
+    if raw is None:
+        raw = params.get("registry_identifier")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    return text
+
+
+def _registry_kind_from_params(params: Mapping[str, Any]) -> str | None:
+    raw = params.get("registry_kind")
+    if raw is None:
+        raw = params.get("kind")
+    if raw is None:
+        return None
+    text = str(raw).strip().casefold()
+    if not text:
+        return None
+    return text
 
 
 def _non_empty_set(values: Sequence[str] | None) -> frozenset[str]:
@@ -205,8 +236,19 @@ class MinecraftTestRunner:
             ("pd.agent.minecraft.expected_sha256", target.sha256),
             ("pd.agent.targetEntrypointClass", target_entrypoint_class),
             ("pd.agent.minecraft.test_id", spec.test_id),
+            ("pd.agent.observationType", spec.observation_type.value),
             ("pd.agent.minecraft.expect_neighbor_update", str(spec.expect_neighbor_update).lower()),
             ("pd.agent.minecraft.result_path", evidence_paths.harness_result_json.as_posix()),
+            *(
+                (("pd.agent.observationRegistryKind", registry_kind),)
+                if (registry_kind := _registry_kind_from_params(spec.observation_params)) is not None
+                else ()
+            ),
+            *(
+                (("pd.agent.observationIdentifier", observation_identifier),)
+                if (observation_identifier := _registry_identifier_from_params(spec.observation_params)) is not None
+                else ()
+            ),
         )
         return MinecraftLaunchPlan(
             run_id=run_id,
@@ -373,12 +415,23 @@ class MinecraftTestRunner:
             f"-Ppd.agent.targetSha256={expected_sha256}",
             f"-Ppd.agent.targetEntrypointClass={target_entrypoint_class}",
             f"-Ppd.agent.testId={result.spec.test_id}",
+            f"-Ppd.agent.observationType={result.spec.observation_type.value}",
             f"-Ppd.agent.resultPath={result.evidence_paths.harness_result_json}",
             f"-Ppd.agent.runDir={result.evidence_paths.root / 'runtime'}",
             f"-Ppd.agent.resultMode={result_mode}",
             f"-Ppd.agent.expectedBlockStateId={expected_block_state_id}",
             f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
+            *(
+                (f"-Ppd.agent.observationRegistryKind={registry_kind}",)
+                if (registry_kind := _registry_kind_from_params(result.spec.observation_params)) is not None
+                else ()
+            ),
+            *(
+                (f"-Ppd.agent.observationIdentifier={observation_identifier}",)
+                if (observation_identifier := _registry_identifier_from_params(result.spec.observation_params)) is not None
+                else ()
+            ),
         )
 
     def _build_command(self, launch_properties: tuple[str, ...]) -> tuple[str, ...]:

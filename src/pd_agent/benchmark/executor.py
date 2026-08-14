@@ -18,6 +18,7 @@ from pd_agent.context import ContextManager, ExternalContextSource, ProjectConte
 from pd_agent.core import ExecutionLimits, ModelProvider, ProviderError, RunState
 from pd_agent.minecraft import (
     MinecraftEvidencePaths,
+    MinecraftObservationType,
     MinecraftTargetMetadata,
     MinecraftTestResult,
     MinecraftTestRunner,
@@ -137,6 +138,10 @@ def _minecraft_spec_for_task(
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
     target_mod_id = str(spec.get("target_mod_id") or spec.get("mod_id") or task.task_id).strip()
     test_id = str(spec.get("test_id") or f"{task.task_id}:{task.task_version}").strip()
+    observation_type = str(spec.get("observation_type") or MinecraftObservationType.LEGACY_BLOCK_STATE.value).strip()
+    observation_params = spec.get("observation_params")
+    if observation_params is None:
+        observation_params = spec.get("expectations", {})
     minecraft_version = str(spec.get("minecraft_version") or task.environment.minecraft_version or "").strip()
     loader_version = str(spec.get("loader_version") or task.environment.loader_version or "").strip()
     timeout_seconds = int(spec.get("timeout_seconds", default_timeout_seconds))
@@ -147,6 +152,8 @@ def _minecraft_spec_for_task(
         minecraft_version=minecraft_version,
         loader_version=loader_version,
         test_id=test_id,
+        observation_type=observation_type,
+        observation_params=observation_params,
         timeout_seconds=timeout_seconds,
         expect_neighbor_update=expect_neighbor_update,
     )

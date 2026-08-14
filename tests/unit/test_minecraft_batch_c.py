@@ -7,7 +7,13 @@ import sys
 
 import pytest
 
-from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, MinecraftTestStatus, MinecraftTestValidationError
+from pd_agent.minecraft import (
+    MinecraftObservationType,
+    MinecraftTestRunner,
+    MinecraftTestSpec,
+    MinecraftTestStatus,
+    MinecraftTestValidationError,
+)
 from tests.fixtures.artifact_projects import write_jar, write_manifest_jar
 
 
@@ -428,6 +434,8 @@ def test_runner_preserves_generic_observation_labels_in_launch_plan(tmp_path: Pa
         minecraft_version="1.21.11",
         loader_version="0.19.3",
         test_id="server_registry_presence",
+        observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+        observation_params={"registry_kind": "block", "identifier": "minecraft:diamond_block"},
         timeout_seconds=30,
         expect_neighbor_update=False,
     )
@@ -435,6 +443,9 @@ def test_runner_preserves_generic_observation_labels_in_launch_plan(tmp_path: Pa
     plan = runner.build_launch_plan(spec, run_id="run-generic-observation", java_version="21")
 
     assert dict(plan.system_properties)["pd.agent.minecraft.test_id"] == "server_registry_presence"
+    assert dict(plan.system_properties)["pd.agent.observationType"] == "REGISTRY_ENTRY_PRESENT"
+    assert dict(plan.system_properties)["pd.agent.observationRegistryKind"] == "block"
+    assert dict(plan.system_properties)["pd.agent.observationIdentifier"] == "minecraft:diamond_block"
     assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
 
 

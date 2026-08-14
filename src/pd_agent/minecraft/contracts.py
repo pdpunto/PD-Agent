@@ -49,6 +49,13 @@ def _validate_mod_id(value: object) -> str:
     return mod_id
 
 
+class MinecraftObservationType(StrEnum):
+    """Supported runtime observation contracts."""
+
+    LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE"
+    REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT"
+
+
 @dataclass(frozen=True, slots=True)
 class MinecraftTestSpec:
     """Minimum Minecraft runtime test specification."""
@@ -59,6 +66,8 @@ class MinecraftTestSpec:
     loader_version: str
     test_id: str
     timeout_seconds: int
+    observation_type: MinecraftObservationType = MinecraftObservationType.LEGACY_BLOCK_STATE
+    observation_params: Mapping[str, Any] = field(default_factory=dict)
     expect_neighbor_update: bool = False
 
     def __post_init__(self) -> None:
@@ -67,6 +76,8 @@ class MinecraftTestSpec:
         object.__setattr__(self, "minecraft_version", _non_empty_text("minecraft_version", self.minecraft_version))
         object.__setattr__(self, "loader_version", _non_empty_text("loader_version", self.loader_version))
         object.__setattr__(self, "test_id", _non_empty_text("test_id", self.test_id))
+        object.__setattr__(self, "observation_type", MinecraftObservationType(str(self.observation_type)))
+        object.__setattr__(self, "observation_params", dict(self.observation_params))
         timeout_seconds = int(self.timeout_seconds)
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -80,6 +91,8 @@ class MinecraftTestSpec:
             "minecraft_version": self.minecraft_version,
             "loader_version": self.loader_version,
             "test_id": self.test_id,
+            "observation_type": self.observation_type.value,
+            "observation_params": _json_ready(dict(self.observation_params)),
             "timeout_seconds": self.timeout_seconds,
             "expect_neighbor_update": self.expect_neighbor_update,
         }
@@ -92,6 +105,10 @@ class MinecraftTestSpec:
             minecraft_version=str(data["minecraft_version"]),
             loader_version=str(data["loader_version"]),
             test_id=str(data["test_id"]),
+            observation_type=MinecraftObservationType(
+                str(data.get("observation_type", MinecraftObservationType.LEGACY_BLOCK_STATE.value))
+            ),
+            observation_params=dict(data.get("observation_params", {})),
             timeout_seconds=int(data["timeout_seconds"]),
             expect_neighbor_update=bool(data.get("expect_neighbor_update", False)),
         )

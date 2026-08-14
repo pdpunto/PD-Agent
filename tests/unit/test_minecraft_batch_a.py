@@ -11,6 +11,7 @@ from pd_agent.minecraft import (
     MinecraftEvidencePaths,
     MinecraftLaunchPlan,
     MinecraftProcessEvidence,
+    MinecraftObservationType,
     MinecraftRuntimeEvidence,
     MinecraftTargetMetadata,
     MinecraftTestResult,
@@ -58,13 +59,14 @@ def test_status_enum_is_closed_and_terminal() -> None:
 
 
 def test_spec_validation_and_round_trip(tmp_path: Path) -> None:
-    jar = _make_jar(tmp_path)
+    _make_jar(tmp_path)
     spec = MinecraftTestSpec(
         target_jar=Path("build/libs/target.jar"),
         target_mod_id="pdagentl11",
         minecraft_version="1.21.11",
         loader_version="0.19.3",
         test_id="batch-a",
+        observation_type=MinecraftObservationType.LEGACY_BLOCK_STATE,
         timeout_seconds=90,
     )
 
@@ -74,10 +76,60 @@ def test_spec_validation_and_round_trip(tmp_path: Path) -> None:
         "minecraft_version": "1.21.11",
         "loader_version": "0.19.3",
         "test_id": "batch-a",
+        "observation_type": "LEGACY_BLOCK_STATE",
+        "observation_params": {},
         "timeout_seconds": 90,
         "expect_neighbor_update": False,
     }
     assert MinecraftTestSpec.from_dict(spec.to_dict()) == spec
+
+
+def test_spec_supports_generic_registry_observation_round_trip(tmp_path: Path) -> None:
+    _make_jar(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="registry-observation",
+        observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+        observation_params={"registry_kind": "block", "identifier": "minecraft:diamond_block"},
+        timeout_seconds=90,
+    )
+
+    assert spec.to_dict()["observation_type"] == "REGISTRY_ENTRY_PRESENT"
+    assert spec.to_dict()["observation_params"] == {
+        "registry_kind": "block",
+        "identifier": "minecraft:diamond_block",
+    }
+    assert MinecraftTestSpec.from_dict(spec.to_dict()) == spec
+
+
+@pytest.mark.parametrize(
+    "observation_params",
+    [
+        {"registry_kind": "block", "identifier": "minecraft:diamond_block"},
+        {"registry_kind": "item", "identifier": "minecraft:diamond_sword"},
+    ],
+)
+def test_spec_supports_generic_registry_observation_values(
+    tmp_path: Path,
+    observation_params: dict[str, str],
+) -> None:
+    _make_jar(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="registry-observation",
+        observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+        observation_params=observation_params,
+        timeout_seconds=90,
+    )
+
+    assert spec.observation_type is MinecraftObservationType.REGISTRY_ENTRY_PRESENT
+    assert spec.observation_params == observation_params
 
 
 @pytest.mark.parametrize(
@@ -88,6 +140,7 @@ def test_spec_validation_and_round_trip(tmp_path: Path) -> None:
         {"minecraft_version": ""},
         {"loader_version": ""},
         {"test_id": ""},
+        {"observation_type": "bad-type"},
         {"timeout_seconds": 0},
     ],
 )
@@ -99,6 +152,7 @@ def test_spec_rejects_invalid_values(tmp_path: Path, kwargs: dict[str, object]) 
         "minecraft_version": "1.21.11",
         "loader_version": "0.19.3",
         "test_id": "batch-a",
+        "observation_type": MinecraftObservationType.LEGACY_BLOCK_STATE,
         "timeout_seconds": 90,
     }
     payload.update(kwargs)

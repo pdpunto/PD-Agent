@@ -58,11 +58,18 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     jvmArgs.add("-Dpd.agent.targetSha256=${providers.gradleProperty("pd.agent.targetSha256").get()}")
     jvmArgs.add("-Dpd.agent.targetEntrypointClass=${providers.gradleProperty("pd.agent.targetEntrypointClass").get()}")
     jvmArgs.add("-Dpd.agent.testId=${providers.gradleProperty("pd.agent.testId").get()}")
+    jvmArgs.add("-Dpd.agent.observationType=${providers.gradleProperty("pd.agent.observationType").get()}")
     jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")
     jvmArgs.add("-Dpd.agent.resultMode=${providers.gradleProperty("pd.agent.resultMode").orElse("pass").get()}")
     jvmArgs.add("-Dpd.agent.expectedBlockStateId=${providers.gradleProperty("pd.agent.expectedBlockStateId").orElse("diamond_block").get()}")
     jvmArgs.add("-Dpd.agent.expectNeighborUpdate=${providers.gradleProperty("pd.agent.expectNeighborUpdate").orElse("false").get()}")
     jvmArgs.add("-Dpd.agent.hangMillis=${providers.gradleProperty("pd.agent.hangMillis").orElse("600000").get()}")
+    providers.gradleProperty("pd.agent.observationRegistryKind").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationRegistryKind=$it")
+    }
+    providers.gradleProperty("pd.agent.observationIdentifier").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationIdentifier=$it")
+    }
     javaLauncher = javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
