@@ -112,7 +112,7 @@ Decision A selected:
 ## Tests Executed
 
 - `python -m compileall src scripts tests`
-- `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q tests\\unit\\test_v0_5_multifile_capability.py tests\\unit\\test_l9_runtime.py`
+- `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q tests\\unit\\test_l9_runtime.py -k \"multi_file or max_tool_calls_and_builds or action_only or file_exists\"`
 - `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q`
 
 ## Results
