@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "examplemod",
+  "version": "1.0.0",
+  "name": "Example Mod",
+  "description": "Pinned representative Fabric base project for PD Agent v0.5.",
+  "authors": [
+    "PD Agent"
+  ],
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.example.examplemod.ExampleMod"
+    ],
+    "client": [
+      "com.example.examplemod.client.ExampleModClient"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}
