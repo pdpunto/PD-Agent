@@ -35,6 +35,20 @@ from pd_agent.tools import ToolExecutionContext, ToolExecutor, create_filesystem
 
 
 @dataclass(slots=True)
+class _RetainedFileEvidence:
+    path: str
+    observed_step: int
+    excerpt: str
+    truncated: bool
+    bytes_total: int | None = None
+    kind: str = "file"
+
+    @property
+    def excerpt_bytes(self) -> int:
+        return len(self.excerpt.encode("utf-8"))
+
+
+@dataclass(slots=True)
 class _LoopTelemetry:
     last_failure_signature: str | None = None
     failure_repeat_count: int = 0
@@ -47,6 +61,7 @@ class _LoopTelemetry:
     recent_inspected_paths: tuple[str, ...] = ()
     last_operational_progress_step: int = 0
     action_pressure_level: str = "normal"
+    retained_file_evidence: dict[str, _RetainedFileEvidence] = field(default_factory=dict)
 
 
 class ActionGateState(StrEnum):
@@ -66,6 +81,9 @@ _FOCUSED_ACTION_STEP = 5
 _ACTION_ONLY_STEP = 7
 _ACTION_STALL_STEP = 8
 _RECENT_HISTORY_LIMIT = 8
+_MAX_RETAINED_FILE_EVIDENCE = 8
+_MAX_RETAINED_FILE_EXCERPT_BYTES = 4096
+_MAX_RETAINED_FILE_TOTAL_BYTES = 24576
 
 
 class AgentRuntime:
@@ -104,6 +122,7 @@ class AgentRuntime:
         limits: ExecutionLimits | None = None,
     ) -> tuple[RunState, FinalReport]:
         limits = limits or ExecutionLimits()
+        self._telemetry = _LoopTelemetry()
         run_state.task = task
         run_state.project_snapshot = project_snapshot.to_dict()
         self._emit(run_state.run_id, RunEventType.STATE_CHANGED, {"state": run_state.state.value, "reason": "start"})
@@ -333,10 +352,11 @@ class AgentRuntime:
         policy_context = self._build_action_transition_context(run_state, limits, gate_state)
         tool_specs = tuple(self._tool_specs(gate_state))
         offered_tool_names = tuple(spec["name"] for spec in tool_specs)
+        retained_evidence_context = self._retained_file_evidence_context_items()
         bundle = self.context_manager.build_context(
             project_snapshot=project_snapshot,
             run_state=run_state,
-            external_context=(policy_context, *external_context),
+            external_context=(policy_context, *retained_evidence_context, *external_context),
             limits=limits,
         )
         self._persist_knowledge_traces(run_state.run_id)
@@ -458,6 +478,7 @@ class AgentRuntime:
             result = self.tool_executor.execute(call, context)
             results.append(result)
             run_state.record_tool_call()
+            self._record_retained_file_evidence(run_state, result)
             self._record_changed_files(run_state, result)
             self._persist_state(run_state)
             self._observe_progress(
@@ -480,6 +501,135 @@ class AgentRuntime:
         if path is None:
             return
         run_state.record_changed_file(path)
+
+    def _record_retained_file_evidence(self, run_state: RunState, result: ToolResult) -> None:
+        if result.status != ToolResultStatus.SUCCESS:
+            return
+
+        if result.metadata.get("changed"):
+            self._remove_retained_file_evidence(result)
+
+        if result.tool_name != "read_file":
+            return
+
+        output = result.output if isinstance(result.output, Mapping) else {}
+        path = output.get("path")
+        content = output.get("content")
+        if path is None or content is None:
+            return
+
+        excerpt, excerpt_truncated = self._truncate_utf8_prefix(str(content), _MAX_RETAINED_FILE_EXCERPT_BYTES)
+        bytes_total = output.get("bytes_total")
+        try:
+            normalized_bytes_total = int(bytes_total) if bytes_total is not None else None
+        except (TypeError, ValueError):
+            normalized_bytes_total = None
+
+        self._telemetry.retained_file_evidence[str(path)] = _RetainedFileEvidence(
+            path=str(path),
+            observed_step=run_state.agent_step_count,
+            excerpt=excerpt,
+            truncated=bool(output.get("truncated", False)) or excerpt_truncated,
+            bytes_total=normalized_bytes_total,
+        )
+        self._prune_retained_file_evidence()
+
+    def _remove_retained_file_evidence(self, result: ToolResult) -> None:
+        path = result.metadata.get("path")
+        if path is None and isinstance(result.output, Mapping):
+            path = result.output.get("path")
+        if path is None:
+            return
+        self._telemetry.retained_file_evidence.pop(str(path), None)
+
+    def _prune_retained_file_evidence(self) -> None:
+        while self._telemetry.retained_file_evidence:
+            entries = self._sorted_retained_file_evidence()
+            total_bytes = sum(entry.excerpt_bytes for entry in entries)
+            if len(entries) <= _MAX_RETAINED_FILE_EVIDENCE and total_bytes <= _MAX_RETAINED_FILE_TOTAL_BYTES:
+                return
+            oldest = entries[0]
+            self._telemetry.retained_file_evidence.pop(oldest.path, None)
+
+    def _sorted_retained_file_evidence(self) -> tuple[_RetainedFileEvidence, ...]:
+        return tuple(
+            sorted(
+                self._telemetry.retained_file_evidence.values(),
+                key=lambda entry: (entry.observed_step, entry.path),
+            )
+        )
+
+    def _retained_file_evidence_paths(self) -> tuple[str, ...]:
+        return tuple(entry.path for entry in self._sorted_retained_file_evidence())
+
+    def _retained_file_evidence_context_items(self) -> tuple[ContextItem, ...]:
+        entries = self._sorted_retained_file_evidence()
+        if not entries:
+            return ()
+
+        total_bytes = sum(entry.excerpt_bytes for entry in entries)
+        items: list[ContextItem] = [
+            ContextItem.from_text(
+                source="runtime",
+                priority=6,
+                label="retained-inspection-evidence",
+                content="\n".join(
+                    [
+                        f"retained_file_count: {len(entries)}",
+                        f"retained_total_excerpt_bytes: {total_bytes}",
+                        f"retained_paths: {[entry.path for entry in entries]}",
+                    ]
+                ),
+                metadata={
+                    "retained_file_count": len(entries),
+                    "retained_total_excerpt_bytes": total_bytes,
+                    "retained_paths": [entry.path for entry in entries],
+                },
+            )
+        ]
+        for entry in entries:
+            items.append(
+                ContextItem.from_text(
+                    source="runtime",
+                    priority=7,
+                    label=f"retained-file:{entry.path}",
+                    content="\n".join(
+                        [
+                            f"path: {entry.path}",
+                            f"kind: {entry.kind}",
+                            f"observed_step: {entry.observed_step}",
+                            f"truncated: {entry.truncated}",
+                            f"bytes_total: {entry.bytes_total}",
+                            "excerpt:",
+                            entry.excerpt,
+                        ]
+                    ),
+                    metadata={
+                        "path": entry.path,
+                        "kind": entry.kind,
+                        "observed_step": entry.observed_step,
+                        "truncated": entry.truncated,
+                        "bytes_total": entry.bytes_total,
+                        "excerpt_bytes": entry.excerpt_bytes,
+                    },
+                    truncated=entry.truncated,
+                )
+            )
+        return tuple(items)
+
+    def _truncate_utf8_prefix(self, text: str, limit_bytes: int) -> tuple[str, bool]:
+        if limit_bytes <= 0:
+            return "", bool(text)
+        encoded = text.encode("utf-8")
+        if len(encoded) <= limit_bytes:
+            return text, False
+        chunk = encoded[:limit_bytes]
+        while chunk:
+            try:
+                return chunk.decode("utf-8"), True
+            except UnicodeDecodeError as exc:
+                chunk = chunk[:exc.start]
+        return "", True
 
     def _finish(
         self,
@@ -585,6 +735,8 @@ class AgentRuntime:
             "progress:",
             f"- files_changed: {list(run_state.changed_files)}",
             f"- build_attempted: {bool(run_state.build_results)}",
+            f"- retained_inspection_evidence_count: {len(self._telemetry.retained_file_evidence)}",
+            f"- retained_inspection_evidence_paths: {list(self._retained_file_evidence_paths())}",
             f"- consecutive_inspection_steps: {telemetry.consecutive_inspection_steps}",
             f"- recent_inspection_tools: {list(telemetry.recent_inspection_tools)}",
             f"- recent_inspected_paths: {list(telemetry.recent_inspected_paths)}",
@@ -651,6 +803,10 @@ class AgentRuntime:
             "- genuinely new/nonexistent path -> create_file",
             "- never use create_file to replace an existing file",
             "- use recent_inspected_paths as guidance, but treat only an observed file as an existing target.",
+            "- prefer files and symbols directly supported by the task and retained inspection evidence.",
+            "- preserve unrelated structure, declarations, metadata, configuration, entrypoints and public contracts unless verified evidence shows they are implicated.",
+            "- when rewriting an existing file, keep non-target content and contracts intact unless the verified fix requires changing them.",
+            "- if the evidence is insufficient to choose a target confidently, inspect only the specific blocker or validate the current state with a build.",
         )
         escalation_rules = self._escalation_policy_lines(gate_state)
         return (

@@ -13,12 +13,13 @@ import pytest
 from pd_agent import AgentRuntime, ContextManager, RunController
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextItem
-from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ExecutionLimits, ProviderContinuation, ToolCall
+from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ExecutionLimits, ProviderContinuation, RunState, RunStatus, ToolCall, ToolResult, ToolResultStatus
 from pd_agent.core.errors import ProviderError
-from pd_agent.project import ProjectInspectionStatus
+from pd_agent.project import ProjectInspectionStatus, ProjectInspector, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunEventType, RunStorage
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
+import pd_agent.runtime.engine as runtime_engine
 
 
 def _tool_names(request: AgentRequest) -> tuple[str, ...]:
@@ -29,6 +30,25 @@ def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8", newline="\n")
     return path
+
+
+def _retained_read_result(*, path: str, content: str, bytes_total: int | None = None, truncated: bool = False) -> ToolResult:
+    output = {
+        "path": path,
+        "content": content,
+        "bytes_total": bytes_total if bytes_total is not None else len(content.encode("utf-8")),
+        "truncated": truncated,
+    }
+    metadata = {"changed": False, "truncated": truncated}
+    if bytes_total is not None:
+        metadata["bytes_total"] = bytes_total
+    return ToolResult(
+        call_id="1",
+        tool_name="read_file",
+        status=ToolResultStatus.SUCCESS,
+        output=output,
+        metadata=metadata,
+    )
 
 
 def _runtime_project(root: Path, *, build_state: str = "pass") -> Path:
@@ -144,6 +164,27 @@ def _controller(root: Path, provider: ScriptedProvider, *, limits: ExecutionLimi
         limits=limits or ExecutionLimits(),
     )
     return controller, storage
+
+
+def _runtime(
+    root: Path,
+    provider: ScriptedProvider,
+    *,
+    limits: ExecutionLimits | None = None,
+    context_manager: ContextManager | None = None,
+) -> tuple[AgentRuntime, RunStorage, ProjectSnapshot]:
+    storage = RunStorage(root / "runs")
+    runtime = AgentRuntime(
+        provider=provider,
+        tool_executor=ToolExecutor(tools=create_filesystem_tools()),
+        build_runner=GradleBuildRunner(reporting=storage),
+        artifact_validator=ArtifactValidator(reporting=storage),
+        context_manager=context_manager or ContextManager(),
+        reporting=storage,
+        model_config={},
+    )
+    snapshot = ProjectInspector().inspect(root)
+    return runtime, storage, snapshot
 
 
 def test_edit_build_artifact_valid(tmp_path: Path) -> None:
@@ -641,6 +682,9 @@ def test_action_transition_policy_escalates_explicitly_at_threshold(tmp_path: Pa
     assert "existing path or observed existing file -> write_file" in provider.requests[0].messages[0].content
     assert "genuinely new/nonexistent path -> create_file" in provider.requests[0].messages[0].content
     assert "recent_inspected_paths" in provider.requests[0].messages[0].content
+    assert "prefer files and symbols directly supported by the task and retained inspection evidence" in provider.requests[0].messages[0].content
+    assert "preserve unrelated structure, declarations, metadata, configuration, entrypoints and public contracts" in provider.requests[0].messages[0].content
+    assert "if the evidence is insufficient to choose a target confidently" in provider.requests[0].messages[0].content
     assert "phase: PLANNING" in provider.requests[4].messages[0].content
     assert "escalation_state: action_required" in provider.requests[4].messages[0].content
     assert "ACTION REQUIRED" in provider.requests[4].messages[0].content
@@ -688,9 +732,10 @@ def test_action_transition_escalates_and_stops_before_exhaustion(tmp_path: Path)
 
 def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "action-only-build", build_state="pass")
+    _write(root / "notes.txt", "alpha\nbeta\n")
     provider = ScriptedProvider(
         [
-            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "build-state.txt", "max_bytes": 16}),)),
+            AgentResponse(assistant_message="step1", tool_calls=(ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 16}),)),
             AgentResponse(assistant_message="step2", tool_calls=(ToolCall(call_id="2", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
             AgentResponse(assistant_message="step3", tool_calls=(ToolCall(call_id="3", tool_name="read_file", arguments={"path": "settings.gradle.kts", "max_bytes": 64}),)),
             AgentResponse(assistant_message="step4", tool_calls=(ToolCall(call_id="4", tool_name="read_file", arguments={"path": "gradle.properties", "max_bytes": 64}),)),
@@ -713,6 +758,7 @@ def test_action_only_zero_tool_calls_advances_to_build(tmp_path: Path) -> None:
     assert "read_file" not in offered
     assert "search_text" not in offered
     assert {"write_file", "create_file", "delete_file"}.issubset(set(offered))
+    assert "retained-file:notes.txt" in provider.requests[7].messages[0].content
 
 
 def test_action_gate_blocks_unoffered_tool_and_keeps_running(tmp_path: Path) -> None:
@@ -848,6 +894,368 @@ def test_action_gate_policy_is_independent_of_external_context(tmp_path: Path) -
     assert on_event.payload["action_gate_state"] == "normal"
     assert off_event.payload["offered_tool_names"] == on_event.payload["offered_tool_names"]
     assert _tool_names(provider_off.requests[0]) == _tool_names(provider_on.requests[0])
+
+
+def test_retained_inspection_evidence_is_visible_in_followup_context(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-visible", build_state="pass")
+    _write(root / "notes.txt", "alpha\nbeta\n")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "retained evidence")
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 2
+    followup = provider.requests[1].messages[0].content
+    assert "retained_inspection_evidence_count: 1" in followup
+    assert "retained-inspection-evidence" in followup
+    assert "retained-file:notes.txt" in followup
+    assert "path: notes.txt" in followup
+    assert "alpha" in followup
+
+
+def test_brain_context_and_retained_evidence_coexist(tmp_path: Path) -> None:
+    root_off = _runtime_project(tmp_path / "retained-off", build_state="pass")
+    root_on = _runtime_project(tmp_path / "retained-on", build_state="pass")
+    _write(root_off / "notes.txt", "alpha\nbeta\n")
+    _write(root_on / "notes.txt", "alpha\nbeta\n")
+    provider_off = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    provider_on = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    controller_off, _storage_off = _controller(root_off, provider_off)
+    controller_on, _storage_on = _controller(root_on, provider_on)
+
+    run_state_off, report_off = controller_off.run(root_off, "retained off")
+    run_state_on, report_on = controller_on.run(
+        root_on,
+        "retained on",
+        external_context=(ContextItem.from_text(source="brain", priority=1, label="yarn", content="retrieved yarn"),),
+    )
+
+    assert run_state_off.state.value == "COMPLETED"
+    assert report_off.final_state.value == "COMPLETED"
+    assert run_state_on.state.value == "COMPLETED"
+    assert report_on.final_state.value == "COMPLETED"
+    off_followup = provider_off.requests[1].messages[0].content
+    on_followup = provider_on.requests[1].messages[0].content
+    assert "retained-file:notes.txt" in off_followup
+    assert "retained-file:notes.txt" in on_followup
+    assert "retrieved yarn" not in off_followup
+    assert "retrieved yarn" in on_followup
+    assert "prefer files and symbols directly supported by the task and retained inspection evidence" in off_followup
+    assert "prefer files and symbols directly supported by the task and retained inspection evidence" in on_followup
+    assert "preserve unrelated structure, declarations, metadata, configuration, entrypoints and public contracts" in off_followup
+    assert "preserve unrelated structure, declarations, metadata, configuration, entrypoints and public contracts" in on_followup
+
+
+def test_retained_inspection_evidence_respects_max_total_bytes(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-total", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+    content = "x" * 4096
+
+    for index in range(7):
+        run_state.agent_step_count = index + 1
+        runtime._record_retained_file_evidence(  # noqa: SLF001
+            run_state,
+            _retained_read_result(path=f"blob-{index}.txt", content=content, bytes_total=len(content.encode("utf-8"))),
+        )
+
+    total_bytes = sum(entry.excerpt_bytes for entry in runtime._telemetry.retained_file_evidence.values())  # noqa: SLF001
+    assert total_bytes <= 24576
+    assert len(runtime._telemetry.retained_file_evidence) == 6  # noqa: SLF001
+
+
+def test_retained_inspection_evidence_tie_breaks_by_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _runtime_project(tmp_path / "retained-tie", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+    content = "x" * 4096
+
+    monkeypatch.setattr(runtime_engine, "_MAX_RETAINED_FILE_EVIDENCE", 1)
+    monkeypatch.setattr(runtime_engine, "_MAX_RETAINED_FILE_TOTAL_BYTES", 10_000)
+
+    for path in ("b.txt", "a.txt"):
+        runtime._record_retained_file_evidence(  # noqa: SLF001
+            run_state,
+            _retained_read_result(path=path, content=content, bytes_total=len(content.encode("utf-8"))),
+        )
+
+    paths = runtime._retained_file_evidence_paths()  # noqa: SLF001
+    assert "a.txt" not in paths
+    assert paths[0] == "b.txt"
+    assert len(paths) == 1
+
+
+def test_retained_inspection_evidence_reread_updates_entry_and_recency(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-reread", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+
+    runtime._record_retained_file_evidence(  # noqa: SLF001
+        run_state,
+        _retained_read_result(path="notes.txt", content="alpha", bytes_total=5),
+    )
+    run_state.agent_step_count = 4
+    runtime._record_retained_file_evidence(  # noqa: SLF001
+        run_state,
+        _retained_read_result(path="notes.txt", content="beta", bytes_total=4),
+    )
+
+    assert len(runtime._telemetry.retained_file_evidence) == 1  # noqa: SLF001
+    entry = runtime._telemetry.retained_file_evidence["notes.txt"]  # noqa: SLF001
+    assert entry.observed_step == 4
+    assert entry.excerpt == "beta"
+    assert runtime._retained_file_evidence_paths() == ("notes.txt",)  # noqa: SLF001
+
+
+def test_retained_inspection_evidence_max_context_bytes_is_bounded(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-context-limit", build_state="pass")
+    _write(root / "notes.txt", "alpha\nbeta\n")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    runtime, _storage, snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="bounded")
+    run_state.transition_to(RunStatus.INSPECTING)
+
+    run_state, report = runtime.run(
+        run_state=run_state,
+        project_snapshot=snapshot,
+        task="bounded",
+        limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5, max_context_bytes=1200),
+    )
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    message = provider.requests[1].messages[0]
+    assert message.metadata["context_max_bytes"] == 1200
+    assert message.metadata["context_bytes"] <= 1200
+
+
+def test_retained_inspection_evidence_delete_invalidates_path(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-delete", build_state="pass")
+    _write(root / "notes.txt", "alpha\nbeta\n")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="delete",
+                tool_calls=(
+                    ToolCall(call_id="2", tool_name="delete_file", arguments={"path": "notes.txt"}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "delete evidence")
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 2
+    assert "retained-file:notes.txt" in provider.requests[1].messages[0].content
+    assert not (root / "notes.txt").exists()
+
+
+def test_retained_inspection_evidence_delete_invalidates_path_directly(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-delete-direct", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+
+    runtime._record_retained_file_evidence(  # noqa: SLF001
+        run_state,
+        _retained_read_result(path="notes.txt", content="alpha", bytes_total=5),
+    )
+    runtime._record_retained_file_evidence(  # noqa: SLF001
+        run_state,
+        ToolResult(
+            call_id="2",
+            tool_name="delete_file",
+            status=ToolResultStatus.SUCCESS,
+            output={"path": "notes.txt", "changed": True},
+            metadata={"changed": True, "path": "notes.txt"},
+        ),
+    )
+
+    assert "notes.txt" not in runtime._telemetry.retained_file_evidence  # noqa: SLF001
+
+
+def test_retained_inspection_evidence_is_invalidated_by_mutation(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-invalidate", build_state="fail")
+    _write(root / "notes.txt", "alpha\nbeta\n")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="mutate",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="write_file",
+                        arguments={"path": "notes.txt", "content": "gamma\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(assistant_message="diagnose", tool_calls=()),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "invalidate evidence")
+
+    assert run_state.state.value == "FAILED"
+    assert report.final_state.value == "FAILED"
+    assert len(provider.requests) == 3
+    assert "retained-file:notes.txt" in provider.requests[1].messages[0].content
+    assert "retained-file:notes.txt" not in provider.requests[2].messages[0].content
+    assert "alpha" not in provider.requests[2].messages[0].content
+    assert "retained_inspection_evidence_count: 0" in provider.requests[2].messages[0].content
+
+
+def test_retained_inspection_evidence_is_bounded_and_evicts_oldest(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-evict", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+
+    for index in range(9):
+        run_state.agent_step_count = index + 1
+        runtime._record_retained_file_evidence(  # noqa: SLF001
+            run_state,
+            _retained_read_result(
+                path=f"notes-{index}.txt",
+                content=f"file-{index}",
+                bytes_total=len(f"file-{index}".encode("utf-8")),
+            ),
+        )
+
+    assert len(runtime._telemetry.retained_file_evidence) == 8  # noqa: SLF001
+    assert "notes-0.txt" not in runtime._telemetry.retained_file_evidence  # noqa: SLF001
+    assert runtime._retained_file_evidence_paths()[0] == "notes-1.txt"  # noqa: SLF001
+
+
+def test_retained_inspection_evidence_truncates_utf8_prefix(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-truncate", build_state="pass")
+    provider = ScriptedProvider([])
+    runtime, _storage, _snapshot = _runtime(root, provider)
+    run_state = RunState(project_root=root, task="evidence", agent_step_count=1)
+    content = "漢字" * 5000
+
+    runtime._record_retained_file_evidence(  # noqa: SLF001
+        run_state,
+        _retained_read_result(
+            path="unicode.txt",
+            content=content,
+            bytes_total=len(content.encode("utf-8")),
+            truncated=True,
+        ),
+    )
+
+    entry = runtime._telemetry.retained_file_evidence["unicode.txt"]  # noqa: SLF001
+    assert entry.truncated is True
+    assert entry.excerpt_bytes <= 4096
+    assert "\ufffd" not in entry.excerpt
+
+
+def test_retained_inspection_evidence_resets_between_runs(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "retained-reset", build_state="pass")
+    _write(root / "notes.txt", "alpha\nbeta\n")
+    provider_one = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(
+                    ToolCall(call_id="1", tool_name="read_file", arguments={"path": "notes.txt", "max_bytes": 32}),
+                ),
+            ),
+            AgentResponse(assistant_message="continue", tool_calls=()),
+        ]
+    )
+    runtime, _storage, snapshot = _runtime(root, provider_one)
+
+    run_state_one = RunState(project_root=root, task="first run")
+    run_state_one.transition_to(RunStatus.INSPECTING)
+    run_state_one, report_one = runtime.run(
+        run_state=run_state_one,
+        project_snapshot=snapshot,
+        task="first run",
+        limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5),
+    )
+
+    assert run_state_one.state.value == "COMPLETED"
+    assert report_one.final_state.value == "COMPLETED"
+    assert "retained-file:notes.txt" in provider_one.requests[1].messages[0].content
+    assert runtime._telemetry.retained_file_evidence  # noqa: SLF001
+
+    provider_two = ScriptedProvider([AgentResponse(assistant_message="fresh", tool_calls=())])
+    runtime.provider = provider_two
+    run_state_two = RunState(project_root=root, task="second run")
+    run_state_two.transition_to(RunStatus.INSPECTING)
+    run_state_two, report_two = runtime.run(
+        run_state=run_state_two,
+        project_snapshot=snapshot,
+        task="second run",
+        limits=ExecutionLimits(max_agent_steps=10, max_tool_calls=10, max_build_attempts=5),
+    )
+
+    assert run_state_two.state.value == "COMPLETED"
+    assert report_two.final_state.value == "COMPLETED"
+    assert "retained-file:notes.txt" not in provider_two.requests[0].messages[0].content
+    assert "alpha" not in provider_two.requests[0].messages[0].content
 
 
 def test_action_transition_reset_clears_pressure_before_diagnosing(tmp_path: Path) -> None:

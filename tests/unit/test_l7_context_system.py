@@ -75,6 +75,26 @@ def test_external_context_is_included_explicitly() -> None:
     assert "doc fragment" in bundle.to_text()
 
 
+def test_runtime_retained_evidence_context_item_is_rendered() -> None:
+    manager = _context_manager()
+    bundle = manager.build_context(
+        external_context=(
+            ContextItem.from_text(
+                source="runtime",
+                priority=6,
+                label="retained-inspection-evidence",
+                content="path: notes.txt\nexcerpt:\nalpha",
+                metadata={"path": "notes.txt", "observed_step": 1},
+            ),
+        )
+    )
+
+    text = bundle.to_text()
+    assert "[label] retained-inspection-evidence" in text
+    assert "path: notes.txt" in text
+    assert "alpha" in text
+
+
 def test_priority_retains_critical_items_before_huge_external(tmp_path: Path) -> None:
     root = make_dirty_git_project(tmp_path / "priority")
     snapshot = __import__("pd_agent.project", fromlist=["ProjectInspector"]).ProjectInspector().inspect(root)
