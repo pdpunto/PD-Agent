@@ -4,7 +4,7 @@
 **Version:** 1.1  
 **Milestone:** PD Agent v0.4 - Benchmark Foundation  
 **Depends on:** RFC Delta Fabric Action Transition  
-**Audited baseline before planning:** `b95411714180c09e9a334c0767d00dca4a0b4da2`
+**Audited baseline before planning:** `629e2a964794e81615e0c88cfdcbf222a41c549d`
 
 ## 1. Objetivo
 
@@ -389,6 +389,175 @@ Tests obligatorios:
    - `Registries.BLOCK`;
 18. suite completa PASS.
 
+### A11 - Retained Inspection Evidence + Mutation Target Policy
+
+Objetivo:
+
+Retener evidencia inspeccionada suficiente para que OFF pueda actuar con una
+mutacion minima y evaluable, sin convertir Brain OFF en Brain ON.
+
+No reordenar A1-A10.
+
+#### A11.1 Retained evidence model
+
+Implementar la forma mas pequena posible. Preferencia del repo real:
+
+- helper interno pequeno en `src/pd_agent/runtime/engine.py` junto a
+  `_LoopTelemetry`; o
+- dataclass interna adyacente, si la evidencia retenida necesita una forma mas
+  explicita.
+
+Campos minimos:
+
+- `path`;
+- `kind = file`;
+- `content` o `excerpt` bounded;
+- `truncated`;
+- `observed_step`.
+
+Opcional:
+
+- `bytes_total`;
+- `hash`.
+
+No crear modulo grande.
+No crear DB.
+No crear RAG.
+No persistir el contenido completo sin limite.
+
+#### A11.2 Capture from `read_file`
+
+Capturar solo resultados `SUCCESS` de `read_file`.
+
+Punto de captura recomendado en el repo real:
+
+- `src/pd_agent/runtime/engine.py`
+- dentro de `_execute_tool_calls()`
+- justo despues de `result = self.tool_executor.execute(...)`
+- antes de `_record_changed_files()` / `_observe_progress()`
+
+Usar el `ToolResult` estructurado ya existente:
+
+- `output.path`;
+- `output.content`;
+- `metadata.truncated`;
+- `metadata.bytes_total`.
+
+No capturar:
+
+- `list_directory`;
+- `search_text` completo;
+- writes;
+- reasoning del modelo.
+
+Si el mismo `path` se vuelve a leer, actualizar la entrada y su recency.
+No crear duplicados infinitos.
+
+#### A11.3 Context rendering / limits
+
+La evidencia retenida debe renderizarse como una fuente de contexto pequena y
+determinista. El punto de renderizado recomendado es la capa de contexto, no el
+provider.
+
+Repo real:
+
+- `ContextManager.build_context(..., limits=...)` ya existe;
+- `RunContextSource` ya recibe `ExecutionLimits` indirectamente via `ContextRequest`;
+- por tanto la evidencia puede entrar como un `ContextSource` pequeno
+  adicional o como extension de `RunContextSource`.
+
+Recomendacion de limites:
+
+- max retained files: 8;
+- max excerpt per file: 4096 bytes;
+- max total retained evidence bytes: 24576 bytes;
+- eviction: oldest-first por `observed_step`, con desempate estable por `path`.
+
+El render debe seguir respetando `max_context_bytes`.
+
+#### A11.4 Mutation target policy
+
+La policy debe preferir el cambio minimo respaldado por la evidencia retenida y
+por la tarea actual.
+
+Normativa:
+
+- preferir el archivo o simbolo explicitamente implicado por la tarea;
+- preferir archivos directamente soportados por evidencia inspeccionada;
+- preservar estructura, contratos y declaracion no relacionadas;
+- preservar metadata/configuracion/entrypoints salvo implicacion verificable;
+- no modificar un archivo no relacionado solo para satisfacer action pressure;
+- al reescribir un archivo existente, preservar el contenido no objetivo;
+- bajo incertidumbre razonable, un build del estado actual es preferible a una
+  mutacion especulativa.
+
+No hardcodear reglas especificas como:
+
+- `B001`;
+- `B003`;
+- `ExampleMod`;
+- `fabric.mod.json`;
+- `Registries.BLOCK`.
+
+#### A11.5 Action Gate integration
+
+La retencion de evidencia no debilita el Action Gate.
+
+La policy debe dejar visible:
+
+- task;
+- retained evidence;
+- mutation target guidance;
+- preservation guidance;
+- budget y progress.
+
+ACTION_ONLY sigue igual:
+
+- inspection tools cerradas;
+- mutation tools disponibles;
+- zero-tool call valido;
+- no mutar por fuerza si falta un blocker verificable.
+
+#### A11.6 Regression tests
+
+Tests obligatorios:
+
+1. `read_file` SUCCESS crea retained evidence.
+2. retained evidence incluye `path`.
+3. retained evidence incluye excerpt real.
+4. `truncated` se preserva correctamente.
+5. la evidencia persiste varias provider requests.
+6. el mismo `path` actualiza la entrada y la recency.
+7. bounded por max files.
+8. bounded por max bytes.
+9. eviction determinista.
+10. ACTION_ONLY conserva evidence.
+11. inspection tools siguen NO ofrecidas en ACTION_ONLY.
+12. policy prioriza minimal task-relevant edit.
+13. policy preserva estructura/config/metadata no relacionadas.
+14. policy preserva contenido/contratos no objetivo.
+15. policy permite zero-tool/build ante incertidumbre.
+16. no hardcodes:
+    - B001;
+    - B003;
+    - ExampleMod;
+    - fabric.mod.json;
+    - Registries.BLOCK.
+17. FILE_EXISTS recovery A10 sigue PASS.
+18. Action Gate violations siguen PASS.
+19. repeated gate violation sigue controlado.
+20. Brain OFF/ON misma policy.
+21. Brain knowledge + retained evidence coexisten.
+22. context sigue bounded.
+23. suite completa PASS.
+
+#### A11.7 Offline validation
+
+Validar con:
+
+- `python -m compileall src tests`
+- `python -m pytest -q`
+
 ## 6. Auditoria tecnica contra el repo
 
 ### 6.1 `_LoopTelemetry`
@@ -486,6 +655,34 @@ Preferir:
 - `RunState` ya existente.
 
 Solo crear un campo nuevo si no puede derivarse limpiamente.
+
+### 6.10 Decision record for A11
+
+Respuesta de auditoria contra el repo real:
+
+1. Capture point exacto: `AgentRuntime._execute_tool_calls()` despues de un
+   `read_file` exitoso, antes de `_record_changed_files()` y `_observe_progress()`.
+2. Rendering point exacto: la capa de contexto, idealmente como `ContextSource`
+   pequeno adyacente a `RunContextSource` dentro de `ContextManager`.
+3. `_LoopTelemetry` es suficiente para la senal de recency/streak; la evidencia
+   retenida se beneficia de una dataclass interna pequena, no de un modulo nuevo.
+4. Limites recomendados: 8 archivos, 4096 bytes por excerpt, 24576 bytes
+   totales, con eviction oldest-first por `observed_step`.
+5. Duplicados: no crear uno nuevo por lectura; actualizar la entrada existente
+   para el mismo `path`.
+6. `RunState`: no hace falta persistir la evidencia completa; basta con runtime
+   efimero y, si se desea, un resumen compacto en eventos/contexto.
+7. Persistencia: efimera por run. No durable entre runs.
+8. Reporting/evidence: persistir solo summary compacto o metadata minima, no el
+   contenido completo de todos los archivos retenidos.
+9. Brain: misma policy de retencion para OFF y ON; Brain solo anade knowledge
+   retrieval version-sensitive.
+10. `max_context_bytes`: la evidencia retenida debe entrar en el bundle
+    contextualmente y recortarse antes de exceder el limite global.
+11. Tests reales afectados: `tests/unit/test_l9_runtime.py`,
+    `tests/unit/test_l7_context_system.py`, y solo
+    `tests/unit/test_benchmark_executor.py` si se decide reforzar la
+    propagacion de limits/contexto.
 
 ## 7. Tests necesarios
 

@@ -1,6 +1,6 @@
 # PD Agent v0.4 - Fabric Agent Action Transition RFC Delta
 
-**Status:** DRAFT - pending repository audit  
+**Status:** READY FOR IMPLEMENTATION - audited against repository reality
 **Milestone:** PD Agent v0.4 - Benchmark Foundation  
 **Scope:** Delta sobre el runtime existente. No new provider contracts, no dataset changes, no Brain changes.
 
@@ -381,7 +381,109 @@ La policy debe decir explicitamente:
 
 No convertir esto en una base de datos persistente compleja.
 
-## 20. Criterio de aceptacion RFC
+## 20. Retained Inspection Evidence
+
+Este contrato a�ade una memoria de trabajo efimera, bounded y provider-neutral
+para archivos leidos con exito. No es una base de datos, no es RAG y no
+reconstruye el historial completo del run.
+
+### 20.1 Modelo retenido
+
+La evidencia retenida debe poder representarse como una estructura pequena
+adjunta al runtime, idealmente cerca de `_LoopTelemetry` o como un helper
+adyacente al runtime. La forma minima recomendada es una estructura interna con
+campos:
+
+- `path`;
+- `kind = file`;
+- `content` o `excerpt` bounded;
+- `truncated`;
+- `observed_step`;
+- `bytes_total` opcional si aporta valor real.
+
+No es necesario persistir todo en `RunState`.
+
+### 20.2 Capture and rendering
+
+La captura debe ocurrir cuando `read_file` devuelve `SUCCESS`. La fuente
+estructurada ya existe en el resultado del tool:
+
+- `path`;
+- `content`;
+- `truncated`;
+- `bytes_total`.
+
+El punto de captura recomendado en el repo real es `AgentRuntime._execute_tool_calls()`,
+justo despues de recibir el `ToolResult` exitoso y antes de continuar con la
+observacion de progreso.
+
+La renderizacion recomendada debe entrar en contexto como una fuente pequena
+de runtime, preferiblemente junto a `RunContextSource` dentro de
+`ContextManager`. El runtime ya dispone de `ContextRequest.limits` y
+`ContextManager.build_context(..., limits=...)`, asi que la fuente puede
+combinarse con el budget visible sin tocar providers.
+
+### 20.3 Limits and eviction
+
+La evidencia retenida debe ser bounded y determinista. Recomendacion:
+
+- max retained files: 8;
+- max excerpt per file: 4096 bytes;
+- max total retained evidence bytes: 24576 bytes;
+- eviction: oldest-first por `observed_step`, con desempate estable por `path`;
+- si el mismo `path` se vuelve a leer, actualizar la entrada existente y su
+  recency, no crear duplicados infinitos.
+
+Los limites reales deben respetar tambien `max_context_bytes`.
+
+### 20.4 Persistence
+
+La evidencia retenida debe vivir solo durante el run actual.
+
+Debe:
+
+- sobrevivir a varias provider requests;
+- seguir visible aunque el `ToolResult` original ya no este en el historial
+  inmediato;
+- resetearse al comenzar un run nuevo;
+- no requerir una tabla persistente nueva;
+- no guardarse como memoria entre runs.
+
+### 20.5 Action gate and Brain
+
+La retencion de evidencia no debilita el Action Gate.
+
+- inspection tools siguen cerrandose igual cuando corresponde;
+- retained evidence sigue visible en ACTION_REQUIRED / FOCUSED_ACTION /
+  ACTION_ONLY;
+- el modelo puede hacer zero-tool call si la evidencia ya es suficiente;
+- Brain OFF y Brain ON comparten la misma policy de retencion;
+- Brain ON puede sumar conocimiento externo, pero no sustituye la evidencia
+  factual observada del proyecto actual.
+
+## 21. Mutation Target Policy
+
+La policy de mutacion debe preferir el cambio minimo respaldado por la evidencia
+ya inspeccionada.
+
+Normativa:
+
+- preferir editar el archivo o simbolo explicitamente implicado por la tarea;
+- preferir archivos directamente soportados por evidencia inspeccionada;
+- preservar estructura, declaraciones y contratos no relacionados salvo que la
+  tarea o la evidencia verificada exijan cambiarlos;
+- preservar metadata/configuracion/entrypoints salvo que esten realmente
+  implicados;
+- no modificar un archivo no relacionado solo para satisfacer action pressure;
+- al reescribir un archivo existente, preservar el contenido y los contratos
+  publicos no objetivo del cambio;
+- bajo incertidumbre razonable, un build del estado actual es preferible a una
+  mutacion especulativa no respaldada.
+
+No escribir reglas especificas como "never edit fabric.mod.json". La regla debe
+aplicar a cualquier manifest, config, Gradle file, source, JSON o metadata.
+
+## 22. Criterio de aceptacion RFC
 
 El fix queda aceptado cuando:
 
@@ -402,7 +504,7 @@ El fix queda aceptado cuando:
 
 B001 no tiene que dar PASS funcional.
 
-## 21. Recoverable rejection contract
+## 23. Recoverable rejection contract
 
 La distincion entre rejection fatal y recoverable debe ser estructurada, no por
 parsing de texto.
