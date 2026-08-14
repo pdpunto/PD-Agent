@@ -1353,3 +1353,132 @@ def test_multiple_tool_calls_continue_with_structured_results(tmp_path: Path) ->
     assert [result.call_id for result in provider.requests[1].tool_results] == ["1", "2"]
     assert provider.requests[1].provider_continuations == continuations
     assert all(result.status.value == "success" for result in provider.requests[1].tool_results)
+
+
+def test_multi_file_single_response_applies_all_mutations_before_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multi-file", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="batch",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="write_file",
+                        arguments={
+                            "path": "src/main/java/com/example/ExampleMod.java",
+                            "content": "package com.example; class ExampleMod { int a = 1; }\n",
+                        },
+                    ),
+                    ToolCall(
+                        call_id="2",
+                        tool_name="create_file",
+                        arguments={
+                            "path": "src/main/java/com/example/FeatureHelper.java",
+                            "content": "package com.example; class FeatureHelper {}\n",
+                        },
+                    ),
+                    ToolCall(
+                        call_id="3",
+                        tool_name="write_file",
+                        arguments={
+                            "path": "src/main/resources/fabric.mod.json",
+                            "content": "{\n  \"enabled\": true\n}\n",
+                        },
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "multi file batch")
+    events = storage.read_events(run_state.run_id)
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 1
+    assert run_state.tool_call_count == 3
+    assert run_state.build_attempt_count == 1
+    assert run_state.changed_files == (
+        "src/main/java/com/example/ExampleMod.java",
+        "src/main/java/com/example/FeatureHelper.java",
+        "src/main/resources/fabric.mod.json",
+    )
+    tool_requested = [event for event in events if event.event_type == RunEventType.TOOL_REQUESTED]
+    tool_executed = [event for event in events if event.event_type == RunEventType.TOOL_EXECUTED]
+    file_changed = [event for event in events if event.event_type == RunEventType.FILE_CHANGED]
+    assert [event.payload["call_id"] for event in tool_requested] == ["1", "2", "3"]
+    assert [event.payload["call"]["call_id"] for event in tool_executed] == ["1", "2", "3"]
+    assert len(file_changed) == 3
+    assert events.index(next(event for event in events if event.event_type == RunEventType.BUILD_STARTED)) > events.index(
+        file_changed[-1]
+    )
+    assert (root / "src" / "main" / "java" / "com" / "example" / "ExampleMod.java").read_text(encoding="utf-8").endswith(
+        "int a = 1; }\n"
+    )
+    assert (root / "src" / "main" / "java" / "com" / "example" / "FeatureHelper.java").exists()
+    assert (root / "src" / "main" / "resources" / "fabric.mod.json").read_text(encoding="utf-8") == "{\n  \"enabled\": true\n}\n"
+    assert any(event.event_type == RunEventType.BUILD_STARTED for event in events)
+
+
+def test_multi_file_recoverable_rejection_keeps_later_mutations(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multi-file-reject", build_state="pass")
+    _write(root / "obsolete.txt", "delete me\n")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="batch",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={
+                            "path": "build-state.txt",
+                            "content": "pass\n",
+                        },
+                    ),
+                    ToolCall(
+                        call_id="2",
+                        tool_name="write_file",
+                        arguments={
+                            "path": "src/main/java/com/example/ExampleMod.java",
+                            "content": "package com.example; class ExampleMod { int b = 2; }\n",
+                        },
+                    ),
+                    ToolCall(
+                        call_id="3",
+                        tool_name="delete_file",
+                        arguments={"path": "obsolete.txt"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(root, "multi file rejection")
+    events = storage.read_events(run_state.run_id)
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 1
+    assert run_state.termination_reason == "completed"
+    assert run_state.changed_files == (
+        "src/main/java/com/example/ExampleMod.java",
+        "obsolete.txt",
+    )
+    assert run_state.tool_call_count == 3
+    assert run_state.build_attempt_count == 1
+    assert not (root / "obsolete.txt").exists()
+    assert [event.payload["call_id"] for event in events if event.event_type == RunEventType.TOOL_REQUESTED] == ["1", "2", "3"]
+    assert [event.payload["call"]["call_id"] for event in events if event.event_type == RunEventType.TOOL_EXECUTED] == ["2", "3"]
+    rejected = next(event for event in events if event.event_type == RunEventType.TOOL_REJECTED)
+    assert rejected.payload["call"]["call_id"] == "1"
+    assert "file already exists" in rejected.payload["reason"]
+    assert "use write_file" in rejected.payload["reason"]
+    assert (root / "src" / "main" / "java" / "com" / "example" / "ExampleMod.java").read_text(encoding="utf-8").endswith(
+        "int b = 2; }\n"
+    )
+    assert any(event.event_type == RunEventType.TOOL_REJECTED for event in events)
+    assert any(event.event_type == RunEventType.BUILD_STARTED for event in events)
