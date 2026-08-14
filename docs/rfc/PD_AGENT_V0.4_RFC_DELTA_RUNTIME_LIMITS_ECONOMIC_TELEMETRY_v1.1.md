@@ -292,3 +292,9 @@ PASS unicamente si existe evidencia de que:
 Este RFC no autoriza las 18 runs.
 
 El estado `READY_FOR_LIVE_BENCHMARK` solo podra concederse despues de una nueva smoke OFF/ON con los limites corregidos y un recalculo del presupuesto de requests/cuota basado en evidencia nueva.
+
+## 18. Closure
+
+This delta was implemented on baseline `d2966403ded33e9f7100002fddf452718a8bf78a` and validated by the official v0.4 matrix.
+
+See the final validation record in [docs/validation/PD_AGENT_V0.4_VALIDATION.md](../validation/PD_AGENT_V0.4_VALIDATION.md).

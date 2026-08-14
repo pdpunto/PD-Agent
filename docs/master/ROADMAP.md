@@ -1,12 +1,14 @@
-# PD Agent — Roadmap
+# PD Agent - Roadmap
 
-Status: Updated after v0.2 validation.
+Status: Updated after v0.4 validation.
 
 ## Confirmed Milestones
 
-1. `v0.1` — Fabric Coding Loop — completed
-2. `v0.1.1` — Real Provider Validation — completed
-3. `v0.2` — Minecraft Test Harness Foundation — completed
+1. `v0.1` - Fabric Coding Loop - completed
+2. `v0.1.1` - Real Provider Validation - completed
+3. `v0.2` - Minecraft Test Harness Foundation - completed
+4. `v0.3` - Minecraft Brain Foundation - completed
+5. `v0.4` - Benchmark Foundation - completed
 
 ## v0.2 Closure
 
@@ -32,7 +34,24 @@ This is strategic closure point for Minecraft Test Harness Foundation.
 - regression v0.1.1: `PASS`
 - regression v0.2: `PASS`
 
-The project now has a validated Minecraft Brain Foundation with versioned external knowledge and provenance. Benchmarks remain a candidate under evaluation.
+The project now has a validated Minecraft Brain Foundation with versioned external knowledge and provenance.
+
+## v0.4 Closure
+
+`v0.4` is now closed as:
+
+- `IMPLEMENTADO + LIVE VALIDATED + PASS`
+- baseline closure: `d2966403ded33e9f7100002fddf452718a8bf78a`
+- official matrix: `18/18 valid`
+- invalid: `0`
+- blocked: `0`
+- replacements: `0`
+- comparison status: `COMPLETE`
+- batch status: `COMPLETED`
+- final suite: `425 passed, 2 skipped`
+- official execution root: `C:\Users\Usuario\AppData\Local\Temp\pd-agent-v0.4-official-launch-20260814-204850-235\execution\e86d7abe-aae4-4f5d-bd37-8b751be6323c`
+
+Brain OFF and Brain ON were validated with the same dataset, provider, model, fairness constraints and run budget. The official matrix showed no provider errors, no 429s and no benchmark-level blockers.
 
 ## v0.2 Strategic Goal
 
@@ -91,10 +110,8 @@ Those decisions belong to the later Minecraft Test Harness work after investigat
 
 Later milestones are directional only and may be re-prioritized after each milestone:
 
-- Minecraft Brain / Knowledge Base
 - Build & Debug advanced
 - Fabric Agent complete
-- Benchmarks
 - Multi-Agent
 - Product UI
 - `.Fuzzer`

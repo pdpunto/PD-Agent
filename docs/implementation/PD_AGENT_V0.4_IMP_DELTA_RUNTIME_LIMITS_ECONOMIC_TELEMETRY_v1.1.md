@@ -945,3 +945,9 @@ Si detecta una discrepancia material:
 5. actualizar documentos;
 6. auditar de nuevo si procede;
 7. solo entonces comenzar Lote 1.
+
+## 25. Closure
+
+This delta was implemented on baseline `d2966403ded33e9f7100002fddf452718a8bf78a` and validated by the official v0.4 matrix.
+
+See the final validation record in [docs/validation/PD_AGENT_V0.4_VALIDATION.md](../validation/PD_AGENT_V0.4_VALIDATION.md).
