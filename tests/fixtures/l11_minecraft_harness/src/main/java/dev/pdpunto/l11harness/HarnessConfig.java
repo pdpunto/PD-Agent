@@ -1,8 +1,6 @@
 package dev.pdpunto.l11harness;
 
 import java.nio.file.Path;
-import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 record HarnessConfig(
@@ -19,11 +17,6 @@ record HarnessConfig(
     static final String PROP_TEST_ID = "pd.agent.testId";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
-    static final String SUPPORTED_TEST_ID = "block_state_probe";
-    static final Set<String> SUPPORTED_TEST_IDS = Set.of(
-        SUPPORTED_TEST_ID,
-        "block_state_probe_with_signal"
-    );
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -78,10 +71,10 @@ record HarnessConfig(
     }
 
     private static String normalizeTestId(String value) {
-        if (!SUPPORTED_TEST_IDS.contains(value)) {
-            throw new IllegalArgumentException("unsupported test id: " + value);
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("test id cannot be empty");
         }
-        return value;
+        return value.trim();
     }
 
     private static Path normalizeResultPath(Path value) {

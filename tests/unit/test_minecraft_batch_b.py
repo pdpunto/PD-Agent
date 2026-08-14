@@ -125,9 +125,10 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "pd.agent.targetEntrypointClass" in config_source
     assert "pd.agent.testId" in config_source
     assert "pd.agent.resultPath" in config_source
-    assert "block_state_probe_with_signal" in config_source
-    assert "SUPPORTED_TEST_IDS" in config_source
-    assert "unsupported test id" in config_source
+    assert "normalizeTestId(String value)" in config_source
+    assert "test id cannot be empty" in config_source
+    assert "SUPPORTED_TEST_IDS" not in config_source
+    assert "unsupported test id" not in config_source
     assert "result path must be absolute" in config_source
     assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in runner_source
     assert "HarnessSignals.disarmNeighborUpdateProbe()" in runner_source
@@ -135,13 +136,13 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "boundedNeighborWaitMillis" not in runner_source
 
 
-def test_batch_b_harness_supports_signal_test_id_without_relaxing_validation() -> None:
+def test_batch_b_harness_supports_generic_test_id_labels_without_task_whitelist() -> None:
     config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
 
-    assert "block_state_probe" in config_source
-    assert "block_state_probe_with_signal" in config_source
-    assert "SUPPORTED_TEST_IDS = Set.of(" in config_source
-    assert "unsupported test id" in config_source
+    assert "pd.agent.testId" in config_source
+    assert "test id cannot be empty" in config_source
+    assert "SUPPORTED_TEST_IDS" not in config_source
+    assert "unsupported test id" not in config_source
 
 
 def test_batch_b_built_jars_stay_separate() -> None:

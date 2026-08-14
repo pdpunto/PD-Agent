@@ -72,7 +72,7 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
             "pdagentl11",
             "0000000000000000000000000000000000000000000000000000000000000000",
             "dev.pdpunto.l11.ExampleMod",
-            HarnessConfig.SUPPORTED_TEST_ID,
+            "harness_bootstrap_fallback",
             java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "harness-result.json").toAbsolutePath(),
             false
         );

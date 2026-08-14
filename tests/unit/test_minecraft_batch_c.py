@@ -419,6 +419,25 @@ def test_b003_signal_test_id_does_not_override_neighbor_flag(tmp_path: Path) -> 
     assert dict(plan_false.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
 
 
+def test_runner_preserves_generic_observation_labels_in_launch_plan(tmp_path: Path) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="server_registry_presence",
+        timeout_seconds=30,
+        expect_neighbor_update=False,
+    )
+
+    plan = runner.build_launch_plan(spec, run_id="run-generic-observation", java_version="21")
+
+    assert dict(plan.system_properties)["pd.agent.minecraft.test_id"] == "server_registry_presence"
+    assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
+
+
 def test_runner_rejects_missing_or_ambiguous_main_entrypoint(tmp_path: Path) -> None:
     runner = _runner(tmp_path)
     _make_manifest_jar(
