@@ -10,6 +10,7 @@ from pd_agent import ArtifactValidator, GradleBuildRunner, YarnKnowledgeSource
 from pd_agent.benchmark import (
     BenchmarkCatalog,
     BenchmarkConfig,
+    BenchmarkExecutionManifest,
     BenchmarkExecutionRunner,
     BenchmarkExecutor,
     BenchmarkGradleEnvironment,
@@ -128,11 +129,12 @@ def _build_knowledge_source(configs: tuple[BenchmarkConfig, ...]) -> YarnKnowled
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run PD Agent v0.4 benchmarks")
     parser.add_argument("--catalog-root", required=True, type=Path)
-    parser.add_argument("--dataset-id", required=True)
-    parser.add_argument("--dataset-version", required=True)
-    parser.add_argument("--configs-json", required=True, type=Path)
-    parser.add_argument("--execution-root", required=True, type=Path)
-    parser.add_argument("--gradle-seed-root", required=True, type=Path)
+    parser.add_argument("--resume", type=Path, default=None)
+    parser.add_argument("--dataset-id", default=None)
+    parser.add_argument("--dataset-version", default=None)
+    parser.add_argument("--configs-json", type=Path, default=None)
+    parser.add_argument("--execution-root", type=Path, default=None)
+    parser.add_argument("--gradle-seed-root", type=Path, default=None)
     parser.add_argument("--gradle-seed-manifest", required=False, type=Path, default=None)
     parser.add_argument("--pd-agent-commit", default=None)
     parser.add_argument("--target-valid-repetitions", type=int, default=3)
@@ -144,20 +146,35 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     catalog = BenchmarkCatalog.load(args.catalog_root)
-    configs = _load_configs(args.configs_json)
-    canonical_config = _validate_configs(configs)
-    args.execution_root.mkdir(parents=True, exist_ok=True)
-    gradle_environment = BenchmarkGradleEnvironment.prepare(
-        seed_root=args.gradle_seed_root,
-        execution_root=args.execution_root,
-        seed_manifest_path=args.gradle_seed_manifest,
-        offline=True,
-    )
+
+    if args.resume is not None:
+        execution_dir = args.resume.resolve(strict=True)
+        if args.execution_root is not None and execution_dir.parent.resolve(strict=False) != args.execution_root.resolve(strict=False):
+            raise ValueError("--execution-root must match the parent of --resume when both are provided")
+        manifest = BenchmarkExecutionManifest.from_dict(json.loads((execution_dir / "manifest.json").read_text(encoding="utf-8")))
+        configs = manifest.configs
+        canonical_config = _validate_configs(configs)
+        execution_root = execution_dir.parent
+        gradle_environment = BenchmarkGradleEnvironment.restore(execution_root=execution_root)
+    else:
+        if args.dataset_id is None or args.dataset_version is None or args.configs_json is None or args.execution_root is None or args.gradle_seed_root is None:
+            raise ValueError("dataset-id, dataset-version, configs-json, execution-root and gradle-seed-root are required unless --resume is used")
+        configs = _load_configs(args.configs_json)
+        canonical_config = _validate_configs(configs)
+        execution_root = args.execution_root
+        execution_root.mkdir(parents=True, exist_ok=True)
+        gradle_environment = BenchmarkGradleEnvironment.prepare(
+            seed_root=args.gradle_seed_root,
+            execution_root=execution_root,
+            seed_manifest_path=args.gradle_seed_manifest,
+            offline=True,
+        )
+
     provider = _wrap_provider_for_benchmark(_build_provider(canonical_config), _build_request_pacer())
     knowledge_source = _build_knowledge_source(configs)
     repo_root = Path(__file__).resolve().parents[2]
     minecraft_runner = MinecraftTestRunner(
-        project_root=args.execution_root,
+        project_root=execution_root,
         harness_root=repo_root / "tests" / "fixtures" / "l11_minecraft_harness",
         environment_overrides=gradle_environment.environment_overrides,
     )
@@ -176,14 +193,21 @@ def main(argv: list[str] | None = None) -> int:
         max_attempts_per_cell=args.max_attempts_per_cell,
         scheduling_seed=args.scheduling_seed,
     )
-    batch = runner.run(
-        catalog,
-        dataset_id=args.dataset_id,
-        dataset_version=args.dataset_version,
-        configs=configs,
-        execution_root=args.execution_root,
-        pd_agent_commit=args.pd_agent_commit,
-    )
+    if args.resume is not None:
+        batch = runner.resume(
+            catalog,
+            execution_dir=execution_dir,
+            pd_agent_commit=args.pd_agent_commit,
+        )
+    else:
+        batch = runner.run(
+            catalog,
+            dataset_id=args.dataset_id,
+            dataset_version=args.dataset_version,
+            configs=configs,
+            execution_root=execution_root,
+            pd_agent_commit=args.pd_agent_commit,
+        )
     print(batch.comparison_json_path)
     return 0
 

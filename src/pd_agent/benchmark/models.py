@@ -75,6 +75,14 @@ class BenchmarkComparisonStatus(StrEnum):
     INCONCLUSIVE = "INCONCLUSIVE"
 
 
+class BenchmarkBatchStatus(StrEnum):
+    """Batch-level execution status for benchmark orchestration."""
+
+    RUNNING = "RUNNING"
+    BUDGET_PAUSED = "BUDGET_PAUSED"
+    COMPLETED = "COMPLETED"
+
+
 def _is_secret_key(key: object) -> bool:
     text = str(key).casefold()
     return text in {
@@ -152,6 +160,89 @@ def _tuple_of_strings(value: Any) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
     raise TypeError("expected string sequence")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BenchmarkExecutionState:
+    """Serializable batch-level execution state used for pause/resume."""
+
+    schema_version: int = SCHEMA_VERSION
+    execution_id: str
+    batch_status: BenchmarkBatchStatus
+    logical_budget_cap: int
+    logical_budget_used: int
+    logical_budget_remaining: int
+    attempt_reservation: int
+    pause_reason: str | None = None
+    paused_at: datetime | None = None
+    next_pending_schedule_item: Mapping[str, Any] | None = None
+    session_id: str | None = None
+    session_index: int = 1
+    resume_count: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "execution_id", _non_empty_text(self.execution_id, field_name="execution_id"))
+        object.__setattr__(self, "batch_status", BenchmarkBatchStatus(str(self.batch_status)))
+        object.__setattr__(self, "logical_budget_cap", int(self.logical_budget_cap))
+        object.__setattr__(self, "logical_budget_used", int(self.logical_budget_used))
+        object.__setattr__(self, "logical_budget_remaining", int(self.logical_budget_remaining))
+        object.__setattr__(self, "attempt_reservation", int(self.attempt_reservation))
+        if self.pause_reason is not None:
+            object.__setattr__(self, "pause_reason", _non_empty_text(self.pause_reason, field_name="pause_reason"))
+        if self.next_pending_schedule_item is not None:
+            object.__setattr__(self, "next_pending_schedule_item", dict(self.next_pending_schedule_item))
+        if self.session_id is not None:
+            object.__setattr__(self, "session_id", _non_empty_text(self.session_id, field_name="session_id"))
+        object.__setattr__(self, "session_index", int(self.session_index))
+        object.__setattr__(self, "resume_count", int(self.resume_count))
+        if self.logical_budget_cap <= 0:
+            raise ValueError("logical_budget_cap must be positive")
+        if self.logical_budget_used < 0:
+            raise ValueError("logical_budget_used must be non-negative")
+        if self.logical_budget_remaining < 0:
+            raise ValueError("logical_budget_remaining must be non-negative")
+        if self.attempt_reservation <= 0:
+            raise ValueError("attempt_reservation must be positive")
+        if self.session_index <= 0:
+            raise ValueError("session_index must be positive")
+        if self.resume_count < 0:
+            raise ValueError("resume_count must be non-negative")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "execution_id": self.execution_id,
+            "batch_status": self.batch_status.value,
+            "logical_budget_cap": self.logical_budget_cap,
+            "logical_budget_used": self.logical_budget_used,
+            "logical_budget_remaining": self.logical_budget_remaining,
+            "attempt_reservation": self.attempt_reservation,
+            "pause_reason": self.pause_reason,
+            "paused_at": self.paused_at.isoformat() if self.paused_at is not None else None,
+            "next_pending_schedule_item": _json_ready(dict(self.next_pending_schedule_item)) if self.next_pending_schedule_item is not None else None,
+            "session_id": self.session_id,
+            "session_index": self.session_index,
+            "resume_count": self.resume_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkExecutionState":
+        _schema_version_or_raise(data, model="BenchmarkExecutionState")
+        paused_at = data.get("paused_at")
+        return cls(
+            execution_id=str(data["execution_id"]),
+            batch_status=BenchmarkBatchStatus(str(data["batch_status"])),
+            logical_budget_cap=int(data["logical_budget_cap"]),
+            logical_budget_used=int(data["logical_budget_used"]),
+            logical_budget_remaining=int(data["logical_budget_remaining"]),
+            attempt_reservation=int(data["attempt_reservation"]),
+            pause_reason=data.get("pause_reason"),
+            paused_at=datetime.fromisoformat(str(paused_at)) if paused_at is not None else None,
+            next_pending_schedule_item=dict(data["next_pending_schedule_item"]) if data.get("next_pending_schedule_item") is not None else None,
+            session_id=data.get("session_id"),
+            session_index=int(data.get("session_index", 1)),
+            resume_count=int(data.get("resume_count", 0)),
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

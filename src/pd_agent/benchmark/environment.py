@@ -378,6 +378,79 @@ class BenchmarkGradleEnvironment:
             seed_manifest_path=manifest_path,
         )
 
+    @classmethod
+    def restore(cls, *, execution_root: Path) -> "BenchmarkGradleEnvironment":
+        execution_root = Path(execution_root).resolve(strict=True)
+        if not execution_root.is_dir():
+            raise BenchmarkGradleEnvironmentError("execution_root must be an existing directory")
+
+        materialization_root = execution_root / "environment"
+        gradle_user_home = materialization_root / "gradle-user-home"
+        manifest_path = materialization_root / "gradle-seed" / "manifest.json"
+        bootstrap_path = materialization_root / "bootstrap.json"
+
+        if not gradle_user_home.exists():
+            raise BenchmarkGradleEnvironmentError(f"isolated GRADLE_USER_HOME is missing: {gradle_user_home}")
+        if not manifest_path.exists():
+            raise BenchmarkGradleEnvironmentError(f"Gradle seed manifest missing: {manifest_path}")
+        if not bootstrap_path.exists():
+            raise BenchmarkGradleEnvironmentError(f"Gradle bootstrap evidence missing: {bootstrap_path}")
+
+        bootstrap_data = json.loads(bootstrap_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(bootstrap_data, Mapping):
+            raise BenchmarkGradleEnvironmentError(f"bootstrap evidence must be an object: {bootstrap_path}")
+        if str(bootstrap_data.get("bootstrap_status", "")) != DEFAULT_BOOTSTRAP_STATUS:
+            raise BenchmarkGradleEnvironmentError(
+                f"unsupported bootstrap status in resume materialization: {bootstrap_data.get('bootstrap_status')}"
+            )
+        if not bool(bootstrap_data.get("offline", True)):
+            raise BenchmarkGradleEnvironmentError("resume materialization is not offline")
+
+        seed_manifest = BenchmarkGradleSeedManifest.from_dict(
+            json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        )
+        actual_manifest = BenchmarkGradleSeedManifest.build(
+            gradle_user_home,
+            seed_id=seed_manifest.seed_id,
+            seed_version=seed_manifest.seed_version,
+        )
+        if actual_manifest.identity_hash != seed_manifest.identity_hash:
+            diff = actual_manifest.diff(seed_manifest)
+            raise BenchmarkGradleEnvironmentError(
+                "restored Gradle home does not match stored seed manifest: "
+                f"expected={seed_manifest.identity_hash} actual={actual_manifest.identity_hash} diff={list(diff)}"
+            )
+        manifest_hash = bootstrap_data.get("manifest_hash")
+        if manifest_hash is not None and str(manifest_hash) != seed_manifest.identity_hash:
+            raise BenchmarkGradleEnvironmentError(
+                f"materialized Gradle home manifest hash mismatch: expected {manifest_hash}, actual {seed_manifest.identity_hash}"
+            )
+        if not cls._is_writable(gradle_user_home):
+            raise BenchmarkGradleEnvironmentError(f"isolated GRADLE_USER_HOME is not writable: {gradle_user_home}")
+
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "seed_root", Path(bootstrap_data.get("seed_root", gradle_user_home)).resolve(strict=False))
+        object.__setattr__(instance, "execution_root", execution_root)
+        object.__setattr__(instance, "seed_manifest", seed_manifest)
+        object.__setattr__(instance, "materialization_root", materialization_root)
+        object.__setattr__(instance, "gradle_user_home", gradle_user_home)
+        object.__setattr__(instance, "bootstrap_status", str(bootstrap_data.get("bootstrap_status", DEFAULT_BOOTSTRAP_STATUS)))
+        object.__setattr__(instance, "offline", bool(bootstrap_data.get("offline", True)))
+        source_manifest_path = bootstrap_data.get("source_manifest_path")
+        object.__setattr__(
+            instance,
+            "source_manifest_path",
+            Path(source_manifest_path).resolve(strict=False) if source_manifest_path is not None else None,
+        )
+        object.__setattr__(instance, "seed_manifest_path", manifest_path)
+        created_at_value = bootstrap_data.get("created_at")
+        object.__setattr__(
+            instance,
+            "created_at",
+            datetime.fromisoformat(str(created_at_value)) if created_at_value is not None else datetime.now(timezone.utc),
+        )
+        return instance
+
     @staticmethod
     def _load_expected_manifest(
         seed_root: Path,

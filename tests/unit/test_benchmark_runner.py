@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from pd_agent.benchmark import (
+    BenchmarkBatchStatus,
     BenchmarkComparisonStatus,
     BenchmarkConfig,
     BenchmarkDataset,
     BenchmarkExecutionRunner,
     BenchmarkExecutionStatus,
+    BenchmarkExecutionResumeError,
     BenchmarkRun,
     BenchmarkScheduler,
     BenchmarkTask,
@@ -17,6 +23,7 @@ from pd_agent.benchmark import (
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
 )
+from pd_agent.core import ExecutionLimits
 
 
 def _utc(text: str) -> datetime:
@@ -123,19 +130,34 @@ class _Catalog:
 
 
 class _FakeExecutor:
-    def __init__(self, task: BenchmarkTask, config: BenchmarkConfig) -> None:
+    def __init__(
+        self,
+        task: BenchmarkTask,
+        config: BenchmarkConfig,
+        *,
+        logical_request_count: int = 1,
+        first_execution_status: BenchmarkExecutionStatus = BenchmarkExecutionStatus.BLOCKED,
+        first_task_outcome: BenchmarkTaskOutcome = BenchmarkTaskOutcome.NOT_EVALUATED,
+        later_execution_status: BenchmarkExecutionStatus = BenchmarkExecutionStatus.COMPLETED,
+        later_task_outcome: BenchmarkTaskOutcome = BenchmarkTaskOutcome.PASS,
+    ) -> None:
         self.task = task
         self.config = config
+        self.logical_request_count = logical_request_count
+        self.first_execution_status = first_execution_status
+        self.first_task_outcome = first_task_outcome
+        self.later_execution_status = later_execution_status
+        self.later_task_outcome = later_task_outcome
         self.calls: list[int] = []
 
     def execute(self, task, config, attempt, **kwargs):
         self.calls.append(attempt.attempt_index)
         if attempt.attempt_index == 1:
-            status = BenchmarkExecutionStatus.BLOCKED
-            outcome = BenchmarkTaskOutcome.NOT_EVALUATED
+            status = self.first_execution_status
+            outcome = self.first_task_outcome
         else:
-            status = BenchmarkExecutionStatus.COMPLETED
-            outcome = BenchmarkTaskOutcome.PASS
+            status = self.later_execution_status
+            outcome = self.later_task_outcome
         run = _run(
             run_id=f"run-{attempt.attempt_index}",
             task=task,
@@ -145,7 +167,10 @@ class _FakeExecutor:
             execution_status=status,
             task_outcome=outcome,
         )
-        return type("Result", (), {"benchmark_run": run})()
+        return SimpleNamespace(
+            benchmark_run=run,
+            collection=SimpleNamespace(logical_provider_request_count=self.logical_request_count),
+        )
 
 
 def test_runner_appends_replacement_attempts(tmp_path: Path) -> None:
@@ -180,3 +205,222 @@ def test_runner_appends_replacement_attempts(tmp_path: Path) -> None:
     ]
     assert batch.schedule.cells[0].attempted == 2
     assert batch.comparison.comparison_status == BenchmarkComparisonStatus.COMPLETE
+
+
+def test_runner_pauses_before_next_attempt_when_budget_is_insufficient(tmp_path: Path) -> None:
+    task = _task()
+    config = BenchmarkConfig(
+        config_id="cfg-1",
+        provider="gemini",
+        model="gemini-3.1-flash-lite",
+        brain_enabled=False,
+        model_config={"max_output_tokens": 512},
+        provider_config={"timeout_seconds": 60},
+        execution_limits=ExecutionLimits(max_agent_steps=2, max_tool_calls=50),
+        knowledge_config={},
+        target_repetition_count=1,
+    )
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    executor = _FakeExecutor(
+        task,
+        config,
+        logical_request_count=2,
+        first_execution_status=BenchmarkExecutionStatus.COMPLETED,
+        first_task_outcome=BenchmarkTaskOutcome.PASS,
+    )
+    runner = BenchmarkExecutionRunner(
+        executor=executor,
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=3,
+        target_valid_repetitions=2,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+
+    batch = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+
+    assert batch.batch_status == BenchmarkBatchStatus.BUDGET_PAUSED
+    assert batch.execution_state.batch_status == BenchmarkBatchStatus.BUDGET_PAUSED
+    assert batch.execution_state.logical_budget_cap == 3
+    assert batch.execution_state.logical_budget_used == 2
+    assert batch.execution_state.logical_budget_remaining == 1
+    assert batch.execution_state.attempt_reservation == 2
+    assert batch.execution_state.next_pending_schedule_item is not None
+    assert batch.execution_state.next_pending_schedule_item["attempt_index"] == 2
+    assert len(batch.runs) == 1
+    assert batch.comparison.comparison_status == BenchmarkComparisonStatus.INCOMPLETE
+    assert len(batch.schedule.cells[0].completed_runs) == 1
+    assert batch.schedule.cells[0].completed_runs[0].execution_status == BenchmarkExecutionStatus.COMPLETED
+
+
+def test_runner_resume_continues_exact_next_pending_attempt(tmp_path: Path) -> None:
+    task = _task()
+    config = BenchmarkConfig(
+        config_id="cfg-1",
+        provider="gemini",
+        model="gemini-3.1-flash-lite",
+        brain_enabled=False,
+        model_config={"max_output_tokens": 512},
+        provider_config={"timeout_seconds": 60},
+        execution_limits=ExecutionLimits(max_agent_steps=2, max_tool_calls=50),
+        knowledge_config={},
+        target_repetition_count=1,
+    )
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    runner = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(
+            task,
+            config,
+            logical_request_count=2,
+            first_execution_status=BenchmarkExecutionStatus.COMPLETED,
+            first_task_outcome=BenchmarkTaskOutcome.PASS,
+        ),
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=3,
+        target_valid_repetitions=2,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+
+    paused = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+
+    resume_executor = _FakeExecutor(task, config, logical_request_count=2)
+    resumed_runner = BenchmarkExecutionRunner(
+        executor=resume_executor,
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=3,
+        target_valid_repetitions=2,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+    resumed = resumed_runner.resume(catalog, execution_dir=paused.execution_root)
+
+    assert resume_executor.calls == [2]
+    assert resumed.batch_status == BenchmarkBatchStatus.COMPLETED
+    assert resumed.execution_state.batch_status == BenchmarkBatchStatus.COMPLETED
+    assert resumed.execution_state.resume_count == 1
+    assert resumed.execution_state.session_index == 2
+    assert len(resumed.runs) == 2
+    assert resumed.comparison.comparison_status == BenchmarkComparisonStatus.COMPLETE
+    assert resumed.schedule.cells[0].attempted == 2
+
+
+def test_runner_resume_on_completed_batch_is_safe_noop(tmp_path: Path) -> None:
+    task = _task()
+    config = BenchmarkConfig(
+        config_id="cfg-1",
+        provider="gemini",
+        model="gemini-3.1-flash-lite",
+        brain_enabled=False,
+        model_config={"max_output_tokens": 512},
+        provider_config={"timeout_seconds": 60},
+        execution_limits=ExecutionLimits(max_agent_steps=2, max_tool_calls=50),
+        knowledge_config={},
+        target_repetition_count=1,
+    )
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    runner = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(task, config, logical_request_count=1),
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=10,
+        target_valid_repetitions=1,
+        max_attempts_per_cell=1,
+        scheduling_seed=1,
+    )
+
+    completed = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+
+    noop_executor = _FakeExecutor(task, config, logical_request_count=1)
+    noop_runner = BenchmarkExecutionRunner(
+        executor=noop_executor,
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=10,
+        target_valid_repetitions=1,
+        max_attempts_per_cell=1,
+        scheduling_seed=1,
+    )
+    resumed = noop_runner.resume(catalog, execution_dir=completed.execution_root)
+
+    assert noop_executor.calls == []
+    assert resumed.batch_status == BenchmarkBatchStatus.COMPLETED
+    assert resumed.execution_state.batch_status == BenchmarkBatchStatus.COMPLETED
+    assert len(resumed.runs) == 1
+
+
+def test_runner_resume_rejects_manifest_drift(tmp_path: Path) -> None:
+    task = _task()
+    config = BenchmarkConfig(
+        config_id="cfg-1",
+        provider="gemini",
+        model="gemini-3.1-flash-lite",
+        brain_enabled=False,
+        model_config={"max_output_tokens": 512},
+        provider_config={"timeout_seconds": 60},
+        execution_limits=ExecutionLimits(max_agent_steps=2, max_tool_calls=50),
+        knowledge_config={},
+        target_repetition_count=1,
+    )
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    runner = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(task, config, logical_request_count=2),
+        scheduler=BenchmarkScheduler(),
+        logical_session_cap=3,
+        target_valid_repetitions=2,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+
+    batch = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+    manifest_path = batch.manifest_path
+    payload = manifest_path.read_text(encoding="utf-8")
+    manifest_data = json.loads(payload)
+    manifest_data["dataset_id"] = "drifted"
+    manifest_path.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with pytest.raises(BenchmarkExecutionResumeError) as excinfo:
+        runner.resume(catalog, execution_dir=batch.execution_root)
+    assert excinfo.value.code == "RESUME_DRIFT"

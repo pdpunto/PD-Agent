@@ -8,6 +8,7 @@ import pytest
 from pd_agent.benchmark import (
     BenchmarkAggregateMetrics,
     BenchmarkAcceptanceSpec,
+    BenchmarkBatchStatus,
     BenchmarkComparison,
     BenchmarkComparisonCell,
     BenchmarkComparisonStatus,
@@ -15,6 +16,7 @@ from pd_agent.benchmark import (
     BenchmarkDataset,
     BenchmarkEnvironmentRequirements,
     BenchmarkExecutionStatus,
+    BenchmarkExecutionState,
     BenchmarkFailureCode,
     BenchmarkFailureOrigin,
     BenchmarkFixtureReference,
@@ -215,11 +217,30 @@ def test_round_trip_main_models() -> None:
     assert BenchmarkComparisonCell.from_dict(cell.to_dict()) == cell
     assert BenchmarkComparison.from_dict(comparison.to_dict()) == comparison
 
+    state = BenchmarkExecutionState(
+        execution_id="execution-001",
+        batch_status=BenchmarkBatchStatus.BUDGET_PAUSED,
+        logical_budget_cap=400,
+        logical_budget_used=375,
+        logical_budget_remaining=25,
+        attempt_reservation=25,
+        pause_reason="logical budget remaining 24 is below attempt reservation 25",
+        paused_at=datetime(2026, 8, 12, 12, 0, tzinfo=timezone.utc),
+        next_pending_schedule_item={"scheduled_attempt_id": "B001:1:cfg-off:abc:0:4"},
+        session_id="session-001",
+        session_index=2,
+        resume_count=1,
+    )
+    assert BenchmarkExecutionState.from_dict(state.to_dict()) == state
+
 
 def test_enums_cover_expected_values() -> None:
     assert BenchmarkExecutionStatus.COMPLETED.value == "COMPLETED"
     assert BenchmarkExecutionStatus.BLOCKED.value == "BLOCKED"
     assert BenchmarkExecutionStatus.INVALID.value == "INVALID"
+    assert BenchmarkBatchStatus.RUNNING.value == "RUNNING"
+    assert BenchmarkBatchStatus.BUDGET_PAUSED.value == "BUDGET_PAUSED"
+    assert BenchmarkBatchStatus.COMPLETED.value == "COMPLETED"
     assert BenchmarkTaskOutcome.PASS.value == "PASS"
     assert BenchmarkTaskOutcome.FAIL.value == "FAIL"
     assert BenchmarkTaskOutcome.NOT_EVALUATED.value == "NOT_EVALUATED"

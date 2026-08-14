@@ -111,3 +111,24 @@ def test_prepare_rejects_seed_manifest_mismatch(tmp_path: Path) -> None:
             execution_root=execution_root,
             seed_manifest_path=manifest_path,
         )
+
+
+def test_restore_reuses_existing_materialization(tmp_path: Path) -> None:
+    seed_root = _seed(tmp_path / "seed")
+    execution_root = tmp_path / "exec"
+    execution_root.mkdir()
+    manifest_path = _manifest(seed_root, bom=False)
+
+    prepared = BenchmarkGradleEnvironment.prepare(
+        seed_root=seed_root,
+        execution_root=execution_root,
+        seed_manifest_path=manifest_path,
+    )
+    restored = BenchmarkGradleEnvironment.restore(execution_root=execution_root)
+
+    assert restored.bootstrap_status == "READY"
+    assert restored.offline is True
+    assert restored.gradle_user_home == prepared.gradle_user_home
+    assert restored.environment_overrides == prepared.environment_overrides
+    assert restored.seed_manifest.identity_hash == prepared.seed_manifest.identity_hash
+    assert restored.seed_manifest_path == prepared.seed_manifest_path

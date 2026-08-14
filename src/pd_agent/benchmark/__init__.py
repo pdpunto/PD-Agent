@@ -14,7 +14,7 @@ from .environment import (
 )
 from .executor import BenchmarkExecutionResult, BenchmarkExecutor
 from .pacing import BenchmarkPacedProvider, BenchmarkRequestPacer
-from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionRunner
+from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionResumeError, BenchmarkExecutionRunner
 from .scheduler import (
     BenchmarkSchedule,
     BenchmarkScheduleCell,
@@ -24,6 +24,7 @@ from .scheduler import (
 from .models import (
     BenchmarkAggregateMetrics,
     BenchmarkAcceptanceSpec,
+    BenchmarkBatchStatus,
     BenchmarkComparison,
     BenchmarkComparisonCell,
     BenchmarkComparisonStatus,
@@ -31,6 +32,7 @@ from .models import (
     BenchmarkDataset,
     BenchmarkEnvironmentRequirements,
     BenchmarkExecutionStatus,
+    BenchmarkExecutionState,
     BenchmarkFailureCode,
     BenchmarkFailureOrigin,
     BenchmarkFixtureReference,
@@ -67,12 +69,14 @@ __all__ = [
     "render_comparison_markdown",
     "BenchmarkExecutionBatch",
     "BenchmarkExecutionManifest",
+    "BenchmarkExecutionResumeError",
     "BenchmarkExecutionResult",
     "BenchmarkExecutionRunner",
     "BenchmarkExecutor",
     "BenchmarkPacedProvider",
     "BenchmarkAcceptanceSpec",
     "BenchmarkAggregateMetrics",
+    "BenchmarkBatchStatus",
     "BenchmarkComparison",
     "BenchmarkComparisonCell",
     "BenchmarkComparisonStatus",
@@ -80,6 +84,7 @@ __all__ = [
     "BenchmarkDataset",
     "BenchmarkEnvironmentRequirements",
     "BenchmarkExecutionStatus",
+    "BenchmarkExecutionState",
     "BenchmarkFailureCode",
     "BenchmarkFailureOrigin",
     "BenchmarkFixtureReference",
