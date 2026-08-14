@@ -14,7 +14,7 @@ from pd_agent.artifacts import ArtifactValidator
 from pd_agent.brain import FileKnowledgeCache, KnowledgeEnvironment, KnowledgeEnvironmentResolver, KnowledgeNeed, KnowledgeRetrievalResult, MinecraftBrain
 from pd_agent.brain.models import KnowledgeType
 from pd_agent.build import GradleBuildRunner
-from pd_agent.context import ContextManager, ProjectContextSource, RunContextSource
+from pd_agent.context import ContextManager, ExternalContextSource, ProjectContextSource, RunContextSource
 from pd_agent.core import ExecutionLimits, ModelProvider, ProviderError, RunState
 from pd_agent.minecraft import (
     MinecraftEvidencePaths,
@@ -89,7 +89,13 @@ def _knowledge_need_from_mapping(data: Mapping[str, Any], *, environment: Knowle
 def _default_context_manager(brain_enabled: bool) -> ContextManager:
     if brain_enabled:
         return ContextManager()
-    return ContextManager(sources=(("project", ProjectContextSource()), ("run", RunContextSource())))
+    return ContextManager(
+        sources=(
+            ("project", ProjectContextSource()),
+            ("run", RunContextSource()),
+            ("external", ExternalContextSource()),
+        )
+    )
 
 
 def _benchmark_execution_limits(config: BenchmarkConfig) -> ExecutionLimits:

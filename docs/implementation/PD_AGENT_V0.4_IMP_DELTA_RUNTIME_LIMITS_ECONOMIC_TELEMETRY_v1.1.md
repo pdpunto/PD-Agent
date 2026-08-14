@@ -538,8 +538,11 @@ Pipeline:
 Debe demostrar:
 
 - `brain_enabled=false`;
-- no external retrieval ejecutado para esa run;
-- injected external knowledge = 0.
+- no retrieval/injection de Brain ejecutado para esa run;
+- runtime external context conservado;
+- injected external knowledge = 0;
+- `ExternalContextSource` presente;
+- `KnowledgeContextSource` ausente.
 
 ### Brain ON
 
@@ -885,7 +888,7 @@ La implementacion se considera completa cuando:
 - scheduler reproducible;
 - aggregator funcional;
 - executor usa runtime real;
-- Brain OFF no hace retrieval externo;
+- Brain OFF no hace retrieval externo de Brain, pero conserva runtime external context;
 - Brain ON conserva provenance;
 - dataset de 3 tasks congelado;
 - ejecucion live completada;

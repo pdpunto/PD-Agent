@@ -280,7 +280,7 @@ PASS unicamente si existe evidencia de que:
 2. una smoke que agota pasos no supera 25 logical provider requests por run, salvo llamadas explicitamente documentadas fuera de ese loop;
 3. `logical_provider_request_count` queda persistido con autoridad en `AgentRuntime`/`RunState`;
 4. usage existente sigue persistido sin regresion;
-5. Brain OFF conserva 0 contexto externo;
+5. Brain OFF conserva runtime external context, pero no ejecuta retrieval/injection de Brain;
 6. Brain ON conserva retrieval/selection/injection y provenance;
 7. pacing sigue evitando 429 en la smoke de validacion;
 8. suite completa PASS;

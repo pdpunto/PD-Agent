@@ -19,7 +19,7 @@ from pd_agent.benchmark import (
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
 )
-from pd_agent.benchmark.executor import _filesystem_safe_fragment
+from pd_agent.benchmark.executor import _default_context_manager, _filesystem_safe_fragment
 from pd_agent.brain import (
     CompatibilityStatus,
     KnowledgeEnvironment,
@@ -36,6 +36,7 @@ from pd_agent.core import ArtifactResult, BuildResult, ExecutionLimits, RunState
 from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
 from pd_agent.minecraft.errors import MinecraftTestValidationError
 from pd_agent.reporting import FinalReport, RunStorage
+from pd_agent.context import ContextItem
 from pd_agent.context.knowledge import KnowledgeRejection, KnowledgeSourceAttempt, KnowledgeTrace
 
 
@@ -338,6 +339,44 @@ def _gradle_seed(root: Path) -> Path:
     (root / "wrapper" / "seed.txt").write_text("wrapper", encoding="utf-8")
     (root / "caches" / "marker.txt").write_text("cache", encoding="utf-8")
     return root
+
+
+def _context_source_names(manager) -> tuple[str, ...]:  # noqa: ANN001
+    return tuple(binding.name for binding in manager._sources)  # noqa: SLF001
+
+
+def test_default_context_manager_brain_off_preserves_external_context_source() -> None:
+    manager = _default_context_manager(False)
+
+    assert _context_source_names(manager) == ("project", "run", "external")
+
+
+def test_default_context_manager_brain_on_keeps_knowledge_and_external_sources() -> None:
+    manager = _default_context_manager(True)
+
+    assert _context_source_names(manager) == ("project", "run", "knowledge", "external")
+
+
+def test_default_context_manager_brain_off_keeps_runtime_external_context_visible(tmp_path: Path) -> None:
+    manager = _default_context_manager(False)
+    root = tmp_path / "project"
+    root.mkdir(parents=True, exist_ok=True)
+    snapshot = None
+    run_state = _run_state(root, "task", status=RunStatus.PLANNING)
+
+    bundle = manager.build_context(
+        project_snapshot=snapshot,
+        run_state=run_state,
+        external_context=(
+            ContextItem.from_text(source="runtime", priority=5, label="policy", content="ACTION REQUIRED"),
+            ContextItem.from_text(source="runtime", priority=6, label="retained-inspection-evidence", content="path: notes.txt"),
+        ),
+    )
+
+    text = bundle.to_text()
+    assert "ACTION REQUIRED" in text
+    assert "retained-inspection-evidence" in text
+    assert manager.last_knowledge_traces == ()
 
 
 def test_executor_brain_off_pass_and_cleans_workspace(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
