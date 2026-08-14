@@ -32,6 +32,10 @@ Official post-wiring benchmark matrix for PD Agent v0.4.
 
 - `C:\Users\Usuario\AppData\Local\Temp\pd-agent-v0.4-official-launch-20260814-204850-235\execution\e86d7abe-aae4-4f5d-bd37-8b751be6323c`
 
+## Seed Identity
+
+- `6123f7ecad32e990ac5c3983ad5366195d27b34c0550fe9d9aba8c9745754707`
+
 ## Configuration
 
 | Config | Provider | Model | Brain | Config hash |
