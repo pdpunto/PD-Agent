@@ -136,12 +136,21 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "unsupported test id" not in config_source
     assert "result path must be absolute" in config_source
     assert "HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT" in runner_source
-    assert "Registries.BLOCK.getOrEmpty(identifier).isPresent()" in runner_source
-    assert "Registries.ITEM.getOrEmpty(identifier).isPresent()" in runner_source
+    assert "Registries.BLOCK.containsId(identifier)" in runner_source
+    assert "Registries.ITEM.containsId(identifier)" in runner_source
+    assert "getOrEmpty(identifier).isPresent()" not in runner_source
     assert "HarnessSignals.armNeighborUpdateProbe(SIGNAL_POS)" in runner_source
     assert "HarnessSignals.disarmNeighborUpdateProbe()" in runner_source
     assert "waitForObserverPowered" not in runner_source
     assert "boundedNeighborWaitMillis" not in runner_source
+
+
+def test_batch_b_registry_presence_lookup_is_semantically_key_based() -> None:
+    runner_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
+
+    assert "Registries.BLOCK.containsId(identifier)" in runner_source
+    assert "Registries.ITEM.containsId(identifier)" in runner_source
+    assert "Registry" in runner_source
 
 
 def test_batch_b_harness_supports_generic_test_id_labels_without_task_whitelist() -> None:

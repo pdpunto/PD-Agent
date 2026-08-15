@@ -96,8 +96,8 @@ final class HarnessRunner {
 
     private static boolean isRegistryEntryPresent(String registryKind, Identifier identifier) {
         return switch (registryKind) {
-            case "block" -> Registries.BLOCK.getOrEmpty(identifier).isPresent();
-            case "item" -> Registries.ITEM.getOrEmpty(identifier).isPresent();
+            case "block" -> Registries.BLOCK.containsId(identifier);
+            case "item" -> Registries.ITEM.containsId(identifier);
             default -> throw new IllegalArgumentException("unsupported registry kind: " + registryKind);
         };
     }
