@@ -124,7 +124,7 @@ Executed for this change:
 - Compile: PASS
 - Focused tests: PASS
 - Full suite: 444 passed, 2 skipped
-- Live Minecraft/provider API: not required for this harness-contract change
+- Minecraft real local: executed and PASS/functional FAIL validated; provider API: not executed / not required
 
 ## Minecraft Revalidation
 
