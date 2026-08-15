@@ -7,8 +7,8 @@ Date: 2026-08-15
 
 - Repository: `PD-Agent`
 - Branch: `main`
-- Baseline commit: `b3f290e6c3c4270d84cfc7b24189d003b97dfa2a`
-- HEAD / origin at audit start: `b3f290e6c3c4270d84cfc7b24189d003b97dfa2a`
+- Baseline commit: `ec78080ca8f03cce7e8c6bbad6e2b887cba41a3b`
+- HEAD / origin at audit start: `ec78080ca8f03cce7e8c6bbad6e2b887cba41a3b`
 - Working tree: tracked clean before this change
 - Preexisting untracked diagnostics: `scripts/benchmark/diagnostics/`
 
@@ -21,11 +21,11 @@ Audited against:
 - `docs/implementation/PD_AGENT_V0.5_FABRIC_CAPABILITY_IMP.md`
 - `docs/validation/PD_AGENT_V0.5_FUNCTIONAL_EVALUATION.md`
 - `benchmarks/projects/v0_5_fabric_base/**`
-- `benchmarks/tasks/F6-T1-v2.json`
-- `benchmarks/tasks/F6-T2-v2.json`
-- `benchmarks/tasks/F6-T3-v2.json`
-- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_2.json`
-- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_2.md`
+- `benchmarks/tasks/F6-T1-v3.json`
+- `benchmarks/tasks/F6-T2-v3.json`
+- `benchmarks/tasks/F6-T3-v3.json`
+- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_3.json`
+- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_3.md`
 - `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_1.json`
 - `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_1.md`
 - `src/pd_agent/benchmark/catalog.py`
@@ -36,8 +36,8 @@ Audited against:
 
 ## Frozen Dataset
 
-- Dataset id: `PD_AGENT_BENCHMARK_DATASET_V0.5_2`
-- Dataset version: `0.5.2`
+- Dataset id: `PD_AGENT_BENCHMARK_DATASET_V0.5_3`
+- Dataset version: `0.5.3`
 - Task count: `3`
 - Task ids: `F6-T1`, `F6-T2`, `F6-T3`
 - Project base ref: `projects/v0_5_fabric_base`
@@ -48,7 +48,8 @@ Audited against:
 - `0.5.1` was created and frozen first.
 - Review 04 detected hidden acceptance requirements in T1/T2 and a semantic mismatch in T3.
 - `0.5.1` remains in the repository as historical evidence only.
-- `0.5.2` supersedes `0.5.1` for official approval and live validation.
+- `0.5.2` corrected the naming fairness and initial acceptance shape.
+- `0.5.3` supersedes `0.5.2` for official approval and live validation.
 
 ## Design Fit
 
@@ -92,7 +93,7 @@ Confirmed for all three tasks:
 | `mod_id` | PARTIALLY_ENFORCED | Project inspector + artifact validator + Minecraft target validation |
 | `entrypoints` | PARTIALLY_ENFORCED | Project inspector + target JAR manifest checks |
 | `preserve_unrelated_sources` | DOCUMENTARY_ONLY | Source-change evidence and benchmark notes |
-| `resource_contract` | PARTIALLY_ENFORCED | Resource-file evidence and review of changed files |
+| `resource_contract` | ENFORCED | Resource-file assertions plus paired block/item registry observations |
 
 The existing benchmark pipeline is sufficient for the frozen dataset, but it does not expose a generic semantic diff oracle for arbitrary preservation rules.
 
@@ -110,13 +111,13 @@ No provider API or live benchmark run was needed for this review.
 ## Validation Performed
 
 - `python -m compileall src scripts tests`
-- `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q tests\\unit\\test_benchmark_dataset_v0_5.py tests\\unit\\test_benchmark_catalog.py tests\\unit\\test_benchmark_runner.py tests\\unit\\test_v0_5_acceptance_contract.py tests\\unit\\test_v0_5_project_base.py`
+- `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q tests\\unit\\test_benchmark_acceptance.py tests\\unit\\test_benchmark_dataset_v0_5.py tests\\unit\\test_benchmark_executor.py tests\\unit\\test_v0_5_acceptance_contract.py`
 - `.\\.venv-l0fix\\Scripts\\python.exe -m pytest -q`
 
 ## Results
 
 - Compile: PASS
-- Focused dataset tests: PASS
+- Focused acceptance/dataset/executor tests: PASS
 - Full suite: PASS
 
 ## Risks / Limitations

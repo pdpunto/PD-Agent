@@ -10,9 +10,9 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks"
 PROJECT_BASE = BENCHMARK_ROOT / "projects" / "v0_5_fabric_base"
-DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_2"
-DATASET_VERSION = "0.5.2"
-TASK_VERSION = "2"
+DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
+DATASET_VERSION = "0.5.3"
+TASK_VERSION = "3"
 
 
 def _catalog() -> BenchmarkCatalog:
@@ -40,15 +40,15 @@ def test_v0_5_dataset_loads_with_exactly_three_tasks() -> None:
     catalog = _catalog()
     dataset = catalog.dataset_for(DATASET_ID, DATASET_VERSION)
     expected = BenchmarkDataset.from_dict(
-        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_2.json").read_text(encoding="utf-8"))
+        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_3.json").read_text(encoding="utf-8"))
     )
 
     assert dataset == expected
     assert len(dataset.tasks) == 3
     assert tuple(reference.task_id for reference in dataset.tasks) == _task_ids()
     assert len({(reference.task_id, reference.task_version) for reference in dataset.tasks}) == 3
-    assert dataset.dataset_version == "0.5.2"
-    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_2"
+    assert dataset.dataset_version == "0.5.3"
+    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
 
 
 def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
@@ -74,6 +74,26 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
         assert "expected_class_name" not in task.acceptance.spec
         assert "target_method" not in task.acceptance.spec
         assert "api_signature" not in task.acceptance.spec
+        if task_id == "F6-T1":
+            assert task.acceptance.spec.get("required_resources", []) == []
+            assert task.acceptance.spec.get("required_minecraft_observations", []) == []
+        elif task_id == "F6-T2":
+            assert len(task.acceptance.spec["required_minecraft_observations"]) == 1
+            assert task.acceptance.spec["required_minecraft_observations"][0]["observation_params"] == {
+                "registry_kind": "item",
+                "identifier": "examplemod:marble_lantern",
+            }
+            assert task.acceptance.spec["required_resources"][0]["path"] == "assets/examplemod/lang/en_us.json"
+        elif task_id == "F6-T3":
+            assert len(task.acceptance.spec["required_minecraft_observations"]) == 1
+            assert task.acceptance.spec["required_minecraft_observations"][0]["observation_params"] == {
+                "registry_kind": "item",
+                "identifier": "examplemod:server_core",
+            }
+            assert [resource["path"] for resource in task.acceptance.spec["required_resources"]] == [
+                "assets/examplemod/lang/en_us.json",
+                "data/examplemod/recipes/server_core.json",
+            ]
         assert task.fixture.metadata["project_base"] == "benchmarks/projects/v0_5_fabric_base"
 
 
@@ -168,4 +188,4 @@ def test_v0_5_legacy_dataset_remains_historical_but_not_official() -> None:
 
     assert legacy.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_1"
     assert legacy.dataset_version == "0.5.1"
-    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_2"
+    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"

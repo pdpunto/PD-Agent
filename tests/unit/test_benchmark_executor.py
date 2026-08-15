@@ -38,6 +38,7 @@ from pd_agent.minecraft.errors import MinecraftTestValidationError
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.context import ContextItem
 from pd_agent.context.knowledge import KnowledgeRejection, KnowledgeSourceAttempt, KnowledgeTrace
+from tests.fixtures.artifact_projects import write_manifest_jar
 
 
 def _utc(text: str) -> datetime:
@@ -55,6 +56,8 @@ def _task(
     test_id: str = "l8",
     observation_type: str = "LEGACY_BLOCK_STATE",
     observation_params: dict[str, object] | None = None,
+    required_minecraft_observations: list[dict[str, object]] | None = None,
+    required_resources: list[dict[str, object]] | None = None,
     timeout_seconds: int | None = 30,
 ) -> BenchmarkTask:
     spec: dict[str, object] = {
@@ -68,6 +71,10 @@ def _task(
     }
     if observation_params is not None:
         spec["observation_params"] = observation_params
+    if required_minecraft_observations is not None:
+        spec["required_minecraft_observations"] = required_minecraft_observations
+    if required_resources is not None:
+        spec["required_resources"] = required_resources
     if timeout_seconds is not None:
         spec["timeout_seconds"] = timeout_seconds
     return BenchmarkTask.from_dict(
@@ -160,6 +167,30 @@ def _artifact(project_root: Path) -> ArtifactResult:
     return ArtifactResult(
         path=artifact_path,
         size=123,
+        timestamp=_utc("2026-08-11T10:00:11"),
+        classification="VALID",
+        metadata={"sha256": "abc"},
+    )
+
+
+def _artifact_jar(project_root: Path, *, extra_files: dict[str, bytes | str] | None = None) -> ArtifactResult:
+    artifact_path = project_root / "build" / "libs" / "mod.jar"
+    jar = write_manifest_jar(
+        artifact_path,
+        manifest=(
+            "{"
+            '"schemaVersion": 1, '
+            '"id": "pdagentl11", '
+            '"version": "1.0.0", '
+            '"environment": "*", '
+            '"entrypoints": {"main": ["dev.pdpunto.l11.ExampleMod"]}'
+            "}"
+        ),
+        extra_files=extra_files or {},
+    )
+    return ArtifactResult(
+        path=jar,
+        size=jar.stat().st_size,
         timestamp=_utc("2026-08-11T10:00:11"),
         classification="VALID",
         metadata={"sha256": "abc"},
@@ -689,6 +720,158 @@ def test_executor_carries_registry_observation_into_minecraft_spec(
     assert spec.expect_neighbor_update is False
     assert spec.target_jar == Path("build/libs/mod.jar")
     assert kwargs["run_id"] == "attempt-registry"
+
+
+def test_executor_enforces_required_resources_and_secondary_item_observation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _ResourceAwareController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):  # noqa: ANN001
+            run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
+            jar = _artifact_jar(
+                project_root,
+                extra_files={
+                    "assets/examplemod/lang/en_us.json": (
+                        "{"
+                        '"block.examplemod.marble_lantern": "Marble Lantern", '
+                        '"item.examplemod.marble_lantern": "Marble Lantern"'
+                        "}"
+                    ),
+                },
+            )
+            run_state.artifact_result = jar
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _ResourceAwareController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(
+        minecraft=True,
+        test_id="server_registry_presence",
+        observation_type="REGISTRY_ENTRY_PRESENT",
+        observation_params={"registry_kind": "block", "identifier": "examplemod:marble_lantern"},
+        required_minecraft_observations=[
+            {
+                "test_id": "server_registry_presence:item",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "observation_params": {"registry_kind": "item", "identifier": "examplemod:marble_lantern"},
+            }
+        ],
+        required_resources=[
+            {
+                "path": "assets/examplemod/lang/en_us.json",
+                "type": "json",
+                "assertions": [
+                    {"kind": "json_pointer_equals", "path": "/block.examplemod.marble_lantern", "value": "Marble Lantern"},
+                    {"kind": "json_pointer_equals", "path": "/item.examplemod.marble_lantern", "value": "Marble Lantern"},
+                ],
+            }
+        ],
+    )
+    config = _config(brain_enabled=False)
+    workspace_root = _workspace_root(tmp_path / "exec", "attempt-resource", 1)
+    fake_minecraft = _FakeMinecraftRunner(project_root=workspace_root)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-resource", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert result.classification.task_outcome == BenchmarkTaskOutcome.PASS
+    assert len(fake_minecraft.calls) == 2
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.status == MinecraftTestStatus.PASS
+    acceptance_evaluation = result.minecraft_result.metadata["acceptance_evaluation"]
+    assert acceptance_evaluation["resources"]["passed"] is True
+    assert acceptance_evaluation["minecraft_observations"]["passed"] is True
+    assert len(acceptance_evaluation["minecraft_results"]) == 2
+    assert acceptance_evaluation["minecraft_observations"]["required_observations"][0]["observation_params"]["registry_kind"] == "item"
+
+
+def test_executor_fails_when_required_resource_value_is_wrong_even_if_minecraft_passes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    class _WrongResourceController(_FakeController):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):  # noqa: ANN001
+            run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
+            jar = _artifact_jar(
+                project_root,
+                extra_files={
+                    "assets/examplemod/lang/en_us.json": (
+                        "{"
+                        '"block.examplemod.marble_lantern": "Lantern", '
+                        '"item.examplemod.marble_lantern": "Lantern"'
+                        "}"
+                    ),
+                },
+            )
+            run_state.artifact_result = jar
+            final_report = _final_report(run_state)
+            return run_state, final_report
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _WrongResourceController)
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+    )
+    task = _task(
+        minecraft=True,
+        test_id="server_registry_presence",
+        observation_type="REGISTRY_ENTRY_PRESENT",
+        observation_params={"registry_kind": "block", "identifier": "examplemod:marble_lantern"},
+        required_minecraft_observations=[
+            {
+                "test_id": "server_registry_presence:item",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "observation_params": {"registry_kind": "item", "identifier": "examplemod:marble_lantern"},
+            }
+        ],
+        required_resources=[
+            {
+                "path": "assets/examplemod/lang/en_us.json",
+                "type": "json",
+                "assertions": [
+                    {"kind": "json_pointer_equals", "path": "/block.examplemod.marble_lantern", "value": "Marble Lantern"},
+                    {"kind": "json_pointer_equals", "path": "/item.examplemod.marble_lantern", "value": "Marble Lantern"},
+                ],
+            }
+        ],
+    )
+    config = _config(brain_enabled=False)
+    workspace_root = _workspace_root(tmp_path / "exec", "attempt-resource-fail", 1)
+    fake_minecraft = _FakeMinecraftRunner(project_root=workspace_root)
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-resource-fail", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=tmp_path / "exec",
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert result.classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert result.classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert result.classification.failure_code == BenchmarkFailureCode.AGENT_FUNCTIONAL_FAILURE
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.status == MinecraftTestStatus.FAIL
+    assert result.minecraft_result.metadata["acceptance_evaluation"]["resources"]["passed"] is False
+    assert result.minecraft_result.reason
 
 
 def test_executor_blocks_when_minecraft_runner_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

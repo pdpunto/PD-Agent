@@ -30,6 +30,12 @@ from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectS
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
 
+from .acceptance import (
+    AcceptanceMinecraftObservationEvaluation,
+    AcceptanceResourceEvaluation,
+    evaluate_required_minecraft_observations,
+    evaluate_required_resources,
+)
 from .environment import BenchmarkGradleEnvironment
 from .classifier import BenchmarkClassifier, BenchmarkClassification
 from .collector import BenchmarkCollection, BenchmarkCollector
@@ -159,6 +165,10 @@ def _minecraft_spec_for_task(
     )
 
 
+def _task_acceptance_spec(task: BenchmarkTask) -> Mapping[str, Any]:
+    return task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
+
+
 def _relative_minecraft_target_path(artifact_path: Path, project_root: Path) -> Path:
     resolved_target = Path(artifact_path).resolve(strict=True)
     resolved_root = Path(project_root).resolve(strict=True)
@@ -209,6 +219,59 @@ def _minecraft_infra_error_result(
         finished_at=now,
         duration_seconds=0.0,
         metadata={"phase": "preflight", "reason": reason},
+    )
+
+
+def _combined_minecraft_result(
+    *,
+    base_result: MinecraftTestResult,
+    resource_evaluation: AcceptanceResourceEvaluation,
+    observation_evaluation: AcceptanceMinecraftObservationEvaluation,
+    observation_results: Sequence[MinecraftTestResult],
+) -> MinecraftTestResult:
+    observation_payloads = [result.to_dict() for result in observation_results]
+    metadata = {
+        **dict(base_result.metadata),
+        "acceptance_evaluation": {
+            "resources": resource_evaluation.to_dict(),
+            "minecraft_observations": observation_evaluation.to_dict(),
+            "minecraft_results": observation_payloads,
+        },
+        "minecraft_acceptance_results": observation_payloads,
+    }
+
+    final_status = base_result.status
+    final_reason = base_result.reason
+
+    if observation_results:
+        final_status = observation_results[0].status
+        final_reason = observation_results[0].reason
+        for result in observation_results:
+            if result.status in {MinecraftTestStatus.CRASH, MinecraftTestStatus.TIMEOUT, MinecraftTestStatus.INFRA_ERROR}:
+                final_status = result.status
+                final_reason = result.reason
+                break
+            if result.status == MinecraftTestStatus.FAIL and final_status not in {
+                MinecraftTestStatus.CRASH,
+                MinecraftTestStatus.TIMEOUT,
+                MinecraftTestStatus.INFRA_ERROR,
+            }:
+                final_status = MinecraftTestStatus.FAIL
+                final_reason = result.reason
+
+    if not resource_evaluation.passed and final_status not in {
+        MinecraftTestStatus.CRASH,
+        MinecraftTestStatus.TIMEOUT,
+        MinecraftTestStatus.INFRA_ERROR,
+    }:
+        final_status = MinecraftTestStatus.FAIL
+        final_reason = resource_evaluation.violations[0] if resource_evaluation.violations else "resource requirements not satisfied"
+
+    return replace(
+        base_result,
+        status=final_status,
+        reason=final_reason,
+        metadata=metadata,
     )
 
 
@@ -470,6 +533,7 @@ class BenchmarkExecutor:
             return None
         target_root = Path(runner.project_root) if runner is not None else workspace.workspace_root
         execution_limits = _benchmark_execution_limits(config)
+        acceptance_spec = _task_acceptance_spec(task)
         try:
             target_jar = _relative_minecraft_target_path(artifact.path, target_root)
         except (BenchmarkWorkspaceError, FileNotFoundError, OSError) as exc:
@@ -482,6 +546,12 @@ class BenchmarkExecutor:
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                 default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
+        primary_spec = _minecraft_spec_for_task(
+            task,
+            artifact_path=target_jar,
+            artifact_sha256=str(artifact.metadata.get("sha256", "")) if isinstance(artifact.metadata, Mapping) else "",
+            default_timeout_seconds=execution_limits.process_timeout_seconds,
+        )
         if runner is None:
             return _minecraft_infra_error_result(
                 task=task,
@@ -492,22 +562,40 @@ class BenchmarkExecutor:
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                 default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
-        spec = _minecraft_spec_for_task(
-            task,
-            artifact_path=target_jar,
-            artifact_sha256=str(artifact.metadata.get("sha256", "")) if isinstance(artifact.metadata, Mapping) else "",
-            default_timeout_seconds=execution_limits.process_timeout_seconds,
-        )
-        expected_sha256 = None
-        if isinstance(task.acceptance.spec, Mapping):
-            expected_sha256 = task.acceptance.spec.get("expected_sha256")
-        try:
-            return runner.run(
-                spec,
+        observation_evaluation = evaluate_required_minecraft_observations(primary_spec, acceptance_spec)
+        if not observation_evaluation.passed:
+            return _minecraft_infra_error_result(
+                task=task,
+                artifact=artifact,
                 run_id=filesystem_run_id,
-                java_version=task.environment.java_version,
-                expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+                reason="invalid required minecraft observations: " + "; ".join(observation_evaluation.violations),
+                target_jar=target_jar,
+                evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
+        resource_evaluation = evaluate_required_resources(artifact.path, acceptance_spec)
+        expected_sha256 = None
+        if isinstance(acceptance_spec, Mapping):
+            expected_sha256 = acceptance_spec.get("expected_sha256")
+        observation_results: list[MinecraftTestResult] = []
+        try:
+            observation_results.append(
+                runner.run(
+                    primary_spec,
+                    run_id=filesystem_run_id,
+                    java_version=task.environment.java_version,
+                    expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+                )
+            )
+            for index, extra_spec in enumerate(observation_evaluation.required_observations, start=1):
+                observation_results.append(
+                    runner.run(
+                        extra_spec,
+                        run_id=f"{filesystem_run_id}-obs-{index}",
+                        java_version=task.environment.java_version,
+                        expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+                    )
+                )
         except (MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError) as exc:
             return _minecraft_infra_error_result(
                 task=task,
@@ -518,6 +606,22 @@ class BenchmarkExecutor:
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                 default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
+        if not observation_results:
+            return _minecraft_infra_error_result(
+                task=task,
+                artifact=artifact,
+                run_id=filesystem_run_id,
+                reason="minecraft validation did not produce an observation result",
+                target_jar=target_jar,
+                evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                default_timeout_seconds=execution_limits.process_timeout_seconds,
+            )
+        return _combined_minecraft_result(
+            base_result=observation_results[0],
+            resource_evaluation=resource_evaluation,
+            observation_evaluation=observation_evaluation,
+            observation_results=tuple(observation_results),
+        )
 
     def _benchmark_run(
         self,
