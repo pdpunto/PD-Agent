@@ -1,11 +1,11 @@
-# PD Agent v0.5.3 Dataset Freeze
+# PD Agent v0.5.4 Dataset Freeze
 
-Frozen dataset: `PD_AGENT_BENCHMARK_DATASET_V0.5_3` / `0.5.3`
+Frozen dataset: `PD_AGENT_BENCHMARK_DATASET_V0.5_4` / `0.5.4`
 
-This revision was superseded by `0.5.4` after the T3 recipe-path correction.
-The `0.5.1`, `0.5.2`, and `0.5.3` files remain in the repository as historical
-evidence of earlier freeze attempts, but they are not the official live-
-validation target.
+This revision supersedes the earlier `0.5.3` dataset for official use after
+the T3 recipe-path correction. The `0.5.1`, `0.5.2`, and `0.5.3` files remain
+in the repository as historical evidence of earlier freeze attempts, but they
+are not the official live-validation target.
 
 ## Frozen base
 
@@ -68,5 +68,5 @@ The hints in the task specs are semantic retrieval cues, not solution code.
 
 - Compile: PASS
 - Focused acceptance/dataset/executor tests: PASS
-- Full suite: 457 passed, 2 skipped
+- Full suite: PASS
 - F6 candidate: ready for official approval review

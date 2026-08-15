@@ -10,9 +10,9 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks"
 PROJECT_BASE = BENCHMARK_ROOT / "projects" / "v0_5_fabric_base"
-DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
-DATASET_VERSION = "0.5.3"
-TASK_VERSION = "3"
+DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
+DATASET_VERSION = "0.5.4"
+TASK_VERSION = "4"
 
 
 def _catalog() -> BenchmarkCatalog:
@@ -40,15 +40,15 @@ def test_v0_5_dataset_loads_with_exactly_three_tasks() -> None:
     catalog = _catalog()
     dataset = catalog.dataset_for(DATASET_ID, DATASET_VERSION)
     expected = BenchmarkDataset.from_dict(
-        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_3.json").read_text(encoding="utf-8"))
+        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_4.json").read_text(encoding="utf-8"))
     )
 
     assert dataset == expected
     assert len(dataset.tasks) == 3
     assert tuple(reference.task_id for reference in dataset.tasks) == _task_ids()
     assert len({(reference.task_id, reference.task_version) for reference in dataset.tasks}) == 3
-    assert dataset.dataset_version == "0.5.3"
-    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
+    assert dataset.dataset_version == "0.5.4"
+    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
 
 
 def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
@@ -92,7 +92,7 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
             }
             assert [resource["path"] for resource in task.acceptance.spec["required_resources"]] == [
                 "assets/examplemod/lang/en_us.json",
-                "data/examplemod/recipes/server_core.json",
+                "data/examplemod/recipe/server_core.json",
             ]
         assert task.fixture.metadata["project_base"] == "benchmarks/projects/v0_5_fabric_base"
 
@@ -185,7 +185,10 @@ def test_v0_5_dataset_has_stable_fixture_identity() -> None:
 def test_v0_5_legacy_dataset_remains_historical_but_not_official() -> None:
     catalog = _catalog()
     legacy = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_1", "0.5.1")
+    historical = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_3", "0.5.3")
 
     assert legacy.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_1"
     assert legacy.dataset_version == "0.5.1"
-    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
+    assert historical.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
+    assert historical.dataset_version == "0.5.3"
+    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_4"

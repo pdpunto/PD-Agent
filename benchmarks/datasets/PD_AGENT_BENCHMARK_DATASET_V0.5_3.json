@@ -2,7 +2,7 @@
   "schema_version": 1,
   "dataset_id": "PD_AGENT_BENCHMARK_DATASET_V0.5_3",
   "dataset_version": "0.5.3",
-  "description": "Frozen v0.5.3 Fabric feature-development dataset over the pinned representative base project; supersedes the earlier 0.5.2 revision for official use.",
+  "description": "Frozen v0.5.3 Fabric feature-development dataset over the pinned representative base project; superseded by v0.5.4 after the T3 recipe-path correction.",
   "tasks": [
     {
       "schema_version": 1,
