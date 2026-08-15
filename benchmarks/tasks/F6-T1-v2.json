@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "task_id": "F6-T1",
+  "task_version": "2",
+  "description": "Single-file item registry feature.",
+  "prompt": "Add a small decorative item called Signal Charm to Example Mod and register it in the item registry while keeping the existing mod id and entrypoints intact.",
+  "fixture": {
+    "schema_version": 1,
+    "fixture_ref": "projects/v0_5_fabric_base",
+    "fixture_identity": "11e7af2c112dd4f7bad08aadd7b4739b44d30a1c35e110b515b50d5b7f89fd54",
+    "identity_algorithm": "sha256-tree-v1",
+    "metadata": {
+      "project_base": "benchmarks/projects/v0_5_fabric_base",
+      "source_kind": "pinned_project_base",
+      "source_upstream": "FabricMC/fabric-example-mod"
+    }
+  },
+  "validation": {
+    "schema_version": 1,
+    "build": true,
+    "artifact": true,
+    "minecraft": true,
+    "source_change": true
+  },
+  "acceptance": {
+    "schema_version": 1,
+    "acceptance_type": "fabric_feature",
+    "spec": {
+      "project_base_ref": "projects/v0_5_fabric_base",
+      "knowledge_need_level": "LOW",
+      "observation_type": "REGISTRY_ENTRY_PRESENT",
+      "observation_params": {
+        "registry_kind": "item",
+        "identifier": "examplemod:signal_charm"
+      },
+      "preservation_invariants": {
+        "mod_id": "examplemod",
+        "entrypoints": {
+          "main": [
+            "com.example.examplemod.ExampleMod"
+          ],
+          "client": [
+            "com.example.examplemod.client.ExampleModClient"
+          ]
+        },
+        "preserve_unrelated_sources": true
+      },
+      "evidence_requirements": {
+        "build": true,
+        "artifact": true,
+        "minecraft": true,
+        "changed_files": true
+      },
+      "knowledge_needs": [
+        {
+          "id": "f6-t1-yarn-item-registry",
+          "type": "SYMBOL",
+          "query": "How do you add a custom item in a Fabric 1.21.11 project while keeping the existing mod id and entrypoints intact?",
+          "environment": {
+            "minecraft_version": "1.21.11",
+            "loader_version": "0.19.3",
+            "loom_version": "1.13.3",
+            "mappings_namespace": "yarn",
+            "mappings_version": "1.21.11+build.6",
+            "fabric_api_version": null,
+            "java_version": "21"
+          },
+          "hints": [
+            "custom item",
+            "Fabric registry",
+            "Yarn 1.21.11"
+          ]
+        }
+      ]
+    },
+    "notes": [
+      "Single-source change remains plausible but is not required.",
+      "The prompt describes the requested content, not an implementation path."
+    ]
+  },
+  "environment": {
+    "schema_version": 1,
+    "minecraft_version": "1.21.11",
+    "loader_version": "0.19.3",
+    "loom_version": "1.13.3",
+    "yarn_version": "1.21.11+build.6",
+    "java_version": "21",
+    "fabric_api_version": null,
+    "extra": {}
+  },
+  "tags": [
+    "fabric",
+    "v0.5",
+    "single-file",
+    "runtime",
+    "registry",
+    "baseline"
+  ],
+  "notes": [
+    "F6 task 1 is the simplest representative feature.",
+    "It stays within the pinned project base and does not reveal a solution path."
+  ]
+}

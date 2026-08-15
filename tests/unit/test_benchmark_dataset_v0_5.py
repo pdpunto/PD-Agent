@@ -10,8 +10,9 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks"
 PROJECT_BASE = BENCHMARK_ROOT / "projects" / "v0_5_fabric_base"
-DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_1"
-DATASET_VERSION = "0.5.1"
+DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_2"
+DATASET_VERSION = "0.5.2"
+TASK_VERSION = "2"
 
 
 def _catalog() -> BenchmarkCatalog:
@@ -39,13 +40,15 @@ def test_v0_5_dataset_loads_with_exactly_three_tasks() -> None:
     catalog = _catalog()
     dataset = catalog.dataset_for(DATASET_ID, DATASET_VERSION)
     expected = BenchmarkDataset.from_dict(
-        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_1.json").read_text(encoding="utf-8"))
+        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_2.json").read_text(encoding="utf-8"))
     )
 
     assert dataset == expected
     assert len(dataset.tasks) == 3
     assert tuple(reference.task_id for reference in dataset.tasks) == _task_ids()
     assert len({(reference.task_id, reference.task_version) for reference in dataset.tasks}) == 3
+    assert dataset.dataset_version == "0.5.2"
+    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_2"
 
 
 def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
@@ -53,7 +56,7 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
     expected_hash = compute_fixture_identity(PROJECT_BASE)
 
     for task_id in _task_ids():
-        task = catalog.task_for(task_id, "1")
+        task = catalog.task_for(task_id, TASK_VERSION)
 
         assert task.fixture.fixture_ref == "projects/v0_5_fabric_base"
         assert task.fixture.identity_algorithm == "sha256-tree-v1"
@@ -71,20 +74,37 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
         assert "expected_class_name" not in task.acceptance.spec
         assert "target_method" not in task.acceptance.spec
         assert "api_signature" not in task.acceptance.spec
+        assert task.fixture.metadata["project_base"] == "benchmarks/projects/v0_5_fabric_base"
 
 
 def test_v0_5_dataset_prompts_do_not_leak_benchmark_solution_hints() -> None:
     catalog = _catalog()
+    expected_names = {
+        "F6-T1": "Signal Charm",
+        "F6-T2": "Marble Lantern",
+        "F6-T3": "Server Core",
+    }
+    forbidden_tokens = {
+        "Registry.register",
+        "Identifier.of",
+        "FabricBlockSettings",
+        "BlockItem",
+        "Items",
+        "Registries.BLOCK",
+    }
 
     for task_id in _task_ids():
-        task = catalog.task_for(task_id, "1")
+        task = catalog.task_for(task_id, TASK_VERSION)
 
         assert "B001" not in task.prompt
         assert "B002" not in task.prompt
         assert "B003" not in task.prompt
         assert "TargetBridge" not in task.prompt
         assert "ExampleModClient" not in task.prompt
+        assert expected_names[task_id] in task.prompt
         assert task.acceptance.spec["observation_params"]["identifier"].startswith("examplemod:")
+        for hint in task.acceptance.spec["knowledge_needs"][0]["hints"]:
+            assert hint not in forbidden_tokens
 
 
 def test_v0_5_dataset_acceptance_knows_the_expected_knowledge_levels() -> None:
@@ -96,7 +116,7 @@ def test_v0_5_dataset_acceptance_knows_the_expected_knowledge_levels() -> None:
     }
 
     for task_id, level in expected.items():
-        task = catalog.task_for(task_id, "1")
+        task = catalog.task_for(task_id, TASK_VERSION)
         need = task.acceptance.spec["knowledge_needs"][0]
         assert task.acceptance.spec["knowledge_need_level"] == level
         assert need["environment"]["minecraft_version"] == "1.21.11"
@@ -105,11 +125,13 @@ def test_v0_5_dataset_acceptance_knows_the_expected_knowledge_levels() -> None:
         assert need["environment"]["mappings_version"] == "1.21.11+build.6"
         assert need["environment"]["java_version"] == "21"
         assert need["query"]
+        assert all("Registry.register" not in hint for hint in need["hints"])
+        assert all("Identifier.of" not in hint for hint in need["hints"])
 
 
 def test_v0_5_dataset_is_scheduler_compatible() -> None:
     catalog = _catalog()
-    tasks = tuple(catalog.task_for(task_id, "1") for task_id in _task_ids())
+    tasks = tuple(catalog.task_for(task_id, TASK_VERSION) for task_id in _task_ids())
     configs = (
         _config("cfg-off", brain_enabled=False),
         _config("cfg-on", brain_enabled=True),
@@ -135,6 +157,15 @@ def test_v0_5_dataset_has_stable_fixture_identity() -> None:
     expected = compute_fixture_identity(PROJECT_BASE)
 
     assert expected == compute_fixture_identity(PROJECT_BASE)
-    assert _catalog().fixture_identities[("F6-T1", "1")] == expected
-    assert _catalog().fixture_identities[("F6-T2", "1")] == expected
-    assert _catalog().fixture_identities[("F6-T3", "1")] == expected
+    assert _catalog().fixture_identities[("F6-T1", TASK_VERSION)] == expected
+    assert _catalog().fixture_identities[("F6-T2", TASK_VERSION)] == expected
+    assert _catalog().fixture_identities[("F6-T3", TASK_VERSION)] == expected
+
+
+def test_v0_5_legacy_dataset_remains_historical_but_not_official() -> None:
+    catalog = _catalog()
+    legacy = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_1", "0.5.1")
+
+    assert legacy.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_1"
+    assert legacy.dataset_version == "0.5.1"
+    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_2"

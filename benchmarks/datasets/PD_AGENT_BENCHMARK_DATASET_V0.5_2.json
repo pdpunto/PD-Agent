@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "dataset_id": "PD_AGENT_BENCHMARK_DATASET_V0.5_2",
+  "dataset_version": "0.5.2",
+  "description": "Frozen v0.5.2 Fabric feature-development dataset over the pinned representative base project; supersedes the earlier 0.5.1 revision for official use.",
+  "tasks": [
+    {
+      "schema_version": 1,
+      "task_id": "F6-T1",
+      "task_version": "2"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "F6-T2",
+      "task_version": "2"
+    },
+    {
+      "schema_version": 1,
+      "task_id": "F6-T3",
+      "task_version": "2"
+    }
+  ],
+  "tags": [
+    "fabric",
+    "minecraft",
+    "v0.5",
+    "frozen",
+    "feature-development",
+    "supersedes-0.5.1"
+  ]
+}
