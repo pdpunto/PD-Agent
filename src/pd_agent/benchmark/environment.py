@@ -16,6 +16,7 @@ SCHEMA_VERSION = 1
 DEFAULT_SEED_ID = "gradle-wrapper-caches"
 DEFAULT_SEED_VERSION = "1"
 DEFAULT_BOOTSTRAP_STATUS = "READY"
+_NONPORTABLE_SEED_FILE_NAMES = frozenset({"file-access.bin", "file-access.properties"})
 
 
 class BenchmarkGradleEnvironmentError(ValueError):
@@ -71,8 +72,59 @@ def _iter_seed_files(root: Path) -> tuple[tuple[str, Path], ...]:
                 raise BenchmarkGradleEnvironmentError(f"symlink not allowed in Gradle seed: {candidate}")
             if not candidate.is_file():
                 continue
+            relative_path = candidate.relative_to(root).as_posix()
+            if _is_nonportable_seed_entry(relative_path, current_path=current_path):
+                continue
             items.append((candidate.relative_to(root).as_posix(), candidate))
     return tuple(items)
+
+
+def _is_nonportable_seed_entry(relative_path: str, *, current_path: Path | None = None) -> bool:
+    normalized = relative_path.replace("\\", "/")
+    filename = normalized.rsplit("/", 1)[-1].casefold()
+    if normalized.startswith("caches/fabric-loom/") and (filename.endswith(".lock") or filename.endswith(".lck")):
+        return True
+    if normalized.startswith("caches/journal-1/") and filename in _NONPORTABLE_SEED_FILE_NAMES:
+        return True
+    if current_path is not None and current_path.name.casefold() == "journal-1" and filename in _NONPORTABLE_SEED_FILE_NAMES:
+        return True
+    return False
+
+
+def _portable_seed_manifest(manifest: "BenchmarkGradleSeedManifest") -> "BenchmarkGradleSeedManifest":
+    portable_components = tuple(
+        component
+        for component in manifest.components
+        if not _is_nonportable_seed_entry(component.path)
+    )
+    if len(portable_components) == len(manifest.components):
+        return manifest
+    return BenchmarkGradleSeedManifest(
+        schema_version=manifest.schema_version,
+        seed_id=manifest.seed_id,
+        seed_version=manifest.seed_version,
+        source_root=manifest.source_root,
+        components=portable_components,
+        total_size_bytes=sum(component.size_bytes for component in portable_components),
+        created_at=manifest.created_at,
+    )
+
+
+def _sanitize_materialized_gradle_home(root: Path) -> None:
+    root = Path(root)
+    if not root.exists():
+        return
+    for current, _, filenames in os.walk(root, topdown=False, followlinks=False):
+        current_path = Path(current)
+        for filename in filenames:
+            candidate = current_path / filename
+            relative_path = candidate.relative_to(root).as_posix()
+            if not _is_nonportable_seed_entry(relative_path, current_path=current_path):
+                continue
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -319,13 +371,15 @@ class BenchmarkGradleEnvironment:
 
         expected_manifest = cls._load_expected_manifest(seed_root, seed_manifest_path, seed_id=seed_id, seed_version=seed_version)
         actual_manifest = BenchmarkGradleSeedManifest.build(seed_root, seed_id=seed_id, seed_version=seed_version)
-        selected_manifest = expected_manifest or actual_manifest
+        portable_expected_manifest = _portable_seed_manifest(expected_manifest) if expected_manifest is not None else None
+        portable_actual_manifest = _portable_seed_manifest(actual_manifest)
+        selected_manifest = portable_expected_manifest or portable_actual_manifest
 
-        if expected_manifest is not None and actual_manifest.identity_hash != expected_manifest.identity_hash:
-            diff = actual_manifest.diff(expected_manifest)
+        if portable_expected_manifest is not None and portable_actual_manifest.identity_hash != portable_expected_manifest.identity_hash:
+            diff = portable_actual_manifest.diff(portable_expected_manifest)
             raise BenchmarkGradleEnvironmentError(
                 "Gradle seed manifest mismatch: "
-                f"expected={expected_manifest.identity_hash} actual={actual_manifest.identity_hash} diff={list(diff)}"
+                f"expected={portable_expected_manifest.identity_hash} actual={portable_actual_manifest.identity_hash} diff={list(diff)}"
             )
 
         if gradle_user_home.exists():
@@ -333,6 +387,7 @@ class BenchmarkGradleEnvironment:
 
         gradle_user_home.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(seed_root, gradle_user_home, symlinks=False)
+        _sanitize_materialized_gradle_home(gradle_user_home)
         materialized_manifest = BenchmarkGradleSeedManifest.build(
             gradle_user_home,
             seed_id=selected_manifest.seed_id,
@@ -409,6 +464,7 @@ class BenchmarkGradleEnvironment:
         seed_manifest = BenchmarkGradleSeedManifest.from_dict(
             json.loads(manifest_path.read_text(encoding="utf-8-sig"))
         )
+        _sanitize_materialized_gradle_home(gradle_user_home)
         actual_manifest = BenchmarkGradleSeedManifest.build(
             gradle_user_home,
             seed_id=seed_manifest.seed_id,

@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from pd_agent.benchmark import BenchmarkGradleEnvironment, BenchmarkGradleEnvironmentError, BenchmarkGradleSeedManifest
+from pd_agent.benchmark import (
+    BenchmarkGradleEnvironment,
+    BenchmarkGradleEnvironmentError,
+    BenchmarkGradleSeedComponent,
+    BenchmarkGradleSeedManifest,
+)
 
 
 def _seed(root: Path) -> Path:
@@ -47,6 +52,38 @@ def _manifest(seed_root: Path, *, bom: bool = False) -> Path:
     else:
         path.write_text(raw, encoding="utf-8")
     return path
+
+
+def _contaminated_manifest(seed_root: Path) -> tuple[Path, tuple[BenchmarkGradleSeedComponent, ...]]:
+    portable = BenchmarkGradleSeedManifest.build(seed_root)
+    volatile_files = (
+        seed_root / "caches" / "fabric-loom" / ".4cdb1c74ed94ba0ff74ab4ebba36e04d05e3ffe8.lock",
+        seed_root / "caches" / "journal-1" / "file-access.bin",
+        seed_root / "caches" / "journal-1" / "file-access.properties",
+    )
+    for file_path in volatile_files:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(f"volatile:{file_path.name}", encoding="utf-8")
+    volatile_components = tuple(
+        BenchmarkGradleSeedComponent(path=file_path.relative_to(seed_root).as_posix(), size_bytes=file_path.stat().st_size, sha256="0" * 64)
+        for file_path in volatile_files
+    )
+    contaminated_components = tuple(sorted((*portable.components, *volatile_components), key=lambda component: component.path.casefold()))
+    contaminated_manifest = BenchmarkGradleSeedManifest(
+        schema_version=portable.schema_version,
+        seed_id=portable.seed_id,
+        seed_version=portable.seed_version,
+        source_root=portable.source_root,
+        components=contaminated_components,
+        total_size_bytes=sum(component.size_bytes for component in contaminated_components),
+        created_at=portable.created_at,
+    )
+    path = seed_root.parent / "contaminated-seed-manifest.json"
+    path.write_text(
+        json.dumps(contaminated_manifest.to_dict(), ensure_ascii=False, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return path, volatile_components
 
 
 def test_prepare_accepts_utf8_seed_manifest_without_bom(tmp_path: Path) -> None:
@@ -111,6 +148,45 @@ def test_prepare_rejects_seed_manifest_mismatch(tmp_path: Path) -> None:
             execution_root=execution_root,
             seed_manifest_path=manifest_path,
         )
+
+
+def test_prepare_sanitizes_nonportable_seed_state(tmp_path: Path) -> None:
+    seed_root = _seed(tmp_path / "seed")
+    execution_root = tmp_path / "exec"
+    execution_root.mkdir()
+    manifest_path, volatile_components = _contaminated_manifest(seed_root)
+
+    env = BenchmarkGradleEnvironment.prepare(
+        seed_root=seed_root,
+        execution_root=execution_root,
+        seed_manifest_path=manifest_path,
+    )
+
+    assert env.seed_manifest.identity_hash is not None
+    assert env.seed_manifest.component_count == len(BenchmarkGradleSeedManifest.build(seed_root).components)
+    assert env.seed_manifest.component_count < BenchmarkGradleSeedManifest.from_dict(json.loads(manifest_path.read_text(encoding="utf-8"))).component_count
+    for component in volatile_components:
+        assert not (env.gradle_user_home / component.path).exists()
+    assert (env.gradle_user_home / "wrapper" / "seed.txt").exists()
+
+
+def test_restore_sanitizes_nonportable_seed_state(tmp_path: Path) -> None:
+    seed_root = _seed(tmp_path / "seed")
+    execution_root = tmp_path / "exec"
+    execution_root.mkdir()
+    manifest_path, volatile_components = _contaminated_manifest(seed_root)
+
+    prepared = BenchmarkGradleEnvironment.prepare(
+        seed_root=seed_root,
+        execution_root=execution_root,
+        seed_manifest_path=manifest_path,
+    )
+    restored = BenchmarkGradleEnvironment.restore(execution_root=execution_root)
+
+    assert restored.seed_manifest.identity_hash == prepared.seed_manifest.identity_hash
+    for component in volatile_components:
+        assert not (restored.gradle_user_home / component.path).exists()
+    assert (restored.gradle_user_home / "wrapper" / "seed.txt").exists()
 
 
 def test_restore_reuses_existing_materialization(tmp_path: Path) -> None:
