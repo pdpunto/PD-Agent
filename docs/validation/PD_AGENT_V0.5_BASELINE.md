@@ -30,6 +30,25 @@ Date: 2026-08-14
 - Java: `21`
 - Gradle Wrapper: `8.14.3` on the validated benchmark/harness line
 
+## Gradle Seed Contract
+
+The official Gradle seed for v0.5 must be a coherent portable snapshot of the
+dependency cache material actually required by the pinned project base.
+
+In practice that means:
+
+- capture the portable `caches/modules-2` inventory as a unit after the host
+  resolves the pinned dependency graph;
+- preserve portable metadata files such as
+  `module-metadata.bin`, `module-artifact.bin`, `module-artifacts.bin`,
+  `resource-at-url.bin`, POMs and JARs;
+- exclude nonportable cache-state files such as `*.lock`, `*.lck`,
+  `gc.properties`, and other transient bookkeeping files already classified
+  as nonportable;
+- materialize a fresh per-run `GRADLE_USER_HOME` from that canonical seed;
+- keep offline resolution reproducible without depending on the host temp
+  path used during bootstrap.
+
 ## Capabilities Verified as Inherited
 
 - ProjectInspector READY path

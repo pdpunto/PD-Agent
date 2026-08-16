@@ -58,6 +58,9 @@ def _contaminated_manifest(seed_root: Path) -> tuple[Path, tuple[BenchmarkGradle
     portable = BenchmarkGradleSeedManifest.build(seed_root)
     volatile_files = (
         seed_root / "caches" / "fabric-loom" / ".4cdb1c74ed94ba0ff74ab4ebba36e04d05e3ffe8.lock",
+        seed_root / "caches" / "modules-2" / "sample.lock",
+        seed_root / "caches" / "8.14.3" / "gc.properties",
+        seed_root / "caches" / "modules-2" / "gc.properties",
         seed_root / "caches" / "journal-1" / "file-access.bin",
         seed_root / "caches" / "journal-1" / "file-access.properties",
     )
@@ -187,6 +190,57 @@ def test_restore_sanitizes_nonportable_seed_state(tmp_path: Path) -> None:
     for component in volatile_components:
         assert not (restored.gradle_user_home / component.path).exists()
     assert (restored.gradle_user_home / "wrapper" / "seed.txt").exists()
+
+
+def test_build_keeps_modules_metadata_and_excludes_nonportable_cache_state(tmp_path: Path) -> None:
+    seed_root = _seed(tmp_path / "seed")
+    metadata_root = seed_root / "caches" / "modules-2" / "metadata-2.107"
+    descriptor_root = metadata_root / "descriptors" / "net.fabricmc.fabric-api" / "fabric-api" / "0.141.6+1.21.11" / "abcdef1234567890"
+    files_root = seed_root / "caches" / "modules-2" / "files-2.1" / "net.fabricmc.fabric-api" / "fabric-api" / "0.141.6+1.21.11" / "abcdef1234567890"
+    descriptor_root.mkdir(parents=True, exist_ok=True)
+    files_root.mkdir(parents=True, exist_ok=True)
+    (metadata_root / "module-metadata.bin").write_bytes(b"module-metadata-a")
+    (metadata_root / "module-artifact.bin").write_bytes(b"module-artifact-a")
+    (metadata_root / "module-artifacts.bin").write_bytes(b"module-artifacts-a")
+    (metadata_root / "resource-at-url.bin").write_bytes(b"resource-at-url-a")
+    (descriptor_root / "descriptor.bin").write_bytes(b"descriptor-a")
+    (files_root / "fabric-api-0.141.6+1.21.11.jar").write_bytes(b"fabric-api-jar-a")
+    (files_root / "fabric-api-0.141.6+1.21.11.pom").write_text("<project/>", encoding="utf-8")
+    (seed_root / "caches" / "modules-2" / "gc.properties").write_text("gc", encoding="utf-8")
+    (seed_root / "caches" / "modules-2" / "sample.lock").write_text("lock", encoding="utf-8")
+    (seed_root / "caches" / "8.14.3").mkdir(parents=True, exist_ok=True)
+    (seed_root / "caches" / "8.14.3" / "gc.properties").write_text("gc", encoding="utf-8")
+    (seed_root / "caches" / "journal-1").mkdir(parents=True, exist_ok=True)
+    (seed_root / "caches" / "journal-1" / "file-access.bin").write_bytes(b"journal-bin")
+    (seed_root / "caches" / "journal-1" / "file-access.properties").write_text("journal-props", encoding="utf-8")
+
+    manifest = BenchmarkGradleSeedManifest.build(seed_root)
+    paths = {component.path for component in manifest.components}
+
+    assert "caches/modules-2/metadata-2.107/module-metadata.bin" in paths
+    assert "caches/modules-2/metadata-2.107/module-artifact.bin" in paths
+    assert "caches/modules-2/metadata-2.107/module-artifacts.bin" in paths
+    assert "caches/modules-2/metadata-2.107/resource-at-url.bin" in paths
+    assert "caches/modules-2/metadata-2.107/descriptors/net.fabricmc.fabric-api/fabric-api/0.141.6+1.21.11/abcdef1234567890/descriptor.bin" in paths
+    assert "caches/modules-2/files-2.1/net.fabricmc.fabric-api/fabric-api/0.141.6+1.21.11/abcdef1234567890/fabric-api-0.141.6+1.21.11.jar" in paths
+    assert "caches/modules-2/files-2.1/net.fabricmc.fabric-api/fabric-api/0.141.6+1.21.11/abcdef1234567890/fabric-api-0.141.6+1.21.11.pom" in paths
+    assert not any(path.endswith("gc.properties") for path in paths)
+    assert not any(path.endswith(".lock") or path.endswith(".lck") for path in paths)
+    assert not any(path.endswith("file-access.bin") or path.endswith("file-access.properties") for path in paths)
+
+
+def test_build_identity_changes_when_portable_modules_metadata_changes(tmp_path: Path) -> None:
+    seed_root = _seed(tmp_path / "seed")
+    metadata_root = seed_root / "caches" / "modules-2" / "metadata-2.107"
+    metadata_root.mkdir(parents=True, exist_ok=True)
+    (metadata_root / "module-metadata.bin").write_bytes(b"module-metadata-a")
+    manifest_a = BenchmarkGradleSeedManifest.build(seed_root)
+
+    (metadata_root / "module-metadata.bin").write_bytes(b"module-metadata-b")
+    manifest_b = BenchmarkGradleSeedManifest.build(seed_root)
+
+    assert manifest_a.identity_hash != manifest_b.identity_hash
+    assert manifest_a.diff(manifest_b) == ("mismatch:caches/modules-2/metadata-2.107/module-metadata.bin",)
 
 
 def test_restore_reuses_existing_materialization(tmp_path: Path) -> None:

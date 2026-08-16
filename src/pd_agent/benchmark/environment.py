@@ -82,7 +82,9 @@ def _iter_seed_files(root: Path) -> tuple[tuple[str, Path], ...]:
 def _is_nonportable_seed_entry(relative_path: str, *, current_path: Path | None = None) -> bool:
     normalized = relative_path.replace("\\", "/")
     filename = normalized.rsplit("/", 1)[-1].casefold()
-    if normalized.startswith("caches/fabric-loom/") and (filename.endswith(".lock") or filename.endswith(".lck")):
+    if filename == "gc.properties":
+        return True
+    if filename.endswith(".lock") or filename.endswith(".lck"):
         return True
     if normalized.startswith("caches/journal-1/") and filename in _NONPORTABLE_SEED_FILE_NAMES:
         return True
