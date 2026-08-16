@@ -1,15 +1,15 @@
 # PD Agent v0.5 Project Base Validation
 
 Status: PASS
-Date: 2026-08-14
+Date: 2026-08-16
 
 ## Repository
 
 - Repository: `pdpunto/PD-Agent`
 - Branch: `main`
-- Baseline commit: `02385989b1cf7b232f82f57bffff2b2f3c922978`
-- HEAD: `02385989b1cf7b232f82f57bffff2b2f3c922978`
-- origin/main: `02385989b1cf7b232f82f57bffff2b2f3c922978`
+- Baseline commit: `289524cb05abebf2009b93b572e70cf4601babb3`
+- HEAD: `289524cb05abebf2009b93b572e70cf4601babb3`
+- origin/main: `289524cb05abebf2009b93b572e70cf4601babb3`
 
 ## Working Tree
 
@@ -21,6 +21,7 @@ Date: 2026-08-14
 - Option chosen: `C`
 - Reason: the existing benchmark fixtures and `tests/fixtures/l11_fabric_fixture` are benchmark-adapted and not representative enough for the v0.5 project-base milestone.
 - The final project base is a pinned representative Fabric project snapshot tracked in `benchmarks/projects/v0_5_fabric_base/`.
+- F1 was reopened after F6 runtime evidence confirmed the project base needed the Fabric API runtime dependency restored.
 
 ## Upstream / Provenance
 
@@ -52,7 +53,7 @@ Date: 2026-08-14
 ## Identity
 
 - Tree hash algorithm: `sha256-tree-v1`
-- Tree hash: `e5271eb9d86e13cfda664dfff574b9beda2f3f3b584a90464aa4ac7051137d56`
+- Tree hash: `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`
 
 ## Wrapper
 
@@ -73,6 +74,12 @@ Date: 2026-08-14
 - Executed on a fresh temporary copy of `benchmarks/projects/v0_5_fabric_base`
 - Command: Gradle wrapper `build`
 - Result: `BUILD SUCCESSFUL`
+
+## Rebase Note
+
+- The project base now restores `fabric_api_version=0.141.6+1.21.11` in `gradle.properties`.
+- The build file now restores `modImplementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")`.
+- F1 remains the same representative base, but the dependency line is now part of the frozen base contract after the F6 runtime evidence.
 
 ## Artifact Validation
 

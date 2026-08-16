@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "task_id": "F6-T1",
-  "task_version": "2",
-  "description": "Single-file item registry feature.",
-  "prompt": "Add a small decorative item called Signal Charm to Example Mod and register it in the item registry while keeping the existing mod id and entrypoints intact.",
+  "task_id": "F6-T2",
+  "task_version": "5",
+  "description": "Multi-file block feature with resource wiring.",
+  "prompt": "Add a decorative block called Marble Lantern to Example Mod, make it available as a block item, and add its English display-name resource while preserving the existing mod id and entrypoints.",
   "fixture": {
     "schema_version": 1,
     "fixture_ref": "projects/v0_5_fabric_base",
@@ -30,8 +30,8 @@
       "knowledge_need_level": "LOW",
       "observation_type": "REGISTRY_ENTRY_PRESENT",
       "observation_params": {
-        "registry_kind": "item",
-        "identifier": "examplemod:signal_charm"
+        "registry_kind": "block",
+        "identifier": "examplemod:marble_lantern"
       },
       "preservation_invariants": {
         "mod_id": "examplemod",
@@ -43,19 +43,49 @@
             "com.example.examplemod.client.ExampleModClient"
           ]
         },
+        "resource_contract": "preserve the existing metadata and add the conventional lang and block-item wiring for the new content",
         "preserve_unrelated_sources": true
       },
+      "required_minecraft_observations": [
+        {
+          "test_id": "F6-T2:item",
+          "observation_type": "REGISTRY_ENTRY_PRESENT",
+          "observation_params": {
+            "registry_kind": "item",
+            "identifier": "examplemod:marble_lantern"
+          }
+        }
+      ],
+      "required_resources": [
+        {
+          "path": "assets/examplemod/lang/en_us.json",
+          "type": "json",
+          "assertions": [
+            {
+              "kind": "json_pointer_equals",
+              "path": "/block.examplemod.marble_lantern",
+              "value": "Marble Lantern"
+            },
+            {
+              "kind": "json_pointer_equals",
+              "path": "/item.examplemod.marble_lantern",
+              "value": "Marble Lantern"
+            }
+          ]
+        }
+      ],
       "evidence_requirements": {
         "build": true,
         "artifact": true,
         "minecraft": true,
-        "changed_files": true
+        "changed_files": true,
+        "resource_files": true
       },
       "knowledge_needs": [
         {
-          "id": "f6-t1-yarn-item-registry",
-          "type": "SYMBOL",
-          "query": "How do you add a custom item in a Fabric 1.21.11 project while keeping the existing mod id and entrypoints intact?",
+          "id": "f6-t2-yarn-block-resource",
+          "type": "API",
+          "query": "How do you add a custom block with a matching block item and language resource in Fabric 1.21.11?",
           "environment": {
             "minecraft_version": "1.21.11",
             "loader_version": "0.19.3",
@@ -66,16 +96,16 @@
             "java_version": "21"
           },
           "hints": [
-            "custom item",
-            "Fabric registry",
-            "Yarn 1.21.11"
+            "custom block",
+            "block item",
+            "language resource"
           ]
         }
       ]
     },
     "notes": [
-      "Single-source change remains plausible but is not required.",
-      "The prompt describes the requested content, not an implementation path."
+      "This task is intentionally multi-file and should not be solvable by a one-line registry patch.",
+      "A valid solution may touch Java and resource files."
     ]
   },
   "environment": {
@@ -91,13 +121,12 @@
   "tags": [
     "fabric",
     "v0.5",
-    "single-file",
+    "multi-file",
     "runtime",
     "registry",
-    "baseline"
+    "resource"
   ],
   "notes": [
-    "F6 task 1 is the simplest representative feature.",
-    "It stays within the pinned project base and does not reveal a solution path."
+    "F6 task 2 exercises a conventional block + resource update."
   ]
 }

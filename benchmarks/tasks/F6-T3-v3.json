@@ -7,7 +7,7 @@
   "fixture": {
     "schema_version": 1,
     "fixture_ref": "projects/v0_5_fabric_base",
-    "fixture_identity": "11e7af2c112dd4f7bad08aadd7b4739b44d30a1c35e110b515b50d5b7f89fd54",
+    "fixture_identity": "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3",
     "identity_algorithm": "sha256-tree-v1",
     "metadata": {
       "project_base": "benchmarks/projects/v0_5_fabric_base",
@@ -108,7 +108,7 @@
             "loom_version": "1.13.3",
             "mappings_namespace": "yarn",
             "mappings_version": "1.21.11+build.6",
-            "fabric_api_version": null,
+            "fabric_api_version": "0.141.6+1.21.11",
             "java_version": "21"
           },
           "hints": [
@@ -131,7 +131,7 @@
     "loom_version": "1.13.3",
     "yarn_version": "1.21.11+build.6",
     "java_version": "21",
-    "fabric_api_version": null,
+    "fabric_api_version": "0.141.6+1.21.11",
     "extra": {}
   },
   "tags": [

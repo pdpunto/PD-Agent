@@ -10,9 +10,10 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks"
 PROJECT_BASE = BENCHMARK_ROOT / "projects" / "v0_5_fabric_base"
-DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
-DATASET_VERSION = "0.5.4"
-TASK_VERSION = "4"
+EXPECTED_PROJECT_BASE_IDENTITY = "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3"
+DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_5"
+DATASET_VERSION = "0.5.5"
+TASK_VERSION = "5"
 
 
 def _catalog() -> BenchmarkCatalog:
@@ -40,15 +41,15 @@ def test_v0_5_dataset_loads_with_exactly_three_tasks() -> None:
     catalog = _catalog()
     dataset = catalog.dataset_for(DATASET_ID, DATASET_VERSION)
     expected = BenchmarkDataset.from_dict(
-        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_4.json").read_text(encoding="utf-8"))
+        json.loads((BENCHMARK_ROOT / "datasets" / "PD_AGENT_BENCHMARK_DATASET_V0.5_5.json").read_text(encoding="utf-8"))
     )
 
     assert dataset == expected
     assert len(dataset.tasks) == 3
     assert tuple(reference.task_id for reference in dataset.tasks) == _task_ids()
     assert len({(reference.task_id, reference.task_version) for reference in dataset.tasks}) == 3
-    assert dataset.dataset_version == "0.5.4"
-    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
+    assert dataset.dataset_version == "0.5.5"
+    assert dataset.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_5"
 
 
 def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
@@ -74,6 +75,7 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
         assert "expected_class_name" not in task.acceptance.spec
         assert "target_method" not in task.acceptance.spec
         assert "api_signature" not in task.acceptance.spec
+        assert task.acceptance.spec["knowledge_needs"][0]["environment"]["fabric_api_version"] == "0.141.6+1.21.11"
         if task_id == "F6-T1":
             assert task.acceptance.spec.get("required_resources", []) == []
             assert task.acceptance.spec.get("required_minecraft_observations", []) == []
@@ -176,6 +178,7 @@ def test_v0_5_dataset_is_scheduler_compatible() -> None:
 def test_v0_5_dataset_has_stable_fixture_identity() -> None:
     expected = compute_fixture_identity(PROJECT_BASE)
 
+    assert expected == EXPECTED_PROJECT_BASE_IDENTITY
     assert expected == compute_fixture_identity(PROJECT_BASE)
     assert _catalog().fixture_identities[("F6-T1", TASK_VERSION)] == expected
     assert _catalog().fixture_identities[("F6-T2", TASK_VERSION)] == expected
@@ -186,9 +189,12 @@ def test_v0_5_legacy_dataset_remains_historical_but_not_official() -> None:
     catalog = _catalog()
     legacy = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_1", "0.5.1")
     historical = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_3", "0.5.3")
+    superseded = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_4", "0.5.4")
 
     assert legacy.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_1"
     assert legacy.dataset_version == "0.5.1"
     assert historical.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_3"
     assert historical.dataset_version == "0.5.3"
-    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
+    assert superseded.dataset_id == "PD_AGENT_BENCHMARK_DATASET_V0.5_4"
+    assert superseded.dataset_version == "0.5.4"
+    assert DATASET_ID == "PD_AGENT_BENCHMARK_DATASET_V0.5_5"

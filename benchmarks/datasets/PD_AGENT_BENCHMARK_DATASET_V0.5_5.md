@@ -1,16 +1,13 @@
-# PD Agent v0.5.4 Dataset Freeze
+# PD Agent v0.5.5 Dataset Freeze
 
-Frozen dataset: `PD_AGENT_BENCHMARK_DATASET_V0.5_4` / `0.5.4`
+Frozen dataset: `PD_AGENT_BENCHMARK_DATASET_V0.5_5` / `0.5.5`
 
-This revision was superseded by `0.5.5` after the F1 dependency restoration and
-the F6 rebase. The `0.5.1`, `0.5.2`, `0.5.3`, and `0.5.4` files remain in the
-repository as historical evidence of earlier freeze attempts, but they are not
-the official live-validation target.
+This revision supersedes `0.5.4` after the F1 dependency restoration and the F6 rebase. The `0.5.1`, `0.5.2`, `0.5.3`, and `0.5.4` files remain in the repository as historical evidence of earlier freeze attempts, but they are not the official live-validation target.
 
 ## Frozen base
 
 - Project base: `benchmarks/projects/v0_5_fabric_base`
-- Base identity: `b9fabd3fe817545bc677352bbde111574fe8b9ba0d5e0d3e8cc11e3485273e2c`
+- Base identity: `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`
 - Mod id: `examplemod`
 - Main entrypoint: `com.example.examplemod.ExampleMod`
 - Client entrypoint: `com.example.examplemod.client.ExampleModClient`
@@ -49,13 +46,17 @@ the official live-validation target.
 - Multiple internal solutions remain possible.
 - The request is plausible outside the benchmark.
 
-## Knowledge hints review
+## Knowledge Need Review
 
-The hints in the task specs are semantic retrieval cues, not solution code.
+- `F6-T1`: `LOW`
+- `F6-T2`: `LOW`
+- `F6-T3`: `MATERIAL`
 
-- They avoid explicit class names and call sequences.
-- They point Brain retrieval toward broad Fabric knowledge.
-- They do not encode a full reference implementation.
+Reasoning:
+
+- T1 is a small single-file feature and mostly needs local Fabric item-registration knowledge.
+- T2 adds resource wiring, but still stays on conventional Fabric block/item patterns.
+- T3 is the most representative task and benefits materially from external Yarn/Fabric knowledge without exposing a reference solution.
 
 ## Preservation / observability notes
 
@@ -69,4 +70,4 @@ The hints in the task specs are semantic retrieval cues, not solution code.
 - Compile: PASS
 - Focused acceptance/dataset/executor tests: PASS
 - Full suite: PASS
-- F6 candidate: superseded by the 0.5.5 rebase
+- F6 candidate: ready for official approval review

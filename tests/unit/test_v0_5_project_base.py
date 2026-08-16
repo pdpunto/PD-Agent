@@ -8,6 +8,7 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_BASE = ROOT / "benchmarks" / "projects" / "v0_5_fabric_base"
+EXPECTED_PROJECT_BASE_IDENTITY = "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3"
 
 
 def test_v0_5_project_base_is_ready() -> None:
@@ -22,6 +23,8 @@ def test_v0_5_project_base_is_ready() -> None:
     assert snapshot.fabric_manifests[0].mod_id == "examplemod"
     assert snapshot.fabric_manifests[0].entrypoints["main"] == ("com.example.examplemod.ExampleMod",)
     assert snapshot.fabric_manifests[0].entrypoints["client"] == ("com.example.examplemod.client.ExampleModClient",)
+    assert "fabric-api" in (PROJECT_BASE / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "fabric_api_version=0.141.6+1.21.11" in (PROJECT_BASE / "gradle.properties").read_text(encoding="utf-8")
     assert any(path.name == "fabric.mod.json" for path in snapshot.relevant_files)
     assert any(path.as_posix().endswith("src/main/java") for path in snapshot.source_roots)
     assert any(path.as_posix().endswith("src/main/resources") for path in snapshot.resource_roots)
@@ -38,6 +41,7 @@ def test_v0_5_project_base_identity_is_stable() -> None:
     first = compute_fixture_identity(PROJECT_BASE)
     second = compute_fixture_identity(PROJECT_BASE)
 
+    assert first == EXPECTED_PROJECT_BASE_IDENTITY
     assert first == second
     assert len(first) == 64
 

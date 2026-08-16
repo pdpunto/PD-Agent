@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "task_id": "F6-T1",
-  "task_version": "2",
+  "task_version": "5",
   "description": "Single-file item registry feature.",
   "prompt": "Add a small decorative item called Signal Charm to Example Mod and register it in the item registry while keeping the existing mod id and entrypoints intact.",
   "fixture": {

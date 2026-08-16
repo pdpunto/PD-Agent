@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "task_id": "F6-T3",
-  "task_version": "1",
-  "description": "Representative server-side utility feature.",
-  "prompt": "Add a small server-side utility feature to Example Mod that exposes a new registered block or item and keeps the current project layout, mod id, and entrypoints intact.",
+  "task_version": "5",
+  "description": "Craftable utility block with data wiring.",
+  "prompt": "Add a craftable utility block called Server Core to Example Mod, register the matching block item, and add its English display-name resource and crafting recipe while preserving the existing mod id and entrypoints.",
   "fixture": {
     "schema_version": 1,
     "fixture_ref": "projects/v0_5_fabric_base",
@@ -43,9 +43,53 @@
             "com.example.examplemod.client.ExampleModClient"
           ]
         },
-        "resource_contract": "preserve existing metadata and unrelated assets",
+        "resource_contract": "preserve existing metadata and add the recipe/lang wiring for the new utility block",
         "preserve_unrelated_sources": true
       },
+      "required_minecraft_observations": [
+        {
+          "test_id": "F6-T3:item",
+          "observation_type": "REGISTRY_ENTRY_PRESENT",
+          "observation_params": {
+            "registry_kind": "item",
+            "identifier": "examplemod:server_core"
+          }
+        }
+      ],
+      "required_resources": [
+        {
+          "path": "assets/examplemod/lang/en_us.json",
+          "type": "json",
+          "assertions": [
+            {
+              "kind": "json_pointer_equals",
+              "path": "/block.examplemod.server_core",
+              "value": "Server Core"
+            },
+            {
+              "kind": "json_pointer_equals",
+              "path": "/item.examplemod.server_core",
+              "value": "Server Core"
+            }
+          ]
+        },
+        {
+          "path": "data/examplemod/recipe/server_core.json",
+          "type": "json",
+          "assertions": [
+            {
+              "kind": "json_pointer_equals",
+              "path": "/result/id",
+              "value": "examplemod:server_core"
+            },
+            {
+              "kind": "json_pointer_equals",
+              "path": "/result/count",
+              "value": 1
+            }
+          ]
+        }
+      ],
       "evidence_requirements": {
         "build": true,
         "artifact": true,
@@ -57,7 +101,7 @@
         {
           "id": "f6-t3-yarn-server-utility",
           "type": "MAPPING",
-          "query": "How does Yarn 1.21.11 register a small server-side utility block or item pair while preserving the existing Example Mod layout?",
+          "query": "How do you add a craftable utility block with a matching block item and recipe/resource wiring in Fabric 1.21.11?",
           "environment": {
             "minecraft_version": "1.21.11",
             "loader_version": "0.19.3",
@@ -68,16 +112,16 @@
             "java_version": "21"
           },
           "hints": [
-            "Registries.BLOCK",
-            "Identifier.of",
-            "BlockItem"
+            "crafting recipe",
+            "resource wiring",
+            "Fabric content registration"
           ]
         }
       ]
     },
     "notes": [
-      "This is the most representative task in the freeze.",
-      "It should remain deterministic, bounded, and solvable on the pinned base project."
+      "This is the highest-difficulty task in the freeze.",
+      "The observable gate remains registry presence plus resource-file evidence, which the existing infrastructure can validate."
     ]
   },
   "environment": {

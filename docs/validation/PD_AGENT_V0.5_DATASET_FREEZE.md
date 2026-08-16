@@ -1,14 +1,14 @@
-# PD Agent v0.5.4 Dataset Freeze Validation
+# PD Agent v0.5.5 Dataset Freeze Validation
 
 Status: PASS
-Date: 2026-08-15
+Date: 2026-08-16
 
 ## Repository
 
 - Repository: `PD-Agent`
 - Branch: `main`
-- Baseline commit: `ec78080ca8f03cce7e8c6bbad6e2b887cba41a3b`
-- HEAD / origin at audit start: `ec78080ca8f03cce7e8c6bbad6e2b887cba41a3b`
+- Baseline commit: `289524cb05abebf2009b93b572e70cf4601babb3`
+- HEAD / origin at audit start: `289524cb05abebf2009b93b572e70cf4601babb3`
 - Working tree: tracked clean before this change
 - Preexisting untracked diagnostics: `scripts/benchmark/diagnostics/`
 
@@ -21,11 +21,11 @@ Audited against:
 - `docs/implementation/PD_AGENT_V0.5_FABRIC_CAPABILITY_IMP.md`
 - `docs/validation/PD_AGENT_V0.5_FUNCTIONAL_EVALUATION.md`
 - `benchmarks/projects/v0_5_fabric_base/**`
-- `benchmarks/tasks/F6-T1-v4.json`
-- `benchmarks/tasks/F6-T2-v4.json`
-- `benchmarks/tasks/F6-T3-v4.json`
-- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_4.json`
-- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_4.md`
+- `benchmarks/tasks/F6-T1-v5.json`
+- `benchmarks/tasks/F6-T2-v5.json`
+- `benchmarks/tasks/F6-T3-v5.json`
+- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_5.json`
+- `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_5.md`
 - `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_1.json`
 - `benchmarks/datasets/PD_AGENT_BENCHMARK_DATASET_V0.5_1.md`
 - `src/pd_agent/benchmark/catalog.py`
@@ -36,12 +36,12 @@ Audited against:
 
 ## Frozen Dataset
 
-- Dataset id: `PD_AGENT_BENCHMARK_DATASET_V0.5_4`
-- Dataset version: `0.5.4`
+- Dataset id: `PD_AGENT_BENCHMARK_DATASET_V0.5_5`
+- Dataset version: `0.5.5`
 - Task count: `3`
 - Task ids: `F6-T1`, `F6-T2`, `F6-T3`
 - Project base ref: `projects/v0_5_fabric_base`
-- Project base tree hash: `11e7af2c112dd4f7bad08aadd7b4739b44d30a1c35e110b515b50d5b7f89fd54`
+- Project base tree hash: `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`
 
 ## Revision History
 
@@ -49,8 +49,8 @@ Audited against:
 - Review 04 detected hidden acceptance requirements in T1/T2 and a semantic mismatch in T3.
 - `0.5.1` remains in the repository as historical evidence only.
 - `0.5.2` corrected the naming fairness and initial acceptance shape.
-- `0.5.4` supersedes `0.5.3` for official approval and live validation after
-  the T3 recipe-path correction.
+- `0.5.5` supersedes `0.5.4` for official approval and live validation after
+  the F1 dependency restoration and F6 rebase.
 
 ## Design Fit
 

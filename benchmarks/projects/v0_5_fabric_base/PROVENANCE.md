@@ -10,6 +10,7 @@
 
 - Minecraft: `1.21.11`
 - Fabric Loader: `0.19.3`
+- Fabric API: `0.141.6+1.21.11`
 - Fabric Loom: `1.13.3`
 - Yarn: `1.21.11+build.6`
 - Java: `21`
@@ -25,7 +26,12 @@
 ## Identity
 
 - Tree hash algorithm: `sha256-tree-v1`
-- Tree hash: `e5271eb9d86e13cfda664dfff574b9beda2f3f3b584a90464aa4ac7051137d56`
+- Tree hash: `0b663a8712b72f194aa6d09b4608e57a102a8089559067fcf3a579dd0ba21706`
+
+## Rebase Note
+
+- F1 was reopened after F6 runtime evidence showed the project base needed the Fabric API runtime dependency restored for the reference implementation to start cleanly in Minecraft.
+- The project base now pins the Fabric API dependency in `build.gradle.kts` and `gradle.properties`.
 
 ## Notes
 
