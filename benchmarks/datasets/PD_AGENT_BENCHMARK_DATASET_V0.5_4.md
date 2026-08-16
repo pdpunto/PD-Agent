@@ -10,7 +10,7 @@ the official live-validation target.
 ## Frozen base
 
 - Project base: `benchmarks/projects/v0_5_fabric_base`
-- Base identity: `b9fabd3fe817545bc677352bbde111574fe8b9ba0d5e0d3e8cc11e3485273e2c`
+- Base identity: `11e7af2c112dd4f7bad08aadd7b4739b44d30a1c35e110b515b50d5b7f89fd54`
 - Mod id: `examplemod`
 - Main entrypoint: `com.example.examplemod.ExampleMod`
 - Client entrypoint: `com.example.examplemod.client.ExampleModClient`
