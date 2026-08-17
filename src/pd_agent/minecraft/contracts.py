@@ -42,6 +42,13 @@ def _normalize_path(value: Path | str) -> Path:
     return path
 
 
+def _normalize_runtime_mod_jar(value: Path | str) -> Path:
+    path = Path(value).expanduser()
+    if not str(path):
+        raise ValueError("runtime_mod_jars cannot contain empty paths")
+    return path
+
+
 def _validate_mod_id(value: object) -> str:
     mod_id = _non_empty_text("target_mod_id", value)
     if not _MOD_ID_RE.fullmatch(mod_id):
@@ -69,9 +76,22 @@ class MinecraftTestSpec:
     observation_type: MinecraftObservationType = MinecraftObservationType.LEGACY_BLOCK_STATE
     observation_params: Mapping[str, Any] = field(default_factory=dict)
     expect_neighbor_update: bool = False
+    runtime_mod_jars: tuple[Path, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
+        runtime_mod_jars = tuple(_normalize_runtime_mod_jar(path) for path in self.runtime_mod_jars)
+        runtime_mod_jar_strings = [path.as_posix() for path in runtime_mod_jars]
+        if len(runtime_mod_jar_strings) != len(set(runtime_mod_jar_strings)):
+            raise ValueError("runtime_mod_jars must not contain duplicates")
+        target_jar_string = self.target_jar.as_posix()
+        if target_jar_string in runtime_mod_jar_strings:
+            raise ValueError("target_jar cannot be listed as a runtime dependency")
+        object.__setattr__(
+            self,
+            "runtime_mod_jars",
+            tuple(sorted(runtime_mod_jars, key=lambda path: path.as_posix().casefold())),
+        )
         object.__setattr__(self, "target_mod_id", _validate_mod_id(self.target_mod_id))
         object.__setattr__(self, "minecraft_version", _non_empty_text("minecraft_version", self.minecraft_version))
         object.__setattr__(self, "loader_version", _non_empty_text("loader_version", self.loader_version))
@@ -87,6 +107,7 @@ class MinecraftTestSpec:
     def to_dict(self) -> dict[str, Any]:
         return {
             "target_jar": self.target_jar.as_posix(),
+            "runtime_mod_jars": [path.as_posix() for path in self.runtime_mod_jars],
             "target_mod_id": self.target_mod_id,
             "minecraft_version": self.minecraft_version,
             "loader_version": self.loader_version,
@@ -101,6 +122,7 @@ class MinecraftTestSpec:
     def from_dict(cls, data: Mapping[str, Any]) -> "MinecraftTestSpec":
         return cls(
             target_jar=Path(data["target_jar"]),
+            runtime_mod_jars=tuple(Path(path) for path in data.get("runtime_mod_jars", [])),
             target_mod_id=str(data["target_mod_id"]),
             minecraft_version=str(data["minecraft_version"]),
             loader_version=str(data["loader_version"]),

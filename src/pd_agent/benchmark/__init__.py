@@ -6,6 +6,11 @@ from .classifier import BenchmarkClassification, BenchmarkClassifier
 from .aggregator import BenchmarkAggregator, render_comparison_markdown
 from .collector import BenchmarkCollection, BenchmarkCollector
 from .catalog import BenchmarkCatalog, BenchmarkCatalogError
+from .dependencies import (
+    ResolvedRuntimeModDependency,
+    RuntimeModDependencyResolutionError,
+    resolve_runtime_mod_dependencies,
+)
 from .environment import (
     BenchmarkGradleEnvironment,
     BenchmarkGradleEnvironmentError,
@@ -62,10 +67,13 @@ __all__ = [
     "BenchmarkCollector",
     "BenchmarkCatalog",
     "BenchmarkCatalogError",
+    "ResolvedRuntimeModDependency",
+    "RuntimeModDependencyResolutionError",
     "BenchmarkGradleEnvironment",
     "BenchmarkGradleEnvironmentError",
     "BenchmarkGradleSeedComponent",
     "BenchmarkGradleSeedManifest",
+    "resolve_runtime_mod_dependencies",
     "render_comparison_markdown",
     "BenchmarkExecutionBatch",
     "BenchmarkExecutionManifest",

@@ -72,6 +72,7 @@ def test_spec_validation_and_round_trip(tmp_path: Path) -> None:
 
     assert spec.to_dict() == {
         "target_jar": "build/libs/target.jar",
+        "runtime_mod_jars": [],
         "target_mod_id": "pdagentl11",
         "minecraft_version": "1.21.11",
         "loader_version": "0.19.3",
@@ -103,6 +104,49 @@ def test_spec_supports_generic_registry_observation_round_trip(tmp_path: Path) -
         "identifier": "minecraft:diamond_block",
     }
     assert MinecraftTestSpec.from_dict(spec.to_dict()) == spec
+
+
+def test_spec_supports_runtime_mod_jars_round_trip(tmp_path: Path) -> None:
+    _make_jar(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="runtime-mods",
+        observation_type=MinecraftObservationType.LEGACY_BLOCK_STATE,
+        runtime_mod_jars=(Path("mods/b.jar"), Path("mods/a.jar")),
+        timeout_seconds=90,
+    )
+
+    assert spec.runtime_mod_jars == (Path("mods/a.jar"), Path("mods/b.jar"))
+    assert spec.to_dict()["runtime_mod_jars"] == ["mods/a.jar", "mods/b.jar"]
+    assert MinecraftTestSpec.from_dict(spec.to_dict()) == spec
+
+
+@pytest.mark.parametrize(
+    "runtime_mod_jars",
+    [
+        (Path("mods/a.jar"), Path("mods/a.jar")),
+        (Path("mods/a.jar"), Path("build/libs/target.jar")),
+    ],
+)
+def test_spec_rejects_duplicate_or_target_runtime_mod_jars(
+    tmp_path: Path,
+    runtime_mod_jars: tuple[Path, Path],
+) -> None:
+    _make_jar(tmp_path)
+
+    with pytest.raises(ValueError):
+        MinecraftTestSpec(
+            target_jar=Path("build/libs/target.jar"),
+            target_mod_id="pdagentl11",
+            minecraft_version="1.21.11",
+            loader_version="0.19.3",
+            test_id="runtime-mods",
+            runtime_mod_jars=runtime_mod_jars,
+            timeout_seconds=90,
+        )
 
 
 @pytest.mark.parametrize(
