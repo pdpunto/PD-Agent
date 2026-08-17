@@ -544,7 +544,17 @@ def test_executor_resolves_runtime_mod_dependencies_into_minecraft_specs(
     )
     runtime_mod_path = gradle_environment.gradle_user_home / "caches" / "modules-2" / "files-2.1" / "net" / "fabricmc" / "fabric-api" / "fabric-api" / "0.141.6+1.21.11" / "fabric-api-0.141.6+1.21.11.jar"
     runtime_mod_path.parent.mkdir(parents=True, exist_ok=True)
-    runtime_mod_path.write_text("jar", encoding="utf-8")
+    write_manifest_jar(
+        runtime_mod_path,
+        manifest=(
+            "{"
+            '"schemaVersion": 1, '
+            '"id": "fabric-api", '
+            '"version": "0.141.6+1.21.11", '
+            '"environment": "*"'
+            "}"
+        ),
+    )
     monkeypatch.setattr(
         "pd_agent.benchmark.executor.resolve_runtime_mod_dependencies",
         lambda *args, **kwargs: (
@@ -593,6 +603,22 @@ def test_executor_resolves_runtime_mod_dependencies_into_minecraft_specs(
     assert fake_minecraft.calls[1][0].runtime_mod_jars == (runtime_mod_path,)
     assert result.minecraft_result is not None
     assert result.minecraft_result.spec.runtime_mod_jars == (runtime_mod_path,)
+    assert result.minecraft_result.metadata["runtime_mod_dependencies"] == [
+        {
+            "coordinate": "net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11",
+            "path": runtime_mod_path.as_posix(),
+            "sha256": "f" * 64,
+            "source": "build.gradle.kts:1:modImplementation",
+        }
+    ]
+    assert result.benchmark_run.environment_snapshot["runtime_mod_dependencies"] == [
+        {
+            "coordinate": "net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11",
+            "path": runtime_mod_path.as_posix(),
+            "sha256": "f" * 64,
+            "source": "build.gradle.kts:1:modImplementation",
+        }
+    ]
 
 
 @pytest.mark.parametrize("brain_enabled", [False, True])

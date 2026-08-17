@@ -13,6 +13,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from pd_agent.core import SecurityViolation
 from pd_agent.tools import SecurePathResolver
 
 from .contracts import (
@@ -120,6 +121,14 @@ def _read_text(path: Path | None) -> str | None:
     if path is None or not path.exists():
         return None
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _is_within_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(slots=True)
@@ -305,6 +314,7 @@ class MinecraftTestRunner:
         java_version: str | None = None,
         launch_mode: str = "pass",
         expected_sha256: str | None = None,
+        authorized_runtime_roots: Sequence[Path] | None = None,
     ) -> MinecraftTestResult:
         preflight = self.prepare_run(spec, run_id=run_id, java_version=java_version)
         if not self.harness_root.exists():
@@ -316,6 +326,25 @@ class MinecraftTestRunner:
             )
 
         launch_mode = self._normalize_launch_mode(launch_mode)
+        runtime_dependency_records: tuple[dict[str, Any], ...] = ()
+        if spec.runtime_mod_jars:
+            try:
+                runtime_dependency_records = self._validate_runtime_mod_dependencies(
+                    spec.runtime_mod_jars,
+                    target_path=preflight.target.path,
+                    authorized_runtime_roots=authorized_runtime_roots,
+                )
+            except (MinecraftTestValidationError, SecurityViolation) as exc:
+                return self._finalize_runtime_failure(
+                    preflight,
+                    status=MinecraftTestStatus.INFRA_ERROR,
+                    reason=str(exc),
+                    metadata={
+                        "launch_mode": launch_mode,
+                        "phase": "preflight",
+                        "runtime_mod_dependencies": [],
+                    },
+                )
         launch_props = self._build_launch_properties(preflight, launch_mode, expected_sha256=expected_sha256)
         command = self._build_command(launch_props)
         process = self._run_command(command, cwd=self.harness_root, timeout_seconds=spec.timeout_seconds)
@@ -368,6 +397,16 @@ class MinecraftTestRunner:
                 "environment_overrides": dict(self.environment_overrides),
             },
         )
+        if runtime_dependency_records:
+            runtime_evidence = MinecraftRuntimeEvidence(
+                harness_result_path=runtime_evidence.harness_result_path,
+                latest_log_path=runtime_evidence.latest_log_path,
+                crash_reports_dir=runtime_evidence.crash_reports_dir,
+                metadata={
+                    **runtime_evidence.metadata,
+                    "runtime_mod_dependencies": list(runtime_dependency_records),
+                },
+            )
         final_result = MinecraftTestResult(
             run_id=preflight.run_id,
             status=status,
@@ -396,6 +435,25 @@ class MinecraftTestRunner:
                 "environment_overrides": dict(self.environment_overrides),
             },
         )
+        if runtime_dependency_records:
+            final_result = MinecraftTestResult(
+                run_id=final_result.run_id,
+                status=final_result.status,
+                reason=final_result.reason,
+                spec=final_result.spec,
+                target=final_result.target,
+                evidence_paths=final_result.evidence_paths,
+                launch_plan=final_result.launch_plan,
+                process_evidence=final_result.process_evidence,
+                runtime_evidence=final_result.runtime_evidence,
+                started_at=final_result.started_at,
+                finished_at=final_result.finished_at,
+                duration_seconds=final_result.duration_seconds,
+                metadata={
+                    **dict(final_result.metadata),
+                    "runtime_mod_dependencies": list(runtime_dependency_records),
+                },
+            )
         _write_json(preflight.evidence_paths.result_json, final_result.to_dict())
         return final_result
 
@@ -658,6 +716,80 @@ class MinecraftTestRunner:
         )
         _write_json(preflight.evidence_paths.result_json, result.to_dict())
         return result
+
+    def _validate_runtime_mod_dependencies(
+        self,
+        runtime_mod_jars: Sequence[Path],
+        *,
+        target_path: Path,
+        authorized_runtime_roots: Sequence[Path] | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        roots = tuple(
+            Path(root).resolve(strict=True)
+            for root in (authorized_runtime_roots if authorized_runtime_roots is not None else (self.project_root,))
+        )
+        if not roots:
+            roots = (self.project_root,)
+        resolved_target = Path(target_path).resolve(strict=True)
+        validated: list[dict[str, Any]] = []
+        seen_paths: set[str] = set()
+
+        for raw_path in runtime_mod_jars:
+            candidate = Path(raw_path).expanduser()
+            if not str(candidate).strip():
+                raise MinecraftTestValidationError("runtime mod dependency path cannot be empty")
+
+            resolved_candidate = self._resolve_runtime_mod_dependency(candidate, roots)
+            if resolved_candidate == resolved_target:
+                raise MinecraftTestValidationError("runtime mod dependency cannot be the target jar")
+            if resolved_candidate.suffix.lower() != ".jar":
+                raise MinecraftTestValidationError("runtime mod dependency must be a .jar file")
+            if not resolved_candidate.is_file():
+                raise MinecraftTestValidationError(f"runtime mod dependency is not a file: {resolved_candidate}")
+            if not zipfile.is_zipfile(resolved_candidate):
+                raise MinecraftTestValidationError(f"runtime mod dependency is not a valid jar: {resolved_candidate}")
+
+            resolved_key = resolved_candidate.as_posix().casefold()
+            if resolved_key in seen_paths:
+                raise MinecraftTestValidationError(
+                    f"runtime mod dependency duplicates are not allowed: {resolved_candidate}"
+                )
+            seen_paths.add(resolved_key)
+            validated.append(
+                {
+                    "path": resolved_candidate.as_posix(),
+                    "sha256": _sha256(resolved_candidate),
+                    "source": None,
+                }
+            )
+
+        return tuple(validated)
+
+    def _resolve_runtime_mod_dependency(self, raw_path: Path, roots: Sequence[Path]) -> Path:
+        candidate = Path(raw_path).expanduser()
+        if candidate.is_absolute():
+            try:
+                resolved = candidate.resolve(strict=True)
+            except FileNotFoundError as exc:
+                raise MinecraftTestValidationError(f"missing runtime mod dependency: {candidate}") from exc
+            if not any(_is_within_root(resolved, root) for root in roots):
+                raise SecurityViolation(f"runtime mod dependency escapes authorized roots: {resolved}")
+            return resolved
+
+        matches: list[Path] = []
+        for root in roots:
+            try:
+                resolved = (root / candidate).resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            if _is_within_root(resolved, root):
+                matches.append(resolved)
+        if not matches:
+            raise MinecraftTestValidationError(f"missing runtime mod dependency: {candidate}")
+        unique_matches = {item.as_posix().casefold(): item for item in matches}
+        if len(unique_matches) > 1:
+            raise MinecraftTestValidationError(f"runtime mod dependency path is ambiguous: {candidate}")
+        return next(iter(unique_matches.values()))
 
     def _normalize_launch_mode(self, launch_mode: str) -> str:
         normalized = str(launch_mode).strip().lower()

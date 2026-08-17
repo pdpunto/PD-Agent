@@ -46,6 +46,20 @@ def _make_manifest_jar(root: Path, manifest: dict[str, object], name: str = "tar
     )
 
 
+def _make_runtime_mod_jar(root: Path, rel_path: str, *, mod_id: str) -> Path:
+    return write_manifest_jar(
+        root / rel_path,
+        manifest=json.dumps(
+            {
+                "schemaVersion": 1,
+                "id": mod_id,
+                "version": "1.0.0",
+                "environment": "*",
+            }
+        ),
+    )
+
+
 def _runner(root: Path) -> MinecraftTestRunner:
     return MinecraftTestRunner(project_root=root, harness_root=HARNESS_ROOT)
 
@@ -197,6 +211,8 @@ def test_run_pass_records_harness_and_result(tmp_path: Path, monkeypatch: pytest
 
 def test_run_propagates_runtime_mod_jars_to_launch_plan_and_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _make_jar(tmp_path)
+    runtime_mod_a = _make_runtime_mod_jar(tmp_path, "mods/a.jar", mod_id="mod-a")
+    runtime_mod_b = _make_runtime_mod_jar(tmp_path, "mods/b.jar", mod_id="mod-b")
     runner = _runner(tmp_path)
     spec = MinecraftTestSpec(
         target_jar=Path("build/libs/target.jar"),
@@ -234,7 +250,7 @@ def test_run_propagates_runtime_mod_jars_to_launch_plan_and_command(tmp_path: Pa
 
     monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
 
-    result = runner.run(spec, run_id=run_id, java_version="21")
+    result = runner.run(spec, run_id=run_id, java_version="21", authorized_runtime_roots=(tmp_path,))
 
     assert result.status is MinecraftTestStatus.PASS
     assert result.launch_plan is not None
@@ -244,6 +260,99 @@ def test_run_propagates_runtime_mod_jars_to_launch_plan_and_command(tmp_path: Pa
     assert any(
         str(part).startswith("-Ppd.agent.runtimeModJars=") for part in captured["command"]
     )
+    runtime_dependency_records = result.metadata["runtime_mod_dependencies"]
+    assert [item["path"] for item in runtime_dependency_records] == [
+        runtime_mod_a.resolve().as_posix(),
+        runtime_mod_b.resolve().as_posix(),
+    ]
+    assert all(len(item["sha256"]) == 64 for item in runtime_dependency_records)
+    assert all(item["source"] is None for item in runtime_dependency_records)
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.metadata["runtime_mod_dependencies"] == runtime_dependency_records
+
+
+@pytest.mark.parametrize(
+    "runtime_mod_jars, setup, expected_message",
+    [
+        ((Path("mods/missing.jar"),), None, "missing runtime mod dependency"),
+        ((Path("mods/not-a-jar.txt"),), "text", "must be a .jar file"),
+        ((Path("mods/corrupt.jar"),), "corrupt", "not a valid jar"),
+        ((Path("mods/a.jar"), Path("mods/../mods/a.jar")), "valid", "duplicates are not allowed"),
+        ((Path("build/libs/../libs/target.jar"),), "target", "cannot be the target jar"),
+        ((Path(r"C:\\outside\\mod.jar"),), "outside", "escapes authorized roots"),
+    ],
+)
+def test_run_rejects_invalid_runtime_mod_dependencies_without_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_mod_jars: tuple[Path, ...],
+    setup: str | None,
+    expected_message: str,
+) -> None:
+    _make_jar(tmp_path)
+    if setup == "text":
+        (tmp_path / "mods").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "mods" / "not-a-jar.txt").write_text("not a jar", encoding="utf-8")
+    elif setup == "corrupt":
+        (tmp_path / "mods").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "mods" / "corrupt.jar").write_bytes(b"not-a-jar")
+    elif setup == "valid":
+        _make_runtime_mod_jar(tmp_path, "mods/a.jar", mod_id="mod-a")
+    elif setup == "target":
+        pass
+    elif setup == "outside":
+        outside_root = tmp_path.parent / "outside"
+        runtime_mod_jars = (outside_root / "mod.jar",)
+        _make_runtime_mod_jar(outside_root, "mod.jar", mod_id="mod-outside")
+
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+        runtime_mod_jars=runtime_mod_jars,
+    )
+    run_id = "run-invalid-runtime-mods"
+    called = False
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        nonlocal called
+        called = True
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload={
+                "schema_version": 1,
+                "test_id": "block_state_probe",
+                "target_mod_id": "pdagentl11",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "runtime_target_path": str(tmp_path / "build" / "libs" / "target.jar"),
+                "runtime_target_sha256": runner.validate_target(spec, java_version="21").sha256,
+                "target_sha_match": True,
+                "server_started": True,
+                "functional_test_result": "PASS",
+                "reason": "should not run",
+                "shutdown_requested": True,
+            },
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(
+        spec,
+        run_id=run_id,
+        java_version="21",
+        authorized_runtime_roots=(tmp_path,),
+    )
+
+    assert result.status is MinecraftTestStatus.INFRA_ERROR
+    assert expected_message in result.reason
+    assert result.metadata["phase"] == "preflight"
+    assert not called
 
 
 def test_run_signal_test_id_pass_records_neighbor_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

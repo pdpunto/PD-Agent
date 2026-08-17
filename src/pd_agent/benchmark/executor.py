@@ -36,7 +36,11 @@ from .acceptance import (
     evaluate_required_minecraft_observations,
     evaluate_required_resources,
 )
-from .dependencies import RuntimeModDependencyResolutionError, resolve_runtime_mod_dependencies
+from .dependencies import (
+    ResolvedRuntimeModDependency,
+    RuntimeModDependencyResolutionError,
+    resolve_runtime_mod_dependencies,
+)
 from .environment import BenchmarkGradleEnvironment
 from .classifier import BenchmarkClassifier, BenchmarkClassification
 from .collector import BenchmarkCollection, BenchmarkCollector
@@ -287,6 +291,7 @@ def _execution_environment_snapshot(
     resolution: Mapping[str, Any] | None,
     knowledge_needs: Sequence[KnowledgeNeed],
     gradle_environment: BenchmarkGradleEnvironment | None = None,
+    runtime_mod_dependencies: Sequence[Mapping[str, Any]] | None = None,
     fixture_hash_after: str | None = None,
 ) -> dict[str, Any]:
     snapshot = {
@@ -303,6 +308,8 @@ def _execution_environment_snapshot(
         snapshot["knowledge_environment"] = resolution
     if gradle_environment is not None:
         snapshot["gradle_environment"] = gradle_environment.to_dict()
+    if runtime_mod_dependencies is not None:
+        snapshot["runtime_mod_dependencies"] = [dict(item) for item in runtime_mod_dependencies]
     if fixture_hash_after is not None:
         snapshot["fixture_integrity"] = {
             "canonical_hash_before": workspace.canonical_hash_before,
@@ -379,6 +386,7 @@ class BenchmarkExecutor:
             attempt_id=f"attempt-{scheduled_attempt.attempt_index:03d}",
             preserve_on_cleanup=preserve_workspace,
         )
+        resolved_runtime_mod_dependencies: tuple[ResolvedRuntimeModDependency, ...] = ()
 
         try:
             project_inspector = ProjectInspector()
@@ -429,17 +437,52 @@ class BenchmarkExecutor:
                 model_config=dict(config.model_config),
             )
 
-            minecraft = self._maybe_run_minecraft(
-                task,
-                config,
-                run_state=run_state,
-                final_report=final_report,
-                workspace=workspace,
-                project_snapshot=project_snapshot,
-                benchmark_run_id=benchmark_run_id,
-                filesystem_run_id=run_fragment,
-                minecraft_runner=minecraft_runner or self.minecraft_runner,
-            )
+            runtime_mod_dependency_resolution_error: RuntimeModDependencyResolutionError | None = None
+            if self.gradle_environment is not None:
+                try:
+                    resolved_runtime_mod_dependencies = resolve_runtime_mod_dependencies(
+                        workspace.workspace_root,
+                        gradle_user_home=self.gradle_environment.gradle_user_home,
+                        project_snapshot=project_snapshot,
+                    )
+                except RuntimeModDependencyResolutionError as exc:
+                    runtime_mod_dependency_resolution_error = exc
+                    resolved_runtime_mod_dependencies = ()
+
+            if runtime_mod_dependency_resolution_error is not None:
+                artifact = final_report.artifact or run_state.artifact_result
+                target_jar = Path(artifact.path) if artifact is not None and artifact.path is not None else workspace.workspace_root
+                minecraft = _minecraft_infra_error_result(
+                    task=task,
+                    artifact=artifact,
+                    run_id=run_fragment,
+                    reason=str(runtime_mod_dependency_resolution_error),
+                    target_jar=target_jar,
+                    evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                    default_timeout_seconds=execution_limits.process_timeout_seconds,
+                )
+            else:
+                minecraft = self._maybe_run_minecraft(
+                    task,
+                    config,
+                    run_state=run_state,
+                    final_report=final_report,
+                    workspace=workspace,
+                    project_snapshot=project_snapshot,
+                    benchmark_run_id=benchmark_run_id,
+                    filesystem_run_id=run_fragment,
+                    minecraft_runner=minecraft_runner or self.minecraft_runner,
+                    runtime_mod_dependencies=resolved_runtime_mod_dependencies,
+                )
+            runtime_mod_dependency_records = tuple(dependency.to_dict() for dependency in resolved_runtime_mod_dependencies)
+            if minecraft is not None and runtime_mod_dependency_records:
+                minecraft = replace(
+                    minecraft,
+                    metadata={
+                        **dict(minecraft.metadata),
+                        "runtime_mod_dependencies": list(runtime_mod_dependency_records),
+                    },
+                )
             fixture_hash_after = compute_fixture_identity(workspace.source_fixture)
             contamination_reason = None
             if fixture_hash_after != workspace.canonical_hash_before:
@@ -484,6 +527,7 @@ class BenchmarkExecutor:
                 knowledge_needs=requested_needs,
                 runtime_storage=runtime_storage,
                 fixture_hash_after=fixture_hash_after,
+                runtime_mod_dependencies=runtime_mod_dependency_records or None,
             )
 
             benchmark_run_path, collection_path, classification_path, workspace_metadata_path = self._persist(
@@ -528,6 +572,7 @@ class BenchmarkExecutor:
         benchmark_run_id: str,
         filesystem_run_id: str,
         minecraft_runner: MinecraftTestRunner | None,
+        runtime_mod_dependencies: Sequence[ResolvedRuntimeModDependency] | None = None,
     ) -> MinecraftTestResult | None:
         if not task.validation.minecraft:
             return None
@@ -551,27 +596,7 @@ class BenchmarkExecutor:
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                 default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
-        runtime_mod_jars: tuple[Path, ...] = ()
-        if self.gradle_environment is not None:
-            try:
-                runtime_mod_jars = tuple(
-                    dependency.path
-                    for dependency in resolve_runtime_mod_dependencies(
-                        workspace.workspace_root,
-                        gradle_user_home=self.gradle_environment.gradle_user_home,
-                        project_snapshot=project_snapshot,
-                    )
-                )
-            except RuntimeModDependencyResolutionError as exc:
-                return _minecraft_infra_error_result(
-                    task=task,
-                    artifact=artifact,
-                    run_id=filesystem_run_id,
-                    reason=str(exc),
-                    target_jar=target_jar,
-                    evidence_root=workspace.workspace_root / "evidence" / "minecraft",
-                    default_timeout_seconds=execution_limits.process_timeout_seconds,
-                )
+        runtime_mod_jars: tuple[Path, ...] = tuple(dependency.path for dependency in runtime_mod_dependencies or ())
         primary_spec = _minecraft_spec_for_task(
             task,
             artifact_path=target_jar,
@@ -612,6 +637,14 @@ class BenchmarkExecutor:
                     run_id=filesystem_run_id,
                     java_version=task.environment.java_version,
                     expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+                    authorized_runtime_roots=(
+                        (
+                            workspace.workspace_root,
+                            self.gradle_environment.gradle_user_home,
+                        )
+                        if self.gradle_environment is not None
+                        else (workspace.workspace_root,)
+                    ),
                 )
             )
             for index, extra_spec in enumerate(observation_evaluation.required_observations, start=1):
@@ -621,6 +654,14 @@ class BenchmarkExecutor:
                         run_id=f"{filesystem_run_id}-obs-{index}",
                         java_version=task.environment.java_version,
                         expected_sha256=str(expected_sha256) if expected_sha256 is not None else None,
+                        authorized_runtime_roots=(
+                            (
+                                workspace.workspace_root,
+                                self.gradle_environment.gradle_user_home,
+                            )
+                            if self.gradle_environment is not None
+                            else (workspace.workspace_root,)
+                        ),
                     )
                 )
         except (MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError) as exc:
@@ -668,6 +709,7 @@ class BenchmarkExecutor:
         knowledge_needs: Sequence[KnowledgeNeed],
         runtime_storage: RunStorage,
         fixture_hash_after: str,
+        runtime_mod_dependencies: Sequence[Mapping[str, Any]] = (),
     ) -> BenchmarkRun:
         evidence_refs = (
             f"workspace-metadata.json",
@@ -686,6 +728,7 @@ class BenchmarkExecutor:
             resolution=env_resolution,
             knowledge_needs=knowledge_needs,
             gradle_environment=self.gradle_environment,
+            runtime_mod_dependencies=runtime_mod_dependencies,
             fixture_hash_after=fixture_hash_after,
         )
         return BenchmarkRun(
