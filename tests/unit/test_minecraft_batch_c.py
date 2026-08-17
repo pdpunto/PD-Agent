@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -192,6 +193,57 @@ def test_run_pass_records_harness_and_result(tmp_path: Path, monkeypatch: pytest
     assert result.evidence_paths.harness_result_json.exists()
     assert result.metadata["launch_mode"] == "pass"
     assert result.metadata["harness_result_state"] == "PASS"
+
+
+def test_run_propagates_runtime_mod_jars_to_launch_plan_and_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="block_state_probe",
+        timeout_seconds=30,
+        runtime_mod_jars=(Path("mods/b.jar"), Path("mods/a.jar")),
+    )
+    run_id = "run-runtime-mods"
+    actual_sha = runner.validate_target(spec, java_version="21").sha256
+    captured: dict[str, object] = {}
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        captured["command"] = tuple(command)
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload={
+                "schema_version": 1,
+                "test_id": "block_state_probe",
+                "target_mod_id": "pdagentl11",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "runtime_target_path": str(tmp_path / "build" / "libs" / "target.jar"),
+                "runtime_target_sha256": actual_sha,
+                "target_sha_match": True,
+                "server_started": True,
+                "functional_test_result": "PASS",
+                "reason": "target verified",
+                "shutdown_requested": True,
+            },
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.PASS
+    assert result.launch_plan is not None
+    assert dict(result.launch_plan.system_properties)["pd.agent.runtimeModJars"] == os.pathsep.join(
+        ["mods/a.jar", "mods/b.jar"]
+    )
+    assert any(
+        str(part).startswith("-Ppd.agent.runtimeModJars=") for part in captured["command"]
+    )
 
 
 def test_run_signal_test_id_pass_records_neighbor_trigger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

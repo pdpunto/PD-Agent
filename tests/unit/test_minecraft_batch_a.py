@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -296,6 +297,7 @@ def test_launch_plan_serialization(tmp_path: Path) -> None:
         loader_version="0.19.3",
         test_id="batch-a",
         timeout_seconds=90,
+        runtime_mod_jars=(Path("mods/b.jar"), Path("mods/a.jar")),
     )
 
     plan = runner.build_launch_plan(spec, run_id="run-a", java_version="21")
@@ -305,6 +307,9 @@ def test_launch_plan_serialization(tmp_path: Path) -> None:
     assert dict(plan.system_properties)["pd.agent.minecraft.target_mod_id"] == "pdagentl11"
     assert dict(plan.system_properties)["pd.agent.targetEntrypointClass"] == "dev.pdpunto.l11.ExampleMod"
     assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
+    assert dict(plan.system_properties)["pd.agent.runtimeModJars"] == os.pathsep.join(
+        ["mods/a.jar", "mods/b.jar"]
+    )
     assert MinecraftLaunchPlan.from_dict(plan.to_dict()) == plan
 
 

@@ -36,6 +36,7 @@ from .acceptance import (
     evaluate_required_minecraft_observations,
     evaluate_required_resources,
 )
+from .dependencies import RuntimeModDependencyResolutionError, resolve_runtime_mod_dependencies
 from .environment import BenchmarkGradleEnvironment
 from .classifier import BenchmarkClassifier, BenchmarkClassification
 from .collector import BenchmarkCollection, BenchmarkCollector
@@ -140,6 +141,7 @@ def _minecraft_spec_for_task(
     artifact_path: Path,
     artifact_sha256: str,
     default_timeout_seconds: int,
+    runtime_mod_jars: Sequence[Path] = (),
 ) -> MinecraftTestSpec:
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
     target_mod_id = str(spec.get("target_mod_id") or spec.get("mod_id") or task.task_id).strip()
@@ -162,6 +164,7 @@ def _minecraft_spec_for_task(
         observation_params=observation_params,
         timeout_seconds=timeout_seconds,
         expect_neighbor_update=expect_neighbor_update,
+        runtime_mod_jars=tuple(runtime_mod_jars),
     )
 
 
@@ -432,6 +435,7 @@ class BenchmarkExecutor:
                 run_state=run_state,
                 final_report=final_report,
                 workspace=workspace,
+                project_snapshot=project_snapshot,
                 benchmark_run_id=benchmark_run_id,
                 filesystem_run_id=run_fragment,
                 minecraft_runner=minecraft_runner or self.minecraft_runner,
@@ -520,6 +524,7 @@ class BenchmarkExecutor:
         run_state: RunState,
         final_report: FinalReport,
         workspace: BenchmarkWorkspace,
+        project_snapshot: ProjectSnapshot,
         benchmark_run_id: str,
         filesystem_run_id: str,
         minecraft_runner: MinecraftTestRunner | None,
@@ -546,11 +551,33 @@ class BenchmarkExecutor:
                 evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                 default_timeout_seconds=execution_limits.process_timeout_seconds,
             )
+        runtime_mod_jars: tuple[Path, ...] = ()
+        if self.gradle_environment is not None:
+            try:
+                runtime_mod_jars = tuple(
+                    dependency.path
+                    for dependency in resolve_runtime_mod_dependencies(
+                        workspace.workspace_root,
+                        gradle_user_home=self.gradle_environment.gradle_user_home,
+                        project_snapshot=project_snapshot,
+                    )
+                )
+            except RuntimeModDependencyResolutionError as exc:
+                return _minecraft_infra_error_result(
+                    task=task,
+                    artifact=artifact,
+                    run_id=filesystem_run_id,
+                    reason=str(exc),
+                    target_jar=target_jar,
+                    evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                    default_timeout_seconds=execution_limits.process_timeout_seconds,
+                )
         primary_spec = _minecraft_spec_for_task(
             task,
             artifact_path=target_jar,
             artifact_sha256=str(artifact.metadata.get("sha256", "")) if isinstance(artifact.metadata, Mapping) else "",
             default_timeout_seconds=execution_limits.process_timeout_seconds,
+            runtime_mod_jars=runtime_mod_jars,
         )
         if runner is None:
             return _minecraft_infra_error_result(

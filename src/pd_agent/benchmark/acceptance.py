@@ -368,6 +368,7 @@ def build_required_minecraft_observation_spec(
         observation_params=dict(raw_observation_params),
         timeout_seconds=int(timeout_seconds),
         expect_neighbor_update=bool(expect_neighbor_update),
+        runtime_mod_jars=base_spec.runtime_mod_jars,
     )
 
 

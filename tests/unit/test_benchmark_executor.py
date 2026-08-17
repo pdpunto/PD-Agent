@@ -15,6 +15,7 @@ from pd_agent.benchmark import (
     BenchmarkExecutor,
     BenchmarkFailureCode,
     BenchmarkFailureOrigin,
+    ResolvedRuntimeModDependency,
     BenchmarkTask,
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
@@ -527,6 +528,71 @@ def test_executor_records_gradle_environment_snapshot(monkeypatch: pytest.Monkey
     assert environment_snapshot["gradle_user_home"].endswith("gradle-user-home")
     assert environment_snapshot["seed_manifest"]["seed_id"] == "gradle-wrapper-caches"
     assert environment_snapshot["seed_manifest"]["identity_hash"] is not None
+
+
+def test_executor_resolves_runtime_mod_dependencies_into_minecraft_specs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", _FakeController)
+    seed_root = _gradle_seed(tmp_path / "seed")
+    execution_root = tmp_path / "exec"
+    execution_root.mkdir()
+    gradle_environment = BenchmarkGradleEnvironment.prepare(
+        seed_root=seed_root,
+        execution_root=execution_root,
+    )
+    runtime_mod_path = gradle_environment.gradle_user_home / "caches" / "modules-2" / "files-2.1" / "net" / "fabricmc" / "fabric-api" / "fabric-api" / "0.141.6+1.21.11" / "fabric-api-0.141.6+1.21.11.jar"
+    runtime_mod_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_mod_path.write_text("jar", encoding="utf-8")
+    monkeypatch.setattr(
+        "pd_agent.benchmark.executor.resolve_runtime_mod_dependencies",
+        lambda *args, **kwargs: (
+            ResolvedRuntimeModDependency(
+                coordinate="net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11",
+                path=runtime_mod_path,
+                sha256="f" * 64,
+                source="build.gradle.kts:1:modImplementation",
+            ),
+        ),
+    )
+    executor = BenchmarkExecutor(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+        gradle_environment=gradle_environment,
+    )
+    task = _task(
+        minecraft=True,
+        required_minecraft_observations=[
+            {
+                "test_id": "block_state_probe:extra",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "observation_params": {"registry_kind": "item", "identifier": "minecraft:diamond_block"},
+            }
+        ],
+    )
+    config = _config(brain_enabled=False)
+    fake_minecraft = _FakeMinecraftRunner(
+        project_root=_workspace_root(execution_root, "attempt-runtime-mods", 1),
+    )
+    scheduled_attempt = type("Attempt", (), {"scheduled_attempt_id": "attempt-runtime-mods", "attempt_index": 1, "repetition_index": 0})()
+
+    result = executor.execute(
+        task,
+        config,
+        scheduled_attempt,
+        fixture_root=_fixture_root(),
+        execution_root=execution_root,
+        minecraft_runner=fake_minecraft,
+    )
+
+    assert result.classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert len(fake_minecraft.calls) == 2
+    assert fake_minecraft.calls[0][0].runtime_mod_jars == (runtime_mod_path,)
+    assert fake_minecraft.calls[1][0].runtime_mod_jars == (runtime_mod_path,)
+    assert result.minecraft_result is not None
+    assert result.minecraft_result.spec.runtime_mod_jars == (runtime_mod_path,)
 
 
 @pytest.mark.parametrize("brain_enabled", [False, True])

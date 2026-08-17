@@ -1,3 +1,5 @@
+import java.io.File
+
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 
@@ -42,8 +44,15 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     val targetJar = file(providers.gradleProperty("pd.agent.targetJar").get())
     val harnessJar = layout.buildDirectory.file("libs/pd-agent-l11-harness.jar")
     val runDir = file(providers.gradleProperty("pd.agent.runDir").get())
+    val runtimeModJars = providers.gradleProperty("pd.agent.runtimeModJars").orNull
+    val runtimeModJarFiles = runtimeModJars
+        ?.split(File.pathSeparatorChar)
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+        ?.map { file(it) }
+        ?: emptyList()
 
-    mods.from(files(targetJar, harnessJar))
+    mods.from(files(targetJar, harnessJar, *runtimeModJarFiles.toTypedArray()))
     this.runDir = runDir
     doFirst {
         runDir.mkdirs()

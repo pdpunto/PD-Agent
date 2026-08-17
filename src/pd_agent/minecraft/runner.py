@@ -240,6 +240,11 @@ class MinecraftTestRunner:
             ("pd.agent.minecraft.expect_neighbor_update", str(spec.expect_neighbor_update).lower()),
             ("pd.agent.minecraft.result_path", evidence_paths.harness_result_json.as_posix()),
             *(
+                (("pd.agent.runtimeModJars", os.pathsep.join(path.as_posix() for path in spec.runtime_mod_jars)),)
+                if spec.runtime_mod_jars
+                else ()
+            ),
+            *(
                 (("pd.agent.observationRegistryKind", registry_kind),)
                 if (registry_kind := _registry_kind_from_params(spec.observation_params)) is not None
                 else ()
@@ -422,6 +427,11 @@ class MinecraftTestRunner:
             f"-Ppd.agent.expectedBlockStateId={expected_block_state_id}",
             f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
+            *(
+                (f"-Ppd.agent.runtimeModJars={os.pathsep.join(path.as_posix() for path in result.spec.runtime_mod_jars)}",)
+                if result.spec.runtime_mod_jars
+                else ()
+            ),
             *(
                 (f"-Ppd.agent.observationRegistryKind={registry_kind}",)
                 if (registry_kind := _registry_kind_from_params(result.spec.observation_params)) is not None
