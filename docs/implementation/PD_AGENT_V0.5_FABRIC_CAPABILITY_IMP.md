@@ -413,7 +413,8 @@ Si hay delta:
 ## Objetivo
 
 Permitir observar las familias v0.5 sin convertir el Harness en parte de
-la solución.
+la solución, incluyendo el transporte explícito de runtime mod
+dependencies del target cuando la task lo requiera.
 
 ## Auditoría
 
@@ -423,6 +424,7 @@ Probar qué puede observar el Harness actual:
 -   target entrypoint;
 -   runtime invocation;
 -   registry/state;
+-   runtime mod dependency loading;
 -   comportamiento server-side.
 
 Clasificar cada familia candidata:
@@ -439,6 +441,10 @@ No sustituir `MinecraftTestRunner`.
 
 No crear un harness genérico nuevo.
 
+La resolución de runtime mod dependencies pertenece a la capa
+project/build o benchmark/build-layer. No se usa `runtimeClasspath` como
+autoridad final si contiene artefactos que no son mods.
+
 ## Forma preferida
 
 Añadir observadores/acciones de runtime genéricos, por ejemplo
@@ -447,6 +453,7 @@ conceptualmente:
 -   lookup de registry;
 -   comprobación de presencia;
 -   invocación server-side;
+-   lista explícita `runtime_mod_jars`;
 -   estado esperado;
 -   resultado estructurado.
 
@@ -454,12 +461,21 @@ No hardcodear task IDs en el runner core.
 
 Task-specific expectations deben venir del spec/acceptance.
 
+El flujo preferido para runtime mods es:
+
+workspace/project
+→ dependency resolver del build layer
+→ `MinecraftTestSpec(runtime_mod_jars=...)`
+→ `MinecraftTestRunner`
+→ `mods.from(files(targetJar, harnessJar, runtimeModJars...))`
+
 ## Archivos previsibles
 
 Dependiendo de auditoría:
 
 -   `src/pd_agent/minecraft/contracts.py`
 -   `src/pd_agent/minecraft/runner.py`
+-   benchmark/build-layer dependency resolver
 -   fixture/harness Java existente
 -   tests Minecraft Batch correspondientes
 
@@ -479,9 +495,40 @@ Preservar:
 
 -   harness actual sigue PASS;
 -   nueva observación genérica;
+-   spec round-trip con `runtime_mod_jars`;
+-   zero / one / multiple runtime dependencies;
+-   deterministic ordering;
+-   duplicate dependency rejected or normalized;
+-   target JAR excluded from runtime dependency list;
+-   missing JAR;
+-   path escape;
+-   SHA evidence por dependency;
+-   dynamic `mods.from(...)`;
+-   legacy target sin dependencies sigue funcionando;
+-   Fabric API target runtime;
+-   CASE A/B con mismo target SHA;
+-   latest.log demuestra dependencies cargadas;
 -   target incorrecto rechazado;
 -   feature FAIL funcional diferenciada de infra;
 -   no helper solución dentro del target.
+
+### Batches de implementación
+
+#### Batch 1
+
+Contrato + resolver de runtime mods + tests unitarios.
+
+#### Batch 2
+
+Wiring dinámico en `MinecraftTestRunner` / `productionServerRun`.
+
+#### Batch 3
+
+A/B runtime real con target SHA fijo.
+
+#### Batch 4
+
+Regresión F4/F6 y evidencia final.
 
 ## Handoff 06
 
@@ -519,6 +566,8 @@ No runtime core.
 Por task:
 
 -   construir runtime observation spec;
+-   resolver o recibir `runtime_mod_jars` desde la capa build/project y
+    pasarlos de forma explícita al spec;
 -   entregar expectations;
 -   leer evidence;
 -   producir PASS/FAIL funcional;
@@ -538,6 +587,8 @@ Posibles:
 -   `src/pd_agent/benchmark/acceptance.py`
 -   `src/pd_agent/benchmark/executor.py`
 -   `src/pd_agent/minecraft/contracts.py`
+-   `src/pd_agent/benchmark/dependencies.py` o helper equivalente si el
+    repo ya no expone una resolución más natural;
 -   tests benchmark/Minecraft
 
 La ruta exacta depende del repo real.
@@ -545,6 +596,19 @@ La ruta exacta depende del repo real.
 ## Tests
 
 -   adapter deterministic;
+-   spec consume runtime_mod_jars;
+-   zero / one / multiple runtime dependencies;
+-   deterministic ordering;
+-   duplicate dependency;
+-   target JAR excluded from dependency list;
+-   missing JAR;
+-   path escape;
+-   SHA evidence;
+-   dynamic mods.from wiring;
+-   legacy target without extra dependencies still works;
+-   Fabric API target runtime;
+-   CASE A/B con mismo target SHA;
+-   latest.log demuestra runtime mods cargados;
 -   PASS real;
 -   functional FAIL;
 -   agent-caused non-evaluable failure;

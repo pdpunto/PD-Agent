@@ -292,13 +292,47 @@ El Harness debe recibir:
 
 -   artifact target;
 -   target mod id;
+-   runtime mod dependencies explicitamente resueltas;
 -   versiones;
 -   test id;
 -   timeout;
 -   acceptance/runtime contract;
 -   environment reproducible.
 
-### 13.1 Extension rule
+La capa project/build es la autoridad para resolver las runtime mod
+dependencies del target. El Harness no interpreta `build.gradle` ni
+deduce dependencias por heuristica.
+
+### 13.1 Runtime mod dependency contract
+
+`MinecraftTestSpec` puede transportar una lista nueva `runtime_mod_jars`
+con cero o mas JARs.
+
+Semantica:
+
+-   separada del `target_jar`;
+-   paths relativos o confinados;
+-   orden determinista;
+-   duplicados prohibidos o normalizados de forma determinista;
+-   el `target_jar` no debe aparecer como dependencia runtime;
+-   missing, unreadable o fuera de confinamiento -> `INFRA_ERROR` antes
+    del launch.
+
+La lista debe persistir evidencia por dependencia:
+
+-   path;
+-   SHA-256;
+-   provenance/source cuando este disponible.
+
+Si el target no tiene runtime mod dependencies adicionales, la lista
+puede ser vacia.
+
+`runtimeClasspath` no es autoridad final por si mismo; si el repo expone
+una configuracion mas precisa para mod artifacts runtime, esa es la
+preferida. Si no existe, la capa build/project debe filtrar el conjunto
+resoluble de JARs de mods y excluir las librerias no mod.
+
+### 13.2 Extension rule
 
 Solo se autoriza extensión mínima si una feature representativa no puede
 observarse con el contrato actual.
@@ -323,6 +357,8 @@ Responsabilidad permitida:
 
 -   describir qué comportamiento observar;
 -   preparar spec de runtime;
+-   resolver o recibir la lista `runtime_mod_jars` desde la capa
+    project/build y pasarla de forma explícita al spec;
 -   leer evidencia;
 -   decidir functional PASS/FAIL.
 
@@ -397,6 +433,7 @@ La identidad debe incluir al menos:
 
 -   source revision/hash;
 -   fixture/project hash;
+-   runtime mod dependency set hash/provenance;
 -   Minecraft version;
 -   Fabric Loader;
 -   Loom;
@@ -511,6 +548,7 @@ Cada run debe dejar trazabilidad suficiente:
 
 -   run/config/task identity;
 -   project baseline identity;
+-   runtime mod dependencies resueltas;
 -   inspected files;
 -   retained context metadata;
 -   tool calls/results;
