@@ -156,6 +156,47 @@ F6-T1 runtime regression also passed with the current runtime dependency
 contract. The Signal Charm item was observed with Fabric API resolved by the
 general resolver and loaded by Fabric Loader.
 
-F4 is implemented and live validated. F6 reference satisfiability is
-validated, while F6 remains **OPEN** pending T3. T3 was not executed or
-modified in this validation.
+F4 is implemented and live validated. F6 reference satisfiability is now
+validated for T1, T2, and T3. F6 is **PASS** and closed; F7 remains the next
+phase and is not started by this validation.
+
+### F6-T3 HOST Reference Evidence
+
+The corrected temporary T3 reference was validated from a normal Windows host
+without modifying the canonical project, dataset, Harness, or product code.
+
+- reference source tree hash:
+  `4d33618c7cf0122f3ee178c11a807816d4442c7d62012f5170328c1d11b53b98`;
+- Gradle seed identity: `3f45504a92b4c3ca6a0aff10933f8f193104b5fec08fbdfab50a285900f0e665`;
+- Gradle seed components: `11742`;
+- build: PASS;
+- artifact classification: VALID;
+- artifact SHA-256:
+  `8be9d6453b00deaa0d76e031fdb7278f111734b85dd34871fd099d76104becc2`;
+- runtime dependency: `net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11`;
+- runtime dependency SHA-256:
+  `bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f`;
+- dependency provenance: `build.gradle.kts:17:modImplementation`;
+- block observation `REGISTRY_ENTRY_PRESENT` for
+  `examplemod:server_core`: PASS;
+- item observation `REGISTRY_ENTRY_PRESENT` for
+  `examplemod:server_core`: PASS;
+- both observations reported `target_loaded=true`,
+  `target_origin_resolved=true`, `target_sha_match=true`,
+  `server_started=true`, `shutdown_requested=true`, and
+  `process_timed_out=false`;
+- Fabric API loaded: true; `IllegalAccessError`: false for both observations;
+- required resource acceptance: PASS with no violations;
+- global acceptance: PASS.
+
+Evidence roots:
+
+- host execution:
+  `C:\Users\Usuario\AppData\Local\Temp\pd-agent-f6-t3-host-20260821-193201-256-669`;
+- block observation:
+  `C:\Users\Usuario\AppData\Local\Temp\pd-agent-f4-f6-t3-ab-20260821-193318-707-947`;
+- item observation:
+  `C:\Users\Usuario\AppData\Local\Temp\pd-agent-f4-f6-t3-ab-20260821-193441-432-139`.
+
+F6 final status: `F6-T1 PASS`, `F6-T2 PASS`, `F6-T3 PASS`,
+`V0_5_F6_REFERENCE_SATISFIABILITY_PASS`.
