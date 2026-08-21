@@ -82,7 +82,7 @@ def _fake_mod_jar(base: Path, *, group: str, artifact: str, version: str, hash_d
         / "caches"
         / "modules-2"
         / "files-2.1"
-        / Path(*group.split("."))
+        / group
         / artifact
         / version
         / hash_dir
@@ -105,7 +105,7 @@ def _fake_plain_jar(base: Path, *, group: str, artifact: str, version: str, hash
         / "caches"
         / "modules-2"
         / "files-2.1"
-        / Path(*group.split("."))
+        / group
         / artifact
         / version
         / hash_dir

@@ -179,13 +179,12 @@ def _locate_runtime_mod_jar(
     artifact: str,
     version: str,
 ) -> Path | None:
-    group_root = Path(*group.split("."))
     files_root = (
         gradle_user_home
         / "caches"
         / "modules-2"
         / "files-2.1"
-        / group_root
+        / group
         / artifact
         / version
     )
