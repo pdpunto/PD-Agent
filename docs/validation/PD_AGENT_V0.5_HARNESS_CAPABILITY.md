@@ -202,3 +202,26 @@ It does **not** call:
 
 The Minecraft harness is minimally extended and valid for v0.5 observation labels without a redesign.
 F4 is implemented and validated with real Minecraft PASS and real Minecraft functional FAIL evidence.
+
+## F4 Runtime Dependency Closure
+
+The v0.5 runtime dependency contract is now live validated. The project/build
+layer resolves runtime mod dependencies and passes them through
+`MinecraftTestSpec.runtime_mod_jars` to `MinecraftTestRunner`, which preserves
+the existing security and target-identity gates.
+
+The causal A/B validation used the same frozen target JAR in both runs:
+
+- Without runtime dependencies, Fabric API and
+  `fabric-transitive-access-wideners-v1` were absent and target initialization
+  produced the expected `IllegalAccessError`.
+- With the resolver output, Fabric API, the transitive access wideners, and
+  the relevant Fabric API modules were loaded. The block and item registry
+  observations both passed with target identity and clean shutdown gates.
+
+The resolver group-path defect was corrected to use the Gradle layout
+`files-2.1/<group>/<artifact>/<version>`, preserving the complete Maven group
+as one path segment. Batch 4 regression validation passed, including the F6-T1
+Signal Charm runtime regression.
+
+F4 status: **IMPLEMENTED + LIVE VALIDATED + REGRESSION PASS**.

@@ -131,3 +131,31 @@ No provider API or live benchmark run was needed for this review.
 ## Final Verdict
 
 F6 dataset freeze complete and compatible with the existing benchmark infrastructure.
+
+## Post-freeze Reference Satisfiability Validation
+
+The v0.5.4 reference validation was completed against the frozen target
+contract without changing the dataset tasks. F6-T2 used the positive Marble
+Lantern artifact with SHA
+`5bc5005f390e80173bfd54f659b49af7656b345161690dc35a4ee0e558b8a843`.
+
+Positive reference evidence:
+
+- build: PASS;
+- artifact classification: VALID;
+- block `REGISTRY_ENTRY_PRESENT` for `examplemod:marble_lantern`: PASS;
+- item `REGISTRY_ENTRY_PRESENT` for `examplemod:marble_lantern`: PASS;
+- resource acceptance: PASS;
+- global acceptance: PASS.
+
+Negative language evidence kept block and item behavior valid but changed the
+required language resource. Resource acceptance and global acceptance then
+failed as designed, confirming that the resource checker is meaningful.
+
+F6-T1 runtime regression also passed with the current runtime dependency
+contract. The Signal Charm item was observed with Fabric API resolved by the
+general resolver and loaded by Fabric Loader.
+
+F4 is implemented and live validated. F6 reference satisfiability is
+validated, while F6 remains **OPEN** pending T3. T3 was not executed or
+modified in this validation.
