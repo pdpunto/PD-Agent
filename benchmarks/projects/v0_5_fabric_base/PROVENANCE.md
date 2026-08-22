@@ -25,8 +25,10 @@
 
 ## Identity
 
-- Tree hash algorithm: `sha256-tree-v1`
-- Tree hash: `0b663a8712b72f194aa6d09b4608e57a102a8089559067fcf3a579dd0ba21706`
+- Tree hash algorithm: `sha256-tree-v2`
+- v2 canonicalizes CRLF/CR to LF only for the documented text extensions and
+  the extensionless `gradlew` script; all other file bytes are hashed exactly.
+- v1 remains available for historical evidence and is not reinterpreted.
 
 ## Rebase Note
 

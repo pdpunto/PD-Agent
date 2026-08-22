@@ -5,7 +5,7 @@ from textwrap import dedent
 from pathlib import Path
 
 from pd_agent.benchmark import BenchmarkCatalog, BenchmarkDataset, BenchmarkTask
-from pd_agent.benchmark.workspace import compute_fixture_identity
+from pd_agent.benchmark.workspace import LEGACY_FIXTURE_IDENTITY_ALGORITHM, compute_fixture_identity
 
 
 def _repo_root() -> Path:
@@ -82,7 +82,10 @@ def test_v0_4_hardened_dataset_is_frozen_and_loaded() -> None:
     assert task_b003.acceptance.spec["expected_neighbor_update"] is True
     assert task_b003.acceptance.spec["neighbor_probe_block"] == "neighbor_update_probe"
 
-    expected_hash = compute_fixture_identity(root / "fixtures" / "B001-v1")
+    expected_hash = compute_fixture_identity(
+        root / "fixtures" / "B001-v1",
+        algorithm=LEGACY_FIXTURE_IDENTITY_ALGORITHM,
+    )
     assert catalog.fixture_identities[("B001", "1")] == expected_hash
     assert catalog.fixture_identities[("B002", "2")] == expected_hash
     assert catalog.fixture_identities[("B003", "2")] == expected_hash

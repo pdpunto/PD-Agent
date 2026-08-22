@@ -8,7 +8,7 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 
 ROOT = Path(__file__).resolve().parents[2]
 PROJECT_BASE = ROOT / "benchmarks" / "projects" / "v0_5_fabric_base"
-EXPECTED_PROJECT_BASE_IDENTITY = "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3"
+EXPECTED_PROJECT_BASE_IDENTITY = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 
 
 def test_v0_5_project_base_is_ready() -> None:

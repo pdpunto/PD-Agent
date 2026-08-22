@@ -10,7 +10,7 @@ from pd_agent.benchmark.workspace import compute_fixture_identity
 ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks"
 PROJECT_BASE = BENCHMARK_ROOT / "projects" / "v0_5_fabric_base"
-EXPECTED_PROJECT_BASE_IDENTITY = "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3"
+EXPECTED_PROJECT_BASE_IDENTITY = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 DATASET_ID = "PD_AGENT_BENCHMARK_DATASET_V0.5_5"
 DATASET_VERSION = "0.5.5"
 TASK_VERSION = "5"
@@ -60,7 +60,7 @@ def test_v0_5_dataset_tasks_resolve_to_the_pinned_project_base() -> None:
         task = catalog.task_for(task_id, TASK_VERSION)
 
         assert task.fixture.fixture_ref == "projects/v0_5_fabric_base"
-        assert task.fixture.identity_algorithm == "sha256-tree-v1"
+        assert task.fixture.identity_algorithm == "sha256-tree-v2"
         assert task.fixture.fixture_identity == expected_hash
         assert task.validation.build is True
         assert task.validation.artifact is True

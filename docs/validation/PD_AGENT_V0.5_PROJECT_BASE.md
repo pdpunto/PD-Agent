@@ -52,8 +52,12 @@ Date: 2026-08-16
 
 ## Identity
 
-- Tree hash algorithm: `sha256-tree-v1`
-- Tree hash: `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`
+- Tree hash algorithm: `sha256-tree-v2`
+- Tree hash: `3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396`
+
+`sha256-tree-v2` uses the existing path ordering and ignore rules, canonical
+LF for admitted text files, and exact bytes for binary or unlisted files.
+`sha256-tree-v1` remains supported for historical manifests and evidence.
 
 ## Wrapper
 

@@ -12,7 +12,12 @@ from pd_agent.core import SecurityViolation, ToolExecutionError, ToolValidationE
 from pd_agent.tools import SecurePathResolver
 
 from .models import BenchmarkDataset, BenchmarkSchemaError, BenchmarkTask, BenchmarkTaskReference
-from .workspace import FIXTURE_IDENTITY_ALGORITHM, BenchmarkWorkspaceError, compute_fixture_identity
+from .workspace import (
+    FIXTURE_IDENTITY_ALGORITHM,
+    SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS,
+    BenchmarkWorkspaceError,
+    compute_fixture_identity,
+)
 
 
 class BenchmarkCatalogError(ValueError):
@@ -145,15 +150,16 @@ class BenchmarkCatalog:
             task_path_index[key] = path
             tasks.append(task)
 
-            try:
-                fixture_path = resolver.resolve_existing_directory(task.fixture.fixture_ref)
-                fixture_hash = compute_fixture_identity(fixture_path)
-            except (BenchmarkWorkspaceError, SecurityViolation, ToolExecutionError, ToolValidationError) as exc:
-                raise BenchmarkCatalogError(f"invalid fixture reference for {path}: {exc}") from exc
-            if task.fixture.identity_algorithm is not None and task.fixture.identity_algorithm.casefold() != FIXTURE_IDENTITY_ALGORITHM:
+            identity_algorithm = (task.fixture.identity_algorithm or FIXTURE_IDENTITY_ALGORITHM).casefold()
+            if identity_algorithm not in SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS:
                 raise BenchmarkCatalogError(
                     f"unsupported fixture identity algorithm for {path}: {task.fixture.identity_algorithm}"
                 )
+            try:
+                fixture_path = resolver.resolve_existing_directory(task.fixture.fixture_ref)
+                fixture_hash = compute_fixture_identity(fixture_path, algorithm=identity_algorithm)
+            except (BenchmarkWorkspaceError, SecurityViolation, ToolExecutionError, ToolValidationError) as exc:
+                raise BenchmarkCatalogError(f"invalid fixture reference for {path}: {exc}") from exc
             if task.fixture.fixture_identity is not None and task.fixture.fixture_identity != fixture_hash:
                 raise BenchmarkCatalogError(
                     f"fixture identity mismatch for {path}: expected {task.fixture.fixture_identity}, got {fixture_hash}"

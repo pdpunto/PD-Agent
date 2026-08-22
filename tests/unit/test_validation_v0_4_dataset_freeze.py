@@ -32,7 +32,7 @@ def test_compute_fixture_identity_helper_uses_real_import(monkeypatch: pytest.Mo
     runner = _load_runner()
     calls: list[Path] = []
 
-    def fake_compute(path: Path) -> str:
+    def fake_compute(path: Path, *, algorithm: str | None = None) -> str:
         calls.append(path)
         return "sha"
 

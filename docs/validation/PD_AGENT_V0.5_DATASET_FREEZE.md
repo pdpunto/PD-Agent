@@ -41,7 +41,7 @@ Audited against:
 - Task count: `3`
 - Task ids: `F6-T1`, `F6-T2`, `F6-T3`
 - Project base ref: `projects/v0_5_fabric_base`
-- Project base tree hash: `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`
+- Project base tree hash (`sha256-tree-v2`): `3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396`
 
 ## Revision History
 

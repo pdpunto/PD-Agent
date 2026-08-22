@@ -27,7 +27,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import validate_v0_1 as base
-from pd_agent.benchmark.workspace import compute_fixture_identity
+from pd_agent.benchmark.workspace import LEGACY_FIXTURE_IDENTITY_ALGORITHM, compute_fixture_identity
 from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec
 
 
@@ -228,7 +228,10 @@ def _harness_source_path(harness_root: Path) -> Path:
 
 
 def _case_fixture_identity(task_id: str, version: str) -> str:
-    return compute_fixture_identity(_fixture_source(task_id, version))
+    return compute_fixture_identity(
+        _fixture_source(task_id, version),
+        algorithm=LEGACY_FIXTURE_IDENTITY_ALGORITHM,
+    )
 
 
 def _assert_fixture_identity_matches_manifest(task_id: str, version: str) -> None:
@@ -591,7 +594,7 @@ def _validate_control(
     source_path = _target_source_path(target_root)
     before_text = _read_text(source_path)
     before_hash = _sha256_text(before_text)
-    before_identity = compute_fixture_identity(target_root)
+    before_identity = compute_fixture_identity(target_root, algorithm=LEGACY_FIXTURE_IDENTITY_ALGORITHM)
 
     if spec.source_edit is not None:
         spec.source_edit(target_root)
@@ -600,7 +603,7 @@ def _validate_control(
 
     after_text = _read_text(source_path)
     after_hash = _sha256_text(after_text)
-    after_identity = compute_fixture_identity(target_root)
+    after_identity = compute_fixture_identity(target_root, algorithm=LEGACY_FIXTURE_IDENTITY_ALGORITHM)
     source_diff = "\n".join(
         difflib.unified_diff(
             before_text.splitlines(),

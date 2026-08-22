@@ -55,6 +55,8 @@ from .workspace import (
     BenchmarkWorkspace,
     BenchmarkWorkspaceError,
     FIXTURE_IDENTITY_ALGORITHM,
+    LEGACY_FIXTURE_IDENTITY_ALGORITHM,
+    SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS,
     compute_fixture_identity,
     prepare_workspace,
 )
@@ -112,6 +114,8 @@ __all__ = [
     "BenchmarkWorkspace",
     "BenchmarkWorkspaceError",
     "FIXTURE_IDENTITY_ALGORITHM",
+    "LEGACY_FIXTURE_IDENTITY_ALGORITHM",
+    "SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS",
     "compute_fixture_identity",
     "SCHEMA_VERSION",
     "prepare_workspace",

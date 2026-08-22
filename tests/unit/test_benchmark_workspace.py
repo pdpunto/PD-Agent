@@ -11,6 +11,7 @@ from pd_agent.benchmark import (
     compute_fixture_identity,
     prepare_workspace,
 )
+from pd_agent.benchmark.workspace import LEGACY_FIXTURE_IDENTITY_ALGORITHM
 
 
 def _make_fixture(root: Path) -> Path:
@@ -54,6 +55,41 @@ def test_source_edit_changes_hash(tmp_path: Path) -> None:
     after = compute_fixture_identity(fixture)
 
     assert before != after
+
+
+def test_v2_normalizes_text_eol_but_not_binary_bytes(tmp_path: Path) -> None:
+    lf = tmp_path / "lf"
+    crlf = tmp_path / "crlf"
+    for root in (lf, crlf):
+        root.mkdir()
+        (root / "script.sh").write_bytes(b"#!/bin/sh\nvalue\n")
+        (root / "payload.bin").write_bytes(b"prefix\r\n\x00suffix")
+    (crlf / "script.sh").write_bytes(b"#!/bin/sh\r\nvalue\r\n")
+
+    assert compute_fixture_identity(lf) == compute_fixture_identity(crlf)
+    (crlf / "payload.bin").write_bytes(b"prefix\r\n\x00changed")
+    assert compute_fixture_identity(lf) != compute_fixture_identity(crlf)
+
+
+def test_v1_remains_physical_bytes_and_workspace_persists_algorithm(tmp_path: Path) -> None:
+    fixture = _make_fixture(tmp_path)
+    source = fixture / "src" / "main" / "java" / "dev" / "pdpunto" / "Example.java"
+    source.write_bytes(source.read_bytes().replace(b"\n", b"\r\n"))
+
+    assert compute_fixture_identity(fixture, algorithm=LEGACY_FIXTURE_IDENTITY_ALGORITHM) != compute_fixture_identity(
+        fixture
+    )
+    benchmark_root = tmp_path / "benchmarks"
+    benchmark_root.mkdir()
+    workspace = prepare_workspace(
+        fixture,
+        benchmark_root,
+        run_id="portable",
+        attempt_id="v2",
+        identity_algorithm="sha256-tree-v2",
+    )
+    assert BenchmarkWorkspace.from_dict(workspace.to_dict()).identity_algorithm == "sha256-tree-v2"
+    workspace.cleanup()
 
 
 def test_ignored_outputs_do_not_change_hash(tmp_path: Path) -> None:

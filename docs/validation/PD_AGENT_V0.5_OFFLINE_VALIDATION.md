@@ -20,7 +20,7 @@ executed for this validation.
 - dataset version: `0.5.5`;
 - task count: `3`;
 - project base identity:
-  `43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3`;
+  `3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396`;
 - project inspector: `READY`.
 
 ## Gradle Environment

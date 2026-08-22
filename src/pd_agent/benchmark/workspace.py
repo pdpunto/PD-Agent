@@ -36,7 +36,18 @@ IGNORED_FIXTURE_FILES = {
     "thumbs.db",
 }
 
-FIXTURE_IDENTITY_ALGORITHM = "sha256-tree-v1"
+LEGACY_FIXTURE_IDENTITY_ALGORITHM = "sha256-tree-v1"
+FIXTURE_IDENTITY_ALGORITHM = "sha256-tree-v2"
+SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS = frozenset(
+    {LEGACY_FIXTURE_IDENTITY_ALGORITHM, FIXTURE_IDENTITY_ALGORITHM}
+)
+_TEXT_FIXTURE_SUFFIXES = frozenset(
+    {
+        ".bat", ".cmd", ".gradle", ".java", ".json", ".kts", ".md",
+        ".properties", ".sh", ".txt", ".xml", ".yaml", ".yml",
+    }
+)
+_TEXT_FIXTURE_FILENAMES = frozenset({"gradlew"})
 VALID_BENCHMARK_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
 
 
@@ -91,18 +102,35 @@ def _iter_canonical_files(root: Path) -> Iterator[tuple[Path, Path]]:
             yield candidate.relative_to(root), candidate
 
 
-def compute_fixture_identity(fixture_root: Path) -> str:
-    """Compute canonical SHA-256 over source files in a fixture tree."""
+def _validate_identity_algorithm(algorithm: str | None) -> str:
+    selected = (algorithm or FIXTURE_IDENTITY_ALGORITHM).casefold()
+    if selected not in SUPPORTED_FIXTURE_IDENTITY_ALGORITHMS:
+        raise BenchmarkWorkspaceError(f"unsupported fixture identity algorithm: {algorithm}")
+    return selected
+
+
+def _canonical_file_bytes(relative_path: Path, file_path: Path, *, algorithm: str) -> bytes:
+    content = file_path.read_bytes()
+    if algorithm == LEGACY_FIXTURE_IDENTITY_ALGORITHM:
+        return content
+    if relative_path.name.casefold() in _TEXT_FIXTURE_FILENAMES or relative_path.suffix.casefold() in _TEXT_FIXTURE_SUFFIXES:
+        return content.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return content
+
+
+def compute_fixture_identity(fixture_root: Path, *, algorithm: str | None = None) -> str:
+    """Compute SHA-256 over a fixture tree using an explicit identity policy."""
 
     root = Path(fixture_root).resolve(strict=True)
     if not root.is_dir():
         raise BenchmarkWorkspaceError("fixture root must be an existing directory")
 
+    selected_algorithm = _validate_identity_algorithm(algorithm)
     hasher = hashlib.sha256()
     for relative_path, file_path in _iter_canonical_files(root):
         hasher.update(relative_path.as_posix().encode("utf-8"))
         hasher.update(b"\0")
-        hasher.update(file_path.read_bytes())
+        hasher.update(_canonical_file_bytes(relative_path, file_path, algorithm=selected_algorithm))
         hasher.update(b"\0")
     return hasher.hexdigest()
 
@@ -171,6 +199,7 @@ class BenchmarkWorkspace:
     workspace_hash_initial: str
     run_id: str
     attempt_id: str
+    identity_algorithm: str = FIXTURE_IDENTITY_ALGORITHM
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     preserve_on_cleanup: bool = False
 
@@ -181,6 +210,7 @@ class BenchmarkWorkspace:
         object.__setattr__(self, "workspace_hash_initial", str(self.workspace_hash_initial))
         object.__setattr__(self, "run_id", str(self.run_id).strip())
         object.__setattr__(self, "attempt_id", str(self.attempt_id).strip())
+        object.__setattr__(self, "identity_algorithm", _validate_identity_algorithm(self.identity_algorithm))
         _validate_benchmark_id(self.run_id, field_name="run_id")
         _validate_benchmark_id(self.attempt_id, field_name="attempt_id")
         object.__setattr__(
@@ -204,6 +234,7 @@ class BenchmarkWorkspace:
             "workspace_hash_initial": self.workspace_hash_initial,
             "run_id": self.run_id,
             "attempt_id": self.attempt_id,
+            "identity_algorithm": self.identity_algorithm,
             "created_at": self.created_at.isoformat(),
             "preserve_on_cleanup": self.preserve_on_cleanup,
         }
@@ -218,6 +249,7 @@ class BenchmarkWorkspace:
             workspace_hash_initial=str(data["workspace_hash_initial"]),
             run_id=str(data["run_id"]),
             attempt_id=str(data["attempt_id"]),
+            identity_algorithm=str(data.get("identity_algorithm", LEGACY_FIXTURE_IDENTITY_ALGORITHM)),
             created_at=datetime.fromisoformat(str(data["created_at"])),
             preserve_on_cleanup=bool(data.get("preserve_on_cleanup", False)),
         )
@@ -244,6 +276,7 @@ def prepare_workspace(
     run_id: str,
     attempt_id: str,
     preserve_on_cleanup: bool = False,
+    identity_algorithm: str = FIXTURE_IDENTITY_ALGORITHM,
 ) -> BenchmarkWorkspace:
     """Copy canonical fixture into isolated workspace and record hashes."""
 
@@ -255,7 +288,8 @@ def prepare_workspace(
     if not benchmark_root.is_dir():
         raise BenchmarkWorkspaceError("benchmark_root must be an existing directory")
 
-    canonical_hash = compute_fixture_identity(canonical_root)
+    selected_algorithm = _validate_identity_algorithm(identity_algorithm)
+    canonical_hash = compute_fixture_identity(canonical_root, algorithm=selected_algorithm)
     validated_run_id = _validate_benchmark_id(run_id, field_name="run_id")
     validated_attempt_id = _validate_benchmark_id(attempt_id, field_name="attempt_id")
     workspace_root = _expected_workspace_root(
@@ -268,7 +302,7 @@ def prepare_workspace(
         raise BenchmarkWorkspaceError(f"workspace already exists for run_id={validated_run_id!r} attempt_id={validated_attempt_id!r}")
     workspace_root.parent.mkdir(parents=True, exist_ok=True)
     _copy_canonical_tree(canonical_root, workspace_root)
-    workspace_hash = compute_fixture_identity(workspace_root)
+    workspace_hash = compute_fixture_identity(workspace_root, algorithm=selected_algorithm)
     if workspace_hash != canonical_hash:
         raise BenchmarkWorkspaceError("workspace copy does not match canonical fixture")
 
@@ -280,5 +314,6 @@ def prepare_workspace(
         workspace_hash_initial=workspace_hash,
         run_id=run_id,
         attempt_id=attempt_id,
+        identity_algorithm=selected_algorithm,
         preserve_on_cleanup=preserve_on_cleanup,
     )

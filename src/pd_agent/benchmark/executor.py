@@ -299,6 +299,7 @@ def _execution_environment_snapshot(
         "config": config.to_dict(),
         "benchmark_root": str(workspace.benchmark_root),
         "workspace_root": str(workspace.workspace_root),
+        "fixture_identity_algorithm": workspace.identity_algorithm,
         "canonical_fixture_hash": workspace.canonical_hash_before,
         "workspace_hash_initial": workspace.workspace_hash_initial,
         "project_snapshot": project_snapshot.to_dict(),
@@ -385,6 +386,7 @@ class BenchmarkExecutor:
             run_id=run_fragment,
             attempt_id=f"attempt-{scheduled_attempt.attempt_index:03d}",
             preserve_on_cleanup=preserve_workspace,
+            identity_algorithm=task.fixture.identity_algorithm,
         )
         resolved_runtime_mod_dependencies: tuple[ResolvedRuntimeModDependency, ...] = ()
 
@@ -483,7 +485,10 @@ class BenchmarkExecutor:
                         "runtime_mod_dependencies": list(runtime_mod_dependency_records),
                     },
                 )
-            fixture_hash_after = compute_fixture_identity(workspace.source_fixture)
+            fixture_hash_after = compute_fixture_identity(
+                workspace.source_fixture,
+                algorithm=workspace.identity_algorithm,
+            )
             contamination_reason = None
             if fixture_hash_after != workspace.canonical_hash_before:
                 contamination_reason = (

@@ -7,8 +7,8 @@
   "fixture": {
     "schema_version": 1,
     "fixture_ref": "projects/v0_5_fabric_base",
-    "fixture_identity": "43fa87dbff8a1602d61755cba17fedcae155b08f2763cf7b197d3e56596c43e3",
-    "identity_algorithm": "sha256-tree-v1",
+    "fixture_identity": "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396",
+    "identity_algorithm": "sha256-tree-v2",
     "metadata": {
       "project_base": "benchmarks/projects/v0_5_fabric_base",
       "source_kind": "pinned_project_base",
