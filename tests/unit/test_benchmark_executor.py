@@ -20,7 +20,8 @@ from pd_agent.benchmark import (
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
 )
-from pd_agent.benchmark.executor import _default_context_manager, _filesystem_safe_fragment
+from pd_agent.benchmark.executor import _default_context_manager, _filesystem_safe_fragment, _minecraft_spec_for_task, _target_mod_id_for_task
+from pd_agent.benchmark.models import BenchmarkAcceptanceSpec
 from pd_agent.brain import (
     CompatibilityStatus,
     KnowledgeEnvironment,
@@ -380,6 +381,110 @@ def _gradle_seed(root: Path) -> Path:
 
 def _context_source_names(manager) -> tuple[str, ...]:  # noqa: ANN001
     return tuple(binding.name for binding in manager._sources)  # noqa: SLF001
+
+
+def _task_with_acceptance_spec(spec: dict[str, object]) -> BenchmarkTask:
+    task = _task()
+    acceptance = BenchmarkAcceptanceSpec(
+        acceptance_type=task.acceptance.acceptance_type,
+        spec=spec,
+        notes=task.acceptance.notes,
+    )
+    return task.__class__(
+        task_id=task.task_id,
+        task_version=task.task_version,
+        description=task.description,
+        prompt=task.prompt,
+        fixture=task.fixture,
+        validation=task.validation,
+        acceptance=acceptance,
+        environment=task.environment,
+        tags=task.tags,
+        notes=task.notes,
+    )
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        (
+            {
+                "target_mod_id": "explicit-target",
+                "mod_id": "secondary-target",
+                "preservation_invariants": {"mod_id": "preserved-target"},
+            },
+            "explicit-target",
+        ),
+        (
+            {"mod_id": "secondary-target", "preservation_invariants": {"mod_id": "preserved-target"}},
+            "secondary-target",
+        ),
+        ({"preservation_invariants": {"mod_id": "preserved-target"}}, "preserved-target"),
+    ],
+)
+def test_target_mod_id_resolution_uses_contract_precedence(spec: dict[str, object], expected: str) -> None:
+    task = _task_with_acceptance_spec(spec)
+
+    assert _target_mod_id_for_task(task) == expected
+    assert _minecraft_spec_for_task(
+        task,
+        artifact_path=Path("build/libs/target.jar"),
+        artifact_sha256="a" * 64,
+        default_timeout_seconds=30,
+    ).target_mod_id == expected
+
+
+def test_target_mod_id_resolution_fails_closed_without_contract_value() -> None:
+    task = _task_with_acceptance_spec({})
+
+    with pytest.raises(ValueError, match="missing target mod id"):
+        _target_mod_id_for_task(task)
+
+    with pytest.raises(ValueError, match="missing target mod id"):
+        _minecraft_spec_for_task(
+            task,
+            artifact_path=Path("build/libs/target.jar"),
+            artifact_sha256="a" * 64,
+            default_timeout_seconds=30,
+        )
+
+
+def test_v0_5_tasks_resolve_examplemod_without_task_id_fallback() -> None:
+    from pd_agent.benchmark import BenchmarkCatalog
+
+    catalog = BenchmarkCatalog.load(Path("benchmarks"))
+    dataset = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_5", "0.5.5")
+    for reference in dataset.tasks:
+        task = catalog.task_for(reference.task_id, reference.task_version)
+        assert task.task_id != "examplemod"
+        assert _target_mod_id_for_task(task) == "examplemod"
+
+
+def test_required_minecraft_observations_reuse_primary_target_mod_id() -> None:
+    task = _task_with_acceptance_spec(
+        {
+            "preservation_invariants": {"mod_id": "examplemod"},
+            "required_minecraft_observations": [
+                {
+                    "test_id": "secondary",
+                    "observation_type": "REGISTRY_ENTRY_PRESENT",
+                    "observation_params": {"registry_kind": "item", "identifier": "examplemod:item"},
+                }
+            ],
+        }
+    )
+    primary = _minecraft_spec_for_task(
+        task,
+        artifact_path=Path("build/libs/target.jar"),
+        artifact_sha256="a" * 64,
+        default_timeout_seconds=30,
+    )
+    from pd_agent.benchmark.acceptance import evaluate_required_minecraft_observations
+
+    evaluation = evaluate_required_minecraft_observations(primary, task.acceptance.spec)
+
+    assert evaluation.passed
+    assert evaluation.required_observations[0].target_mod_id == primary.target_mod_id
 
 
 def test_default_context_manager_brain_off_preserves_external_context_source() -> None:

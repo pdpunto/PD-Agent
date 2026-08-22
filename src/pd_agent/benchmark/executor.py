@@ -139,6 +139,27 @@ def _task_knowledge_needs(task: BenchmarkTask, *, environment: KnowledgeEnvironm
     return ()
 
 
+def _target_mod_id_for_task(task: BenchmarkTask) -> str:
+    """Resolve the expected Fabric mod id from the acceptance contract."""
+
+    spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
+    preservation = spec.get("preservation_invariants")
+    preservation_mapping = preservation if isinstance(preservation, Mapping) else {}
+    candidates = (
+        spec.get("target_mod_id"),
+        spec.get("mod_id"),
+        preservation_mapping.get("mod_id"),
+    )
+    for candidate in candidates:
+        value = str(candidate).strip() if candidate is not None else ""
+        if value:
+            return value
+    raise ValueError(
+        "acceptance contract missing target mod id: expected target_mod_id, mod_id, "
+        "or preservation_invariants.mod_id"
+    )
+
+
 def _minecraft_spec_for_task(
     task: BenchmarkTask,
     *,
@@ -148,7 +169,7 @@ def _minecraft_spec_for_task(
     runtime_mod_jars: Sequence[Path] = (),
 ) -> MinecraftTestSpec:
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
-    target_mod_id = str(spec.get("target_mod_id") or spec.get("mod_id") or task.task_id).strip()
+    target_mod_id = _target_mod_id_for_task(task)
     test_id = str(spec.get("test_id") or f"{task.task_id}:{task.task_version}").strip()
     observation_type = str(spec.get("observation_type") or MinecraftObservationType.LEGACY_BLOCK_STATE.value).strip()
     observation_params = spec.get("observation_params")
