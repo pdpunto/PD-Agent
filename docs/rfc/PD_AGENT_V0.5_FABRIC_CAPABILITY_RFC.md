@@ -145,6 +145,30 @@ Si el proyecto tiene múltiples módulos Fabric ambiguos:
 -   se mantiene `BLOCKED`;
 -   no se añade heurística agresiva.
 
+### 6.1 Resource roots y dominios de paths
+
+`ProjectSnapshot.resource_roots`, producido por `ProjectInspector`, es la
+autoridad del layout fisico de recursos del proyecto. No se debe asumir que
+`src/main/resources` es el unico resource root.
+
+v0.5 distingue dos dominios:
+
+- **logical artifact/resource path:** entrada de mod/JAR, por ejemplo
+  `assets/foo/lang/en_us.json` o `data/foo/recipe/example.json`;
+- **physical project-relative path:** archivo real del workspace, por ejemplo
+  `src/main/resources/assets/foo/lang/en_us.json`.
+
+`required_resources[].path` pertenece al primer dominio. `ToolResult` de
+filesystem y `changed_files` pertenecen al segundo. La frontera
+benchmark/workspace debe resolver el path logico contra un `resource_root`
+inspeccionado antes de entregar mutation targets al runtime.
+
+La resolucion es fail-closed: rechaza paths absolutos, traversal, roots fuera
+del workspace y resultados fuera del workspace. La acceptance de artifact
+continua evaluando el path logico dentro del JAR; el accounting de mutaciones
+usa unicamente el path fisico canonico. Nunca se comparan directamente ambos
+dominios.
+
 ## 7. Context model v0.5
 
 El contexto de cada provider request se compone de:
@@ -225,6 +249,11 @@ El runtime debe poder:
 -   crear/modificar resources/data;
 -   mantener contexto suficiente entre steps;
 -   construir después del conjunto mínimo coherente de cambios.
+
+Los `pending_mutation_targets` y `completed_mutation_targets` internos usan
+siempre paths fisicos project-relative canonicos. `role:source` conserva su
+semantica agregada actual para `source_change`; no se convierte en un target
+logico de artifact.
 
 ## 10. Build strategy
 

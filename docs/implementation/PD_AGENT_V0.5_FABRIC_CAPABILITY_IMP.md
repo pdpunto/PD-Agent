@@ -393,6 +393,42 @@ Debe:
 Preferencia fuerte: **cerrar F3 sin cambio runtime** si la arquitectura
 actual ya soporta el caso.
 
+## F3.1 --- Delta de dominios de mutation targets
+
+La auditoria F9 demostro que `required_resources[].path` es un path logico
+de artifact/JAR, mientras que las tools devuelven paths fisicos
+project-relative. El siguiente delta queda fijado antes de implementar:
+
+1. reutilizar `ProjectSnapshot.resource_roots` como autoridad de layout;
+2. resolver `logical_resource_path + resource_root` a un path fisico
+   project-relative canonico;
+3. entregar al runtime solo targets fisicos normalizados;
+4. mantener `required_resources` sin cambios para acceptance de artifact;
+5. mantener `ToolResult.metadata["path"]` y `changed_files` fisicos;
+6. mantener `role:source` sin ampliar scope;
+7. persistir los targets canonicos sin reintroducir paths logicos tras
+   serialization/resume.
+
+El helper debe ser generico para cualquier resource root inspeccionado y no
+puede conocer tasks, features o nombres de mods. Debe rechazar absoluto,
+traversal, resource roots externos y resultados fuera del workspace.
+
+### Lotes autorizados
+
+1. localizar y validar la autoridad de resource roots;
+2. implementar el helper de resolucion logica a fisica;
+3. normalizar `required_resources` en la frontera del `BenchmarkExecutor`;
+4. ajustar `RunState`/`AgentRuntime` solo si el dominio compartido lo exige;
+5. conservar la politica de salida del build, cambiandola solo ante un bug
+   independiente demostrado;
+6. anadir tests de seguridad y serializacion;
+7. anadir integracion offline con metadata real de F6-T2@5 y F6-T3@5;
+8. ejecutar compileall, focalizados y suite completa;
+9. commit y push unicamente tras validacion.
+
+Este delta no modifica dataset, acceptance, configuracion, thresholds ni
+Brain API.
+
 ## Handoff
 
 Si la única forma de hacer multiarchivo exige rediseño grande del loop,
