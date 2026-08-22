@@ -246,6 +246,7 @@ def test_enums_cover_expected_values() -> None:
     assert BenchmarkTaskOutcome.NOT_EVALUATED.value == "NOT_EVALUATED"
     assert BenchmarkFailureOrigin.UNKNOWN.value == "UNKNOWN"
     assert BenchmarkFailureCode.BENCHMARK_CONTAMINATION.value == "BENCHMARK_CONTAMINATION"
+    assert BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID.value == "BENCHMARK_EVIDENCE_INVALID"
     assert BenchmarkComparisonStatus.INCOMPLETE.value == "INCOMPLETE"
 
 

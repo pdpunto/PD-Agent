@@ -27,6 +27,7 @@ def _utc(text: str) -> datetime:
 def _collection(
     *,
     build_success: bool = True,
+    build_present: bool = True,
     artifact_classification: str = "VALID",
     minecraft_status: MinecraftTestStatus | None = MinecraftTestStatus.PASS,
     changed_files: tuple[str, ...] = ("src/main/java/dev/p/A.java",),
@@ -81,7 +82,7 @@ def _collection(
         final_state=None,
         termination_reason=None,
         build_attempts=(build,),
-        final_build=build if build_success or artifact_classification == "VALID" else build,
+        final_build=build if build_present else None,
         artifact=artifact if artifact_classification != "MISSING" else None,
         changed_files=changed_files,
         validation_requirements=requirements
@@ -173,7 +174,17 @@ def test_classifier_missing_required_artifact_is_not_pass() -> None:
     assert classification.execution_status == BenchmarkExecutionStatus.INVALID
     assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
     assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
-    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_CONTAMINATION
+    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
+
+
+def test_classifier_missing_required_build_is_not_pass() -> None:
+    collection = _collection(build_present=False)
+    classification = BenchmarkClassifier().classify(collection)
+
+    assert classification.execution_status == BenchmarkExecutionStatus.INVALID
+    assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
+    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
 
 
 def test_classifier_missing_required_minecraft_is_not_pass() -> None:
@@ -183,7 +194,7 @@ def test_classifier_missing_required_minecraft_is_not_pass() -> None:
     assert classification.execution_status == BenchmarkExecutionStatus.INVALID
     assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
     assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
-    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_CONTAMINATION
+    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
 
 
 def test_classifier_task_failure_without_source_change() -> None:
@@ -203,4 +214,4 @@ def test_classifier_inconsistency_is_invalid() -> None:
     assert classification.execution_status == BenchmarkExecutionStatus.INVALID
     assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
     assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
-    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_CONTAMINATION
+    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID

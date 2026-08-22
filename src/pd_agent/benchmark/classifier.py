@@ -212,6 +212,6 @@ class BenchmarkClassifier:
             execution_status=BenchmarkExecutionStatus.INVALID,
             task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,
             failure_origin=BenchmarkFailureOrigin.BENCHMARK_INFRA,
-            failure_code=BenchmarkFailureCode.BENCHMARK_CONTAMINATION,
+            failure_code=BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID,
             reason=reason,
         )
