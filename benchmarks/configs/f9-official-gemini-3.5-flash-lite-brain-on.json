@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "config_id": "f9-official-gemini-3.5-flash-lite-brain-on",
+  "provider": "gemini",
+  "model": "gemini-3.5-flash-lite",
+  "brain_enabled": true,
+  "model_config": {},
+  "provider_config": {
+    "provider_retry_limit": 2,
+    "timeout_seconds": 60
+  },
+  "execution_limits": {
+    "max_agent_steps": 25,
+    "max_tool_calls": 50,
+    "max_build_attempts": 5,
+    "max_context_bytes": 2000000,
+    "max_tool_output_bytes": 1000000,
+    "process_timeout_seconds": 600,
+    "provider_retry_limit": 2
+  },
+  "knowledge_config": {
+    "offline": false
+  },
+  "target_repetition_count": 3,
+  "notes": [
+    "F9 official matrix freeze; Brain ON only.",
+    "Public values recovered from the persisted F8 live configuration."
+  ]
+}
