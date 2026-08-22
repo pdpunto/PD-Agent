@@ -219,7 +219,11 @@ class BenchmarkClassifier:
     def _is_agent_terminal_failure(self, collection: BenchmarkCollection) -> bool:
         return (
             collection.final_state == RunStatus.FAILED
-            and collection.termination_reason == "tool rejected"
+            and collection.termination_reason
+            in {
+                "tool rejected",
+                "repeated build failure",
+            }
         )
 
     def _invalid(self, reason: str) -> BenchmarkClassification:

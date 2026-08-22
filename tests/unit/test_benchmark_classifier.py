@@ -206,6 +206,23 @@ def test_classifier_terminal_tool_rejection_is_agent_failure_before_evidence_gat
     assert "tool rejected" in classification.reason
 
 
+def test_classifier_repeated_build_failure_is_agent_failure_before_evidence_gates() -> None:
+    collection = _collection(
+        build_success=False,
+        artifact_classification="MISSING",
+        minecraft_status=None,
+        final_state=RunStatus.FAILED,
+        termination_reason="repeated build failure",
+    )
+    classification = BenchmarkClassifier().classify(collection)
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_TASK_FAILURE
+    assert "repeated build failure" in classification.reason
+
+
 def test_classifier_missing_required_minecraft_is_not_pass() -> None:
     collection = _collection(minecraft_status=None)
     classification = BenchmarkClassifier().classify(collection)
