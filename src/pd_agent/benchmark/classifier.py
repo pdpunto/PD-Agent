@@ -48,9 +48,6 @@ class BenchmarkClassifier:
         *,
         runtime_error: Exception | None = None,
     ) -> BenchmarkClassification:
-        if collection.inconsistencies:
-            return self._invalid("evidence inconsistency")
-
         provider_error = runtime_error if isinstance(runtime_error, ProviderError) else None
         if provider_error is not None:
             return self._classify_provider_error(provider_error)
@@ -72,6 +69,18 @@ class BenchmarkClassifier:
                 failure_code=BenchmarkFailureCode.BUILD_ENV_FAILURE,
                 reason=str(runtime_error),
             )
+
+        if self._is_agent_terminal_failure(collection):
+            return BenchmarkClassification(
+                execution_status=BenchmarkExecutionStatus.COMPLETED,
+                task_outcome=BenchmarkTaskOutcome.FAIL,
+                failure_origin=BenchmarkFailureOrigin.AGENT,
+                failure_code=BenchmarkFailureCode.AGENT_TASK_FAILURE,
+                reason=f"agent terminal failure: {collection.termination_reason}",
+            )
+
+        if collection.inconsistencies:
+            return self._invalid("evidence inconsistency")
 
         if collection.validation_requirements is None:
             requirements = BenchmarkValidationRequirements()
@@ -206,6 +215,12 @@ class BenchmarkClassifier:
     def _is_limit_reached(self, collection: BenchmarkCollection) -> bool:
         reason = (collection.termination_reason or "").casefold()
         return "limit" in reason or collection.final_state == RunStatus.LIMIT_REACHED
+
+    def _is_agent_terminal_failure(self, collection: BenchmarkCollection) -> bool:
+        return (
+            collection.final_state == RunStatus.FAILED
+            and collection.termination_reason == "tool rejected"
+        )
 
     def _invalid(self, reason: str) -> BenchmarkClassification:
         return BenchmarkClassification(

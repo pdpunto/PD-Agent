@@ -15,7 +15,7 @@ from pd_agent.benchmark import (
     BenchmarkTaskOutcome,
     BenchmarkValidationRequirements,
 )
-from pd_agent.core import ArtifactResult, BuildResult
+from pd_agent.core import ArtifactResult, BuildResult, RunStatus
 from pd_agent.core.errors import BuildError, LimitReachedError, ProviderError
 from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
 
@@ -33,6 +33,8 @@ def _collection(
     changed_files: tuple[str, ...] = ("src/main/java/dev/p/A.java",),
     requirements: BenchmarkValidationRequirements | None = None,
     inconsistencies: tuple[str, ...] = (),
+    final_state: RunStatus | None = None,
+    termination_reason: str | None = None,
 ) -> BenchmarkCollection:
     run_id = "11111111-1111-4111-8111-111111111111"
     build = BuildResult(
@@ -79,8 +81,8 @@ def _collection(
         )
     return BenchmarkCollection(
         run_id=run_id,
-        final_state=None,
-        termination_reason=None,
+        final_state=final_state,
+        termination_reason=termination_reason,
         build_attempts=(build,),
         final_build=build if build_present else None,
         artifact=artifact if artifact_classification != "MISSING" else None,
@@ -187,6 +189,23 @@ def test_classifier_missing_required_build_is_not_pass() -> None:
     assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
 
 
+def test_classifier_terminal_tool_rejection_is_agent_failure_before_evidence_gates() -> None:
+    collection = _collection(
+        build_present=False,
+        artifact_classification="MISSING",
+        minecraft_status=None,
+        final_state=RunStatus.FAILED,
+        termination_reason="tool rejected",
+    )
+    classification = BenchmarkClassifier().classify(collection)
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_TASK_FAILURE
+    assert "tool rejected" in classification.reason
+
+
 def test_classifier_missing_required_minecraft_is_not_pass() -> None:
     collection = _collection(minecraft_status=None)
     classification = BenchmarkClassifier().classify(collection)
@@ -209,6 +228,22 @@ def test_classifier_task_failure_without_source_change() -> None:
 
 def test_classifier_inconsistency_is_invalid() -> None:
     collection = _collection(inconsistencies=("run_id_mismatch",))
+    classification = BenchmarkClassifier().classify(collection)
+
+    assert classification.execution_status == BenchmarkExecutionStatus.INVALID
+    assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
+    assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
+
+
+def test_classifier_other_failed_reason_is_not_generic_agent_failure() -> None:
+    collection = _collection(
+        build_present=False,
+        artifact_classification="MISSING",
+        minecraft_status=None,
+        final_state=RunStatus.FAILED,
+        termination_reason="no-op",
+    )
     classification = BenchmarkClassifier().classify(collection)
 
     assert classification.execution_status == BenchmarkExecutionStatus.INVALID
