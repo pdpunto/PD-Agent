@@ -1703,3 +1703,64 @@ def test_f9_unresolved_mutation_target_reprompts_before_build(tmp_path: Path) ->
     ]
     assert violations
     assert violations[0].payload["unresolved_mutation_targets"] == [target]
+
+
+def test_f9_repeated_zero_tool_responses_fail_without_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "f9-repeated-zero-tools", build_state="pass")
+    target = "src/main/resources/assets/examplemod/lang/en_us.json"
+    provider = ScriptedProvider(
+        [
+            AgentResponse(assistant_message="not yet", tool_calls=()),
+            AgentResponse(assistant_message="still not yet", tool_calls=()),
+            AgentResponse(assistant_message="no progress", tool_calls=()),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(
+        root,
+        "create required resource",
+        pending_mutation_targets=(target,),
+    )
+
+    assert run_state.state == RunStatus.FAILED
+    assert report.final_state == RunStatus.FAILED
+    assert run_state.termination_reason == "repeated unresolved mutation targets without operational progress"
+    assert run_state.pending_mutation_targets == (target,)
+    assert run_state.build_attempt_count == 0
+    assert not any(event.event_type == RunEventType.BUILD_STARTED for event in storage.read_events(run_state.run_id))
+
+
+def test_f9_pending_targets_remain_hard_gate_after_partial_mutation(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "f9-partial-targets", build_state="pass")
+    first = "src/main/resources/assets/examplemod/lang/en_us.json"
+    second = "src/main/resources/data/examplemod/recipe/server_core.json"
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="create one",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={"path": first, "content": "{}\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(assistant_message="I am finished", tool_calls=()),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(
+        root,
+        "create language and recipe resources",
+        pending_mutation_targets=(first, second),
+    )
+
+    assert run_state.state == RunStatus.FAILED
+    assert report.final_state == RunStatus.FAILED
+    assert run_state.pending_mutation_targets == (second,)
+    assert first in run_state.completed_mutation_targets
+    assert run_state.build_attempt_count == 0
+    assert not any(event.event_type == RunEventType.BUILD_STARTED for event in storage.read_events(run_state.run_id))

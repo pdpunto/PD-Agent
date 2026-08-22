@@ -308,6 +308,12 @@ Solo si el modelo actual no expresa el contrato.
 El modelo benchmark debe representar las tasks v0.5 sin alterar
 semántica v0.4.
 
+El runtime trata `pending_mutation_targets` como precondición dura para
+`BUILDING`: mientras exista cualquier target pendiente, una respuesta sin
+mutación o una mutación rechazada conserva el flujo en edición. El build solo
+puede comenzar cuando el conjunto queda vacío; si se alcanza un límite
+operativo antes, la ejecución termina controladamente sin invocar el build.
+
 ## Git
 
 Commit sugerido:

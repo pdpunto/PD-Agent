@@ -260,6 +260,8 @@ class AgentRuntime:
                         continue
 
                     if gate_violation_detected and not progress_detected:
+                        if run_state.state == RunStatus.EDITING and run_state.pending_mutation_targets:
+                            editing_continuation_available = True
                         self._persist_state(run_state)
                         continue
 
@@ -270,6 +272,8 @@ class AgentRuntime:
                             run_state.state = RunStatus.FAILED
                             run_state.termination_reason = "repeated recoverable tool rejection without operational progress"
                             break
+                        if run_state.state == RunStatus.EDITING and run_state.pending_mutation_targets:
+                            editing_continuation_available = True
                         self._persist_state(run_state)
                         continue
 
@@ -284,7 +288,7 @@ class AgentRuntime:
 
                     if run_state.state == RunStatus.PLANNING:
                         run_state.transition_to(RunStatus.EDITING)
-                        if run_state.pending_mutation_targets and progress_detected:
+                        if run_state.pending_mutation_targets:
                             editing_continuation_available = True
                     elif run_state.state == RunStatus.DIAGNOSING:
                         self._reset_action_pressure(run_state)
@@ -294,7 +298,7 @@ class AgentRuntime:
                     elif run_state.state == RunStatus.CORRECTING:
                         run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
-                        if run_state.pending_mutation_targets and progress_detected:
+                        if run_state.pending_mutation_targets:
                             editing_continuation_available = True
                         else:
                             run_state.transition_to(RunStatus.BUILDING)
@@ -302,7 +306,8 @@ class AgentRuntime:
                     continue
 
                 if run_state.state == RunStatus.EDITING:
-                    if editing_continuation_available and run_state.pending_mutation_targets:
+                    if run_state.pending_mutation_targets:
+                        editing_continuation_available = True
                         self._persist_state(run_state)
                         continue
                     run_state.transition_to(RunStatus.BUILDING)
@@ -310,6 +315,20 @@ class AgentRuntime:
                     continue
 
                 if run_state.state == RunStatus.BUILDING:
+                    if run_state.pending_mutation_targets:
+                        run_state.state = RunStatus.FAILED
+                        run_state.termination_reason = "pending mutation targets block build"
+                        self._emit(
+                            run_state.run_id,
+                            RunEventType.ACTION_GATE_VIOLATION,
+                            {
+                                "gate_violation": True,
+                                "unresolved_mutation_targets": list(run_state.pending_mutation_targets),
+                                "message": "Build blocked until all required mutation targets are completed.",
+                            },
+                        )
+                        self._persist_state(run_state)
+                        break
                     self._check_limits(run_state, limits)
                     build_result = self.build_runner.run(project_snapshot, run_state, limits)
                     self._observe_progress(run_state, build_result=build_result)
