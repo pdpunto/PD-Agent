@@ -70,7 +70,7 @@ def _skip_search_path(path: Path) -> bool:
 
 class ListDirectoryTool:
     name = "list_directory"
-    description = "List directory contents within project_root."
+    description = "List directory contents within project_root. Missing directories are reported as an empty non-existent result."
     input_schema = _schema(
         {
             "path": {"type": "string", "minLength": 1},
@@ -80,7 +80,27 @@ class ListDirectoryTool:
 
     def execute(self, context: ToolExecutionContext, arguments: Mapping[str, Any]) -> ToolResult:
         resolver = SecurePathResolver(context.project_root)
-        directory = resolver.resolve_existing_directory(arguments["path"])
+        directory = resolver.resolve_relative(arguments["path"])
+        relative_path = str(directory.relative_to(context.project_root))
+        if not directory.exists():
+            output = {
+                "path": relative_path,
+                "exists": False,
+                "entries": [],
+                "entry_count": 0,
+                "truncated": False,
+                "limit_bytes": context.limits.max_tool_output_bytes,
+            }
+            return ToolResult(
+                call_id=str(arguments["call_id"]),
+                tool_name=self.name,
+                status=ToolResultStatus.SUCCESS,
+                output=output,
+                metadata={"truncated": False, "exists": False},
+            )
+        if not directory.is_dir():
+            raise ToolExecutionError(f"not a directory: {directory}")
+
         entries: list[dict[str, Any]] = []
         truncated = False
         for item in _sorted_entries(directory):
@@ -99,7 +119,8 @@ class ListDirectoryTool:
             entries.append(entry)
 
         output = {
-            "path": str(directory.relative_to(context.project_root)),
+            "path": relative_path,
+            "exists": True,
             "entries": entries,
             "entry_count": len(entries),
             "truncated": truncated,
@@ -110,7 +131,7 @@ class ListDirectoryTool:
             tool_name=self.name,
             status=ToolResultStatus.SUCCESS,
             output=output,
-            metadata={"truncated": truncated},
+            metadata={"truncated": truncated, "exists": True},
         )
 
 
