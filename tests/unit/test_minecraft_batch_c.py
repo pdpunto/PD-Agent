@@ -144,11 +144,12 @@ def _fake_process(
     timed_out: bool = False,
     stdout: str = "stdout",
     stderr: str = "stderr",
+    latest_log: str = "latest log",
 ) -> dict[str, object]:
     evidence_root = root / "evidence" / "minecraft" / run_id
     runtime_root = evidence_root / "runtime"
     (runtime_root / "logs").mkdir(parents=True, exist_ok=True)
-    (runtime_root / "logs" / "latest.log").write_text("latest log", encoding="utf-8")
+    (runtime_root / "logs" / "latest.log").write_text(latest_log, encoding="utf-8")
     if payload is not None:
         (evidence_root / "harness-result.json").write_text(json.dumps(payload), encoding="utf-8")
     return {
@@ -707,3 +708,75 @@ def test_run_propagates_gradle_user_home_to_harness_wrapper(tmp_path: Path) -> N
     assert sentinel.read_text(encoding="utf-8") == str(tmp_path / "isolated-gradle-home")
     assert result.process_evidence is not None
     assert result.process_evidence.metadata["environment_overrides"]["GRADLE_USER_HOME"] == str(tmp_path / "isolated-gradle-home")
+
+
+def test_run_missing_harness_result_with_target_entrypoint_failure_is_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(target_jar=Path("build/libs/target.jar"), **_spec())
+    run_id = "run-target-startup-crash"
+
+    latest_log = """
+[main/ERROR]: Failed to start the minecraft server
+java.lang.RuntimeException: Could not execute entrypoint stage 'main' due to errors, provided by 'pdagentl11' at 'dev.pdpunto.l11.ExampleMod'!
+Caused by: java.lang.ExceptionInInitializerError
+Caused by: java.lang.NullPointerException: Item id not set
+    at dev.pdpunto.l11.ExampleMod.<clinit>(ExampleMod.java:17)
+""".strip()
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload=None,
+            exit_code=0,
+            latest_log=latest_log,
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.CRASH
+    assert result.reason == "target mod failed during Minecraft startup"
+    assert result.runtime_evidence is not None
+    runtime_metadata = result.runtime_evidence.metadata
+    assert runtime_metadata["classification"] == "CRASH"
+    assert runtime_metadata["target_startup_failure"] is True
+    assert "provided by 'pdagentl11'" in runtime_metadata["target_startup_failure_evidence"]
+
+
+def test_run_missing_harness_result_without_target_failure_remains_infra_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(target_jar=Path("build/libs/target.jar"), **_spec())
+    run_id = "run-genuine-missing-result"
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload=None,
+            exit_code=0,
+            latest_log="Minecraft started but no harness result was written.",
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(
+        spec,
+        run_id=run_id,
+        java_version="21",
+        launch_mode="missing_result",
+    )
+
+    assert result.status is MinecraftTestStatus.INFRA_ERROR
+    assert result.reason == "missing harness result"
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.metadata["classification"] == "INFRA_ERROR"

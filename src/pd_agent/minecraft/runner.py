@@ -382,6 +382,7 @@ class MinecraftTestRunner:
         status, reason, runtime_metadata = self._classify_runtime(
             process=process,
             harness_result=harness_result,
+            latest_log=_read_text(runtime_evidence.latest_log_path),
             launch_mode=launch_mode,
             target=preflight.target,
             timeout_seconds=spec.timeout_seconds,
@@ -617,11 +618,41 @@ class MinecraftTestRunner:
             return {"_malformed": True, "_error": "harness result must be an object"}
         return data
 
+    def _target_startup_failure_from_log(
+        self,
+        latest_log: str | None,
+        *,
+        target: MinecraftTargetMetadata,
+    ) -> str | None:
+        if not latest_log:
+            return None
+
+        required_markers = (
+            "Failed to start the minecraft server",
+            "Could not execute entrypoint stage",
+            f"provided by '{target.mod_id}'",
+        )
+        if not all(marker in latest_log for marker in required_markers):
+            return None
+
+        evidence_lines = [
+            line.strip()
+            for line in latest_log.splitlines()
+            if (
+                "Failed to start the minecraft server" in line
+                or "Could not execute entrypoint stage" in line
+                or f"provided by '{target.mod_id}'" in line
+                or "Caused by:" in line
+            )
+        ]
+        return "\n".join(evidence_lines[:8]) or f"startup failure attributed to {target.mod_id}"
+
     def _classify_runtime(
         self,
         *,
         process: Mapping[str, Any],
         harness_result: Mapping[str, Any] | None,
+        latest_log: str | None,
         launch_mode: str,
         target: MinecraftTargetMetadata,
         timeout_seconds: int,
@@ -641,6 +672,21 @@ class MinecraftTestRunner:
             if process["exit_code"] != 0:
                 metadata["classification"] = "CRASH"
                 return MinecraftTestStatus.CRASH, "Minecraft process exited abnormally", metadata
+
+            target_startup_failure = self._target_startup_failure_from_log(
+                latest_log,
+                target=target,
+            )
+            if target_startup_failure is not None:
+                metadata["classification"] = "CRASH"
+                metadata["target_startup_failure"] = True
+                metadata["target_startup_failure_evidence"] = target_startup_failure
+                return (
+                    MinecraftTestStatus.CRASH,
+                    "target mod failed during Minecraft startup",
+                    metadata,
+                )
+
             metadata["classification"] = "INFRA_ERROR"
             return MinecraftTestStatus.INFRA_ERROR, "missing harness result", metadata
 
