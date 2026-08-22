@@ -372,6 +372,36 @@ Responsabilidad prohibida:
 Los detalles específicos de cada tarea pertenecen al dataset/acceptance,
 no al Fabric Agent core.
 
+### 14.1 Target mod identity contract
+
+`task_id` y el identificador de un mod Fabric pertenecen a dominios
+semanticos distintos. El runtime acceptance adapter no puede usar
+`BenchmarkTask.task_id` como `target_mod_id`.
+
+La resolucion del target mod id debe aplicar esta precedencia cerrada:
+
+1. `acceptance.spec.target_mod_id`;
+2. `acceptance.spec.mod_id`;
+3. `acceptance.spec.preservation_invariants.mod_id`;
+4. error explicito de contrato si no existe ninguno.
+
+Para las tasks v0.5 congeladas, la autoridad efectiva es
+`acceptance.spec.preservation_invariants.mod_id`. Las tasks historicas v0.4
+que declaran `acceptance.spec.target_mod_id` conservan compatibilidad.
+
+El `mod_id` detectado en `fabric.mod.json` del artifact es evidencia de
+validacion: debe coincidir con el identificador esperado y nunca redefinirlo
+dinamicamente. El invariant de preservacion exige que el mod id esperado se
+mantenga tras la modificacion.
+
+`MinecraftTestSpec` debe recibir siempre un mod id semanticamente valido.
+Las entradas de `required_minecraft_observations` deben reutilizar ese mismo
+target mod contract, salvo un override explicito del propio requisito. La
+ausencia total del identificador debe fallar antes del runtime Minecraft.
+
+Este contrato no cambia SecurePathResolver, artifact containment ni los
+demas limites de seguridad del Harness. No requiere migracion del dataset.
+
 ## 15. Feature observability
 
 Las features v0.5 deben ser server-observable.

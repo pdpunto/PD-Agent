@@ -566,6 +566,7 @@ No runtime core.
 Por task:
 
 -   construir runtime observation spec;
+-   resolver `target_mod_id` sin usar `task_id` como fallback;
 -   resolver o recibir `runtime_mod_jars` desde la capa build/project y
     pasarlos de forma explícita al spec;
 -   entregar expectations;
@@ -593,6 +594,43 @@ Posibles:
 
 La ruta exacta depende del repo real.
 
+### Target mod identity wiring
+
+El helper de resolucion debe vivir en la benchmark acceptance layer o en un
+helper equivalente consumido por `BenchmarkExecutor`. Su precedencia exacta
+es:
+
+1. `acceptance.spec.target_mod_id`;
+2. `acceptance.spec.mod_id`;
+3. `acceptance.spec.preservation_invariants.mod_id`;
+4. error explicito de contrato.
+
+Queda prohibido usar `task.task_id` como identificador Fabric. No se debe
+hardcodear `examplemod` en el executor. Para v0.5, las tasks T1, T2 y T3
+resuelven `examplemod` desde `preservation_invariants.mod_id`; para v0.4,
+`target_mod_id` explicito sigue teniendo prioridad.
+
+El identificador detectado en `fabric.mod.json` se compara contra el valor
+esperado como validacion del artifact. No puede sustituir ni redefinir la
+expectativa. El primary `MinecraftTestSpec` y las
+`required_minecraft_observations` deben compartir el mismo target mod id
+resuelto, salvo un override explicito y validado del requisito secundario.
+
+La ausencia de todos los campos validos debe detener el flujo antes de
+invocar Minecraft con un error explicito y estructurado. Este cambio no toca
+dataset, acceptance JSON, config, freeze, SecurePathResolver ni containment.
+
+### Implementation lots
+
+1. Anadir el helper de resolucion y eliminar el fallback a `task.task_id`.
+2. Conectar el helper con la observacion Minecraft primaria.
+3. Verificar la propagacion a `required_minecraft_observations`.
+4. Anadir tests de precedencia, fail-closed, artifact mismatch y regresion
+   v0.4/v0.5.
+5. Ejecutar compileall, tests focalizados y suite completa.
+6. Commit/push; despues revalidar con 10 Benchmarks y lanzar F9 desde un
+   LaunchRoot nuevo. No se debe reanudar la ejecucion abortada.
+
 ## Tests
 
 -   adapter deterministic;
@@ -615,6 +653,18 @@ La ruta exacta depende del repo real.
 -   harness infra BLOCKED;
 -   preservation invariant violation;
 -   evidence consistency.
+-   `task_id` distinto de `mod_id` no contamina el target;
+-   F6-T1@5, F6-T2@5 y F6-T3@5 resuelven `examplemod`;
+-   `target_mod_id` gana sobre `mod_id`;
+-   `mod_id` gana sobre `preservation_invariants.mod_id`;
+-   `preservation_invariants.mod_id` funciona cuando faltan los dos campos
+    explicitos;
+-   ausencia total de mod id falla explicitamente;
+-   `task_id` nunca es fallback;
+-   `MinecraftTestSpec` recibe un mod id valido;
+-   artifact mod id coincide con el esperado;
+-   required observations conservan el mismo target mod;
+-   dataset, fixture, config y freeze F9 permanecen sin cambios.
 
 ## Acceptance
 
