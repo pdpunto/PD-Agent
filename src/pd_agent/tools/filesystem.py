@@ -298,7 +298,7 @@ class CreateFileTool:
 
     def execute(self, context: ToolExecutionContext, arguments: Mapping[str, Any]) -> ToolResult:
         resolver = SecurePathResolver(context.project_root)
-        target, _parent = resolver.resolve_parent_for_creation(arguments["path"])
+        target, parent = resolver.resolve_parent_for_creation(arguments["path"])
         resolver.reject_protected_mutation(target)
         if target.exists():
             raise FileExistsToolValidationError(
@@ -307,6 +307,7 @@ class CreateFileTool:
         content = str(arguments["content"])
         if len(content.encode("utf-8")) > context.limits.max_tool_output_bytes:
             raise ToolValidationError("content too large")
+        parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8", newline="\n")
         output = {
             "path": str(target.relative_to(context.project_root)),

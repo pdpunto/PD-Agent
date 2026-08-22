@@ -105,6 +105,27 @@ def test_valid_read_write_create_search_delete_and_events(tmp_path: Path) -> Non
     assert "FILE_CHANGED" in [event["event_type"] for event in events]
 
 
+def test_create_file_materializes_contained_parent_directories(tmp_path: Path) -> None:
+    root = tmp_path / "nested"
+    root.mkdir()
+    executor, context, _storage, _run_id = _make_executor(root)
+
+    result = executor.execute(
+        ToolCall(
+            call_id="nested",
+            tool_name="create_file",
+            arguments={
+                "path": "src/main/resources/assets/examplemod/lang/en_us.json",
+                "content": "{}\n",
+            },
+        ),
+        context,
+    )
+
+    assert result.status == ToolResultStatus.SUCCESS
+    assert (root / "src/main/resources/assets/examplemod/lang/en_us.json").read_text(encoding="utf-8") == "{}\n"
+
+
 def test_relative_escape_absolute_escape_and_git_protection(tmp_path: Path) -> None:
     root = _prepare_project(tmp_path)
     executor, context, storage, run_id = _make_executor(root)

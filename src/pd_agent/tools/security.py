@@ -69,9 +69,7 @@ class SecurePathResolver:
     def resolve_parent_for_creation(self, raw_path: object) -> tuple[Path, Path]:
         target = self.resolve_relative(raw_path)
         parent = target.parent
-        if not parent.exists():
-            raise ToolValidationError(f"parent directory does not exist: {parent}")
-        if not parent.is_dir():
+        if parent.exists() and not parent.is_dir():
             raise ToolExecutionError(f"parent is not a directory: {parent}")
         if not self._is_within_root(parent.resolve(strict=False)):
             raise SecurityViolation("parent escapes project_root")
@@ -89,4 +87,3 @@ class SecurePathResolver:
         except ValueError:
             return False
         return True
-

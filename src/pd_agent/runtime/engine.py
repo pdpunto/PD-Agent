@@ -144,11 +144,15 @@ class AgentRuntime:
         pending_tool_calls: tuple[ToolCall, ...] = ()
         pending_tool_results: tuple[ToolResult, ...] = ()
         pending_provider_continuations: tuple[ProviderContinuation, ...] = ()
+        editing_continuation_available = False
         try:
             while not run_state.state.is_terminal():
                 self._check_limits(run_state, limits)
 
-                if run_state.state in {RunStatus.PLANNING, RunStatus.DIAGNOSING, RunStatus.CORRECTING}:
+                if run_state.state in {RunStatus.PLANNING, RunStatus.DIAGNOSING, RunStatus.CORRECTING} or (
+                    run_state.state == RunStatus.EDITING and editing_continuation_available
+                ):
+                    editing_continuation_available = False
                     response, offered_tool_names = self._call_provider(
                         run_state=run_state,
                         project_snapshot=project_snapshot,
@@ -246,6 +250,8 @@ class AgentRuntime:
 
                     if run_state.state == RunStatus.PLANNING:
                         run_state.transition_to(RunStatus.EDITING)
+                        if run_state.pending_mutation_targets and progress_detected:
+                            editing_continuation_available = True
                     elif run_state.state == RunStatus.DIAGNOSING:
                         self._reset_action_pressure(run_state)
                         run_state.transition_to(RunStatus.CORRECTING if tool_results else RunStatus.FAILED)
@@ -254,11 +260,17 @@ class AgentRuntime:
                     elif run_state.state == RunStatus.CORRECTING:
                         run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
-                        run_state.transition_to(RunStatus.BUILDING)
+                        if run_state.pending_mutation_targets and progress_detected:
+                            editing_continuation_available = True
+                        else:
+                            run_state.transition_to(RunStatus.BUILDING)
                     self._persist_state(run_state)
                     continue
 
                 if run_state.state == RunStatus.EDITING:
+                    if editing_continuation_available and run_state.pending_mutation_targets:
+                        self._persist_state(run_state)
+                        continue
                     run_state.transition_to(RunStatus.BUILDING)
                     self._persist_state(run_state)
                     continue
@@ -480,6 +492,7 @@ class AgentRuntime:
             run_state.record_tool_call()
             self._record_retained_file_evidence(run_state, result)
             self._record_changed_files(run_state, result)
+            self._record_completed_mutation_target(run_state, result)
             self._persist_state(run_state)
             self._observe_progress(
                 run_state,
@@ -489,6 +502,22 @@ class AgentRuntime:
             if run_state.state.is_terminal():
                 break
         return tuple(results)
+
+    def _record_completed_mutation_target(self, run_state: RunState, result: ToolResult) -> None:
+        if (
+            result.status != ToolResultStatus.SUCCESS
+            or not result.metadata.get("changed")
+            or result.tool_name not in {
+                "write_file",
+                "create_file",
+            }
+        ):
+            return
+        path = result.metadata.get("path")
+        if path is None and isinstance(result.output, Mapping):
+            path = result.output.get("path")
+        if path is not None:
+            run_state.record_completed_mutation_target(path)
 
     def _record_changed_files(self, run_state: RunState, result: ToolResult) -> None:
         if result.status != ToolResultStatus.SUCCESS:
@@ -730,6 +759,8 @@ class AgentRuntime:
             f"- tool_calls_max: {limits.max_tool_calls}",
             f"- tool_calls_remaining: {remaining_tool_calls}",
             f"- build_attempts_used: {run_state.build_attempt_count}",
+            f"- pending_mutation_target_count: {len(run_state.pending_mutation_targets)}",
+            f"- completed_mutation_target_count: {len(run_state.completed_mutation_targets)}",
             f"- build_attempts_max: {limits.max_build_attempts}",
             f"- build_attempts_remaining: {remaining_build_attempts}",
             "progress:",

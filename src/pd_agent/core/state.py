@@ -159,6 +159,8 @@ class RunState:
     project_snapshot: Mapping[str, Any] | None = None
     current_plan: str | None = None
     changed_files: tuple[str, ...] = ()
+    pending_mutation_targets: tuple[str, ...] = ()
+    completed_mutation_targets: tuple[str, ...] = ()
     tool_call_count: int = 0
     agent_step_count: int = 0
     logical_provider_request_count: int = 0
@@ -209,6 +211,32 @@ class RunState:
             return
         self.changed_files = (*self.changed_files, normalized)
 
+    def set_pending_mutation_targets(self, paths: tuple[Path | str, ...] | list[Path | str]) -> None:
+        normalized = tuple(
+            dict.fromkeys(
+                path if str(path).startswith("role:") else Path(path).as_posix()
+                for path in paths
+                if str(path)
+            )
+        )
+        completed = set(self.completed_mutation_targets)
+        self.pending_mutation_targets = tuple(path for path in normalized if path not in completed)
+
+    def record_completed_mutation_target(self, path: Path | str) -> bool:
+        normalized = Path(path).as_posix()
+        matching_target = normalized if normalized in self.pending_mutation_targets else None
+        if matching_target is None and normalized.startswith("src/main/java/"):
+            if "role:source" in self.pending_mutation_targets:
+                matching_target = "role:source"
+        if matching_target is None:
+            return False
+        self.pending_mutation_targets = tuple(
+            item for item in self.pending_mutation_targets if item != matching_target
+        )
+        if matching_target not in self.completed_mutation_targets:
+            self.completed_mutation_targets = (*self.completed_mutation_targets, matching_target)
+        return True
+
     def record_build_result(self, result: BuildResult) -> None:
         self.build_results = (*self.build_results, result)
 
@@ -242,6 +270,8 @@ class RunState:
             ),
             "current_plan": self.current_plan,
             "changed_files": list(self.changed_files),
+            "pending_mutation_targets": list(self.pending_mutation_targets),
+            "completed_mutation_targets": list(self.completed_mutation_targets),
             "tool_call_count": self.tool_call_count,
             "agent_step_count": self.agent_step_count,
             "logical_provider_request_count": self.logical_provider_request_count,
@@ -274,6 +304,8 @@ class RunState:
             ),
             current_plan=data.get("current_plan"),
             changed_files=tuple(data.get("changed_files", ())),
+            pending_mutation_targets=tuple(data.get("pending_mutation_targets", ())),
+            completed_mutation_targets=tuple(data.get("completed_mutation_targets", ())),
             tool_call_count=int(data.get("tool_call_count", 0)),
             agent_step_count=int(data.get("agent_step_count", 0)),
             logical_provider_request_count=int(data.get("logical_provider_request_count", 0)),

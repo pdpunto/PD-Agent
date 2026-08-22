@@ -144,7 +144,7 @@ class _PromptCapturingController:
         self.last_init = dict(kwargs)
         _PromptCapturingController.last_init = self.last_init
 
-    def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):  # noqa: ANN001
+    def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):  # noqa: ANN001
         _PromptCapturingController.last_run = {
             "project_root": project_root,
             "task": task,

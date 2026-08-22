@@ -152,7 +152,12 @@ class ScriptedProvider:
         return outcome
 
 
-def _controller(root: Path, provider: ScriptedProvider, *, limits: ExecutionLimits | None = None) -> tuple[RunController, RunStorage]:
+def _controller(
+    root: Path,
+    provider: ScriptedProvider,
+    *,
+    limits: ExecutionLimits | None = None,
+) -> tuple[RunController, RunStorage]:
     storage = RunStorage(root / "runs")
     controller = RunController(
         provider=provider,
@@ -1420,6 +1425,177 @@ def test_multi_file_single_response_applies_all_mutations_before_build(tmp_path:
     assert (root / "src" / "main" / "java" / "com" / "example" / "FeatureHelper.java").exists()
     assert (root / "src" / "main" / "resources" / "fabric.mod.json").read_text(encoding="utf-8") == "{\n  \"enabled\": true\n}\n"
     assert any(event.event_type == RunEventType.BUILD_STARTED for event in events)
+
+
+def test_multi_turn_source_and_resource_builds_after_both_mutations(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multi-turn-resource", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="source",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="write_file",
+                        arguments={
+                            "path": "src/main/java/com/example/ExampleMod.java",
+                            "content": "package com.example; class ExampleMod { int a = 1; }\n",
+                        },
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="resource",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="create_file",
+                        arguments={
+                            "path": "src/main/resources/assets/examplemod/lang/en_us.json",
+                            "content": "{}\n",
+                        },
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(
+        root,
+        provider,
+    )
+
+    run_state, report = controller.run(
+        root,
+        "source and resource",
+        pending_mutation_targets=(
+            "role:source",
+            "src/main/resources/assets/examplemod/lang/en_us.json",
+        ),
+    )
+    events = storage.read_events(run_state.run_id)
+
+    assert run_state.state == RunStatus.COMPLETED
+    assert report.final_state == RunStatus.COMPLETED
+    assert len(provider.requests) == 2
+    assert run_state.pending_mutation_targets == ()
+    assert run_state.completed_mutation_targets == (
+        "role:source",
+        "src/main/resources/assets/examplemod/lang/en_us.json",
+    )
+    assert run_state.changed_files == (
+        "src/main/java/com/example/ExampleMod.java",
+        "src/main/resources/assets/examplemod/lang/en_us.json",
+    )
+    assert run_state.build_attempt_count == 1
+    build_index = events.index(next(event for event in events if event.event_type == RunEventType.BUILD_STARTED))
+    file_changed_indices = [index for index, event in enumerate(events) if event.event_type == RunEventType.FILE_CHANGED]
+    assert build_index > max(file_changed_indices)
+
+
+def test_multi_turn_source_resource_and_data_requires_all_targets(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multi-turn-data", build_state="pass")
+    lang_path = "src/main/resources/assets/examplemod/lang/en_us.json"
+    recipe_path = "src/main/resources/data/examplemod/recipe/server_core.json"
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="source",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="write_file",
+                        arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="lang",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="create_file",
+                        arguments={"path": lang_path, "content": "{}\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="recipe",
+                tool_calls=(
+                    ToolCall(
+                        call_id="3",
+                        tool_name="create_file",
+                        arguments={"path": recipe_path, "content": "{}\n"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, report = controller.run(
+        root,
+        "source, resource and data",
+        pending_mutation_targets=("role:source", lang_path, recipe_path),
+    )
+
+    assert run_state.state == RunStatus.COMPLETED
+    assert report.final_state == RunStatus.COMPLETED
+    assert len(provider.requests) == 3
+    assert run_state.pending_mutation_targets == ()
+    assert run_state.completed_mutation_targets == ("role:source", lang_path, recipe_path)
+    assert run_state.build_attempt_count == 1
+
+
+def test_multi_turn_wrong_target_does_not_complete_pending_target(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multi-turn-wrong-target", build_state="pass")
+    target = "src/main/resources/assets/examplemod/lang/en_us.json"
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="source",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="write_file",
+                        arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="wrong resource",
+                tool_calls=(
+                    ToolCall(
+                        call_id="2",
+                        tool_name="create_file",
+                        arguments={"path": "src/main/resources/other.json", "content": "{}\n"},
+                    ),
+                ),
+            ),
+            AgentResponse(
+                assistant_message="correct resource",
+                tool_calls=(
+                    ToolCall(
+                        call_id="3",
+                        tool_name="create_file",
+                        arguments={"path": target, "content": "{}\n"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+
+    run_state, _report = controller.run(
+        root,
+        "source and resource",
+        pending_mutation_targets=(target,),
+    )
+
+    assert len(provider.requests) == 3
+    assert run_state.pending_mutation_targets == ()
+    assert run_state.completed_mutation_targets == (target,)
+    assert "src/main/resources/other.json" in run_state.changed_files
+    assert run_state.build_attempt_count == 1
 
 
 def test_multi_file_recoverable_rejection_keeps_later_mutations(tmp_path: Path) -> None:

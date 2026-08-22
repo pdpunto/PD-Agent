@@ -42,9 +42,11 @@ class RunController:
         *,
         external_context: tuple[Any, ...] = (),
         model_config: Mapping[str, Any] | None = None,
+        pending_mutation_targets: tuple[str, ...] = (),
     ) -> tuple[RunState, FinalReport]:
         snapshot = self.project_inspector.inspect(project_root)
         run_state = RunState(project_root=project_root, task=task)
+        run_state.set_pending_mutation_targets(pending_mutation_targets)
         run_id = run_state.run_id
         self._emit(run_id, RunEventType.RUN_STARTED, {"task": task, "project_root": str(project_root)})
         run_state.transition_to(RunStatus.INSPECTING)

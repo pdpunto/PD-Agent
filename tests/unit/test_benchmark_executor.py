@@ -249,12 +249,13 @@ class _FakeController:
         _FakeController.last_init = self.last_init
         self.storage = kwargs["storage"]
 
-    def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+    def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
         _FakeController.last_run = {
             "project_root": project_root,
             "task": task,
             "external_context": tuple(external_context),
             "model_config": dict(model_config or {}),
+            "pending_mutation_targets": tuple(pending_mutation_targets),
         }
         run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
         evidence_refs: tuple[str, ...] = ()
@@ -924,7 +925,7 @@ def test_executor_enforces_required_resources_and_secondary_item_observation(
     tmp_path: Path,
 ) -> None:
     class _ResourceAwareController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):  # noqa: ANN001
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):  # noqa: ANN001
             run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
             jar = _artifact_jar(
                 project_root,
@@ -1001,7 +1002,7 @@ def test_executor_fails_when_required_resource_value_is_wrong_even_if_minecraft_
     tmp_path: Path,
 ) -> None:
     class _WrongResourceController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):  # noqa: ANN001
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):  # noqa: ANN001
             run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
             jar = _artifact_jar(
                 project_root,
@@ -1134,7 +1135,7 @@ def test_executor_blocks_when_minecraft_runner_rejects_target_contract(monkeypat
 
 def test_executor_blocks_when_minecraft_target_escapes_runner_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class _ExternalArtifactController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
             run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
             external_artifact = ArtifactResult(
                 path=tmp_path / "external" / "build" / "libs" / "mod.jar",
@@ -1233,7 +1234,7 @@ def test_filesystem_safe_fragment_shortens_long_attempt_ids() -> None:
 )
 def test_executor_provider_issue_uses_structured_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, expected_code: BenchmarkFailureCode) -> None:
     class _BlockedController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
             run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="provider failed")
             run_state.provider_error_kind = kind
             run_state.provider_error_message = f"{kind} failure"
@@ -1266,7 +1267,7 @@ def test_executor_provider_issue_uses_structured_kind(monkeypatch: pytest.Monkey
 
 def test_executor_message_with_provider_word_without_kind_does_not_fake_unavailable(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class _NoKindController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
             run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="provider word only")
             final_report = _final_report(run_state)
             return run_state, final_report
@@ -1298,7 +1299,7 @@ def test_executor_contamination_invalidates_pass(monkeypatch: pytest.MonkeyPatch
     target_file = fixture_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
 
     class _MutatingController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
             target_file.write_text(target_file.read_text(encoding="utf-8") + "\n// contamination\n", encoding="utf-8")
             run_state = _run_state(project_root, task, status=RunStatus.COMPLETED)
             final_report = _final_report(run_state)
@@ -1337,7 +1338,7 @@ def test_executor_contamination_invalidates_even_if_runtime_fails(monkeypatch: p
     target_file = fixture_root / "src" / "main" / "java" / "dev" / "pdpunto" / "l11" / "ExampleMod.java"
 
     class _FailingController(_FakeController):
-        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None):
+        def run(self, project_root: Path, task: str, *, external_context=(), model_config=None, pending_mutation_targets=()):
             target_file.write_text(target_file.read_text(encoding="utf-8") + "\n// contamination\n", encoding="utf-8")
             run_state = _run_state(project_root, task, status=RunStatus.FAILED, error="build failed")
             final_report = _final_report(run_state)

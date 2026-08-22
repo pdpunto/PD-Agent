@@ -139,6 +139,20 @@ def _task_knowledge_needs(task: BenchmarkTask, *, environment: KnowledgeEnvironm
     return ()
 
 
+def _task_mutation_targets(task: BenchmarkTask) -> tuple[str, ...]:
+    """Expose minimal source/resource targets as internal progress metadata."""
+
+    spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
+    raw_resources = spec.get("required_resources", ())
+    if not isinstance(raw_resources, Sequence) or isinstance(raw_resources, (str, bytes, bytearray)):
+        return ()
+    targets: list[str] = ["role:source"] if task.validation.source_change else []
+    for resource in raw_resources:
+        if isinstance(resource, Mapping) and resource.get("path"):
+            targets.append(Path(str(resource["path"])).as_posix())
+    return tuple(dict.fromkeys(targets))
+
+
 def _target_mod_id_for_task(task: BenchmarkTask) -> str:
     """Resolve the expected Fabric mod id from the acceptance contract."""
 
@@ -458,6 +472,7 @@ class BenchmarkExecutor:
                 task.prompt,
                 external_context=external_context,
                 model_config=dict(config.model_config),
+                pending_mutation_targets=_task_mutation_targets(task),
             )
 
             runtime_mod_dependency_resolution_error: RuntimeModDependencyResolutionError | None = None
