@@ -225,6 +225,40 @@ class AgentRuntime:
                     pending_tool_results = tool_results
                     pending_provider_continuations = response.provider_continuations
 
+                    if (
+                        not response.tool_calls
+                        and run_state.pending_mutation_targets
+                        and run_state.state in {RunStatus.PLANNING, RunStatus.EDITING}
+                    ):
+                        unresolved_mutation_targets = list(run_state.pending_mutation_targets)
+                        self._telemetry.consecutive_gate_violations += 1
+                        message = (
+                            "Required mutation targets remain unresolved: "
+                            f"{unresolved_mutation_targets!r}. "
+                            "Make a concrete modification for one of these targets before validation."
+                        )
+                        self._emit(
+                            run_state.run_id,
+                            RunEventType.ACTION_GATE_VIOLATION,
+                            {
+                                "requested_tool_names": [],
+                                "offered_tool_names": list(offered_tool_names),
+                                "unavailable_tool_names": [],
+                                "gate_violation": True,
+                                "unresolved_mutation_targets": unresolved_mutation_targets,
+                                "message": message,
+                            },
+                        )
+                        history.append(AgentMessage(role="user", content=message))
+                        if self._telemetry.consecutive_gate_violations >= 2:
+                            run_state.state = RunStatus.FAILED
+                            run_state.termination_reason = (
+                                "repeated unresolved mutation targets without operational progress"
+                            )
+                            break
+                        self._persist_state(run_state)
+                        continue
+
                     if gate_violation_detected and not progress_detected:
                         self._persist_state(run_state)
                         continue

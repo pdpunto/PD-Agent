@@ -1658,3 +1658,48 @@ def test_multi_file_recoverable_rejection_keeps_later_mutations(tmp_path: Path) 
     )
     assert any(event.event_type == RunEventType.TOOL_REJECTED for event in events)
     assert any(event.event_type == RunEventType.BUILD_STARTED for event in events)
+
+
+def test_f9_unresolved_mutation_target_reprompts_before_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "f9-pending-target", build_state="pass")
+    target = "src/main/resources/assets/examplemod/lang/en_us.json"
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="I am ready to proceed.",
+                tool_calls=(),
+            ),
+            AgentResponse(
+                assistant_message="Create the required resource.",
+                tool_calls=(
+                    ToolCall(
+                        call_id="1",
+                        tool_name="create_file",
+                        arguments={"path": target, "content": "{}\n"},
+                    ),
+                ),
+            ),
+        ]
+    )
+    controller, storage = _controller(root, provider)
+
+    run_state, report = controller.run(
+        root,
+        "create required resource",
+        pending_mutation_targets=(target,),
+    )
+
+    assert run_state.state.value == "COMPLETED"
+    assert report.final_state.value == "COMPLETED"
+    assert len(provider.requests) == 2
+    assert run_state.pending_mutation_targets == ()
+    assert target in run_state.completed_mutation_targets
+    assert (root / target).exists()
+
+    violations = [
+        event
+        for event in storage.read_events(run_state.run_id)
+        if event.event_type == RunEventType.ACTION_GATE_VIOLATION
+    ]
+    assert violations
+    assert violations[0].payload["unresolved_mutation_targets"] == [target]
