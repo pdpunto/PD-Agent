@@ -669,10 +669,6 @@ class MinecraftTestRunner:
             return MinecraftTestStatus.TIMEOUT, "execution timeout", metadata
 
         if harness_result is None:
-            if process["exit_code"] != 0:
-                metadata["classification"] = "CRASH"
-                return MinecraftTestStatus.CRASH, "Minecraft process exited abnormally", metadata
-
             target_startup_failure = self._target_startup_failure_from_log(
                 latest_log,
                 target=target,
@@ -686,6 +682,10 @@ class MinecraftTestRunner:
                     "target mod failed during Minecraft startup",
                     metadata,
                 )
+
+            if process["exit_code"] != 0:
+                metadata["classification"] = "CRASH"
+                return MinecraftTestStatus.CRASH, "Minecraft process exited abnormally", metadata
 
             metadata["classification"] = "INFRA_ERROR"
             return MinecraftTestStatus.INFRA_ERROR, "missing harness result", metadata

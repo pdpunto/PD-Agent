@@ -17,7 +17,14 @@ from pd_agent.benchmark import (
 )
 from pd_agent.core import ArtifactResult, BuildResult, RunStatus
 from pd_agent.core.errors import BuildError, LimitReachedError, ProviderError
-from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
+from pd_agent.minecraft import (
+    MinecraftEvidencePaths,
+    MinecraftRuntimeEvidence,
+    MinecraftTargetMetadata,
+    MinecraftTestResult,
+    MinecraftTestSpec,
+    MinecraftTestStatus,
+)
 
 
 def _utc(text: str) -> datetime:
@@ -35,6 +42,7 @@ def _collection(
     inconsistencies: tuple[str, ...] = (),
     final_state: RunStatus | None = None,
     termination_reason: str | None = None,
+    minecraft_runtime_metadata: dict[str, object] | None = None,
 ) -> BenchmarkCollection:
     run_id = "11111111-1111-4111-8111-111111111111"
     build = BuildResult(
@@ -78,6 +86,9 @@ def _collection(
                 java_version="21",
             ),
             evidence_paths=MinecraftEvidencePaths(root=Path("C:/dev/project/evidence/minecraft/run-1")),
+            runtime_evidence=MinecraftRuntimeEvidence(
+                metadata=minecraft_runtime_metadata or {},
+            ),
         )
     return BenchmarkCollection(
         run_id=run_id,
@@ -267,3 +278,35 @@ def test_classifier_other_failed_reason_is_not_generic_agent_failure() -> None:
     assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
     assert classification.failure_origin == BenchmarkFailureOrigin.BENCHMARK_INFRA
     assert classification.failure_code == BenchmarkFailureCode.BENCHMARK_EVIDENCE_INVALID
+
+
+def test_classifier_target_startup_crash_is_agent_failure() -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(
+            minecraft_status=MinecraftTestStatus.CRASH,
+            minecraft_runtime_metadata={
+                "classification": "CRASH",
+                "target_startup_failure": True,
+                "target_startup_failure_evidence": (
+                    "Could not execute entrypoint stage 'main', "
+                    "provided by 'pdagentl11'"
+                ),
+            },
+        )
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_FUNCTIONAL_FAILURE
+
+
+def test_classifier_unattributed_minecraft_crash_remains_harness_block() -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(minecraft_status=MinecraftTestStatus.CRASH)
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert classification.failure_origin == BenchmarkFailureOrigin.MINECRAFT_HARNESS
+    assert classification.failure_code == BenchmarkFailureCode.HARNESS_CRASH

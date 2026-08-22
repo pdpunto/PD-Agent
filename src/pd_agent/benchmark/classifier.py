@@ -123,6 +123,19 @@ class BenchmarkClassifier:
                     reason="minecraft behavior failed",
                 )
             if minecraft.status == MinecraftTestStatus.CRASH:
+                runtime_metadata = (
+                    minecraft.runtime_evidence.metadata
+                    if minecraft.runtime_evidence is not None
+                    else {}
+                )
+                if runtime_metadata.get("target_startup_failure") is True:
+                    return BenchmarkClassification(
+                        execution_status=BenchmarkExecutionStatus.COMPLETED,
+                        task_outcome=BenchmarkTaskOutcome.FAIL,
+                        failure_origin=BenchmarkFailureOrigin.AGENT,
+                        failure_code=BenchmarkFailureCode.AGENT_FUNCTIONAL_FAILURE,
+                        reason="target mod crashed during Minecraft startup",
+                    )
                 return BenchmarkClassification(
                     execution_status=BenchmarkExecutionStatus.BLOCKED,
                     task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,

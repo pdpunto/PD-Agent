@@ -780,3 +780,37 @@ def test_run_missing_harness_result_without_target_failure_remains_infra_error(
     assert result.reason == "missing harness result"
     assert result.runtime_evidence is not None
     assert result.runtime_evidence.metadata["classification"] == "INFRA_ERROR"
+
+
+def test_run_nonzero_exit_with_target_entrypoint_failure_marks_target_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(target_jar=Path("build/libs/target.jar"), **_spec())
+    run_id = "run-target-startup-crash-nonzero"
+
+    latest_log = """
+[main/ERROR]: Failed to start the minecraft server
+java.lang.RuntimeException: Could not execute entrypoint stage 'main' due to errors, provided by 'pdagentl11' at 'dev.pdpunto.l11.ExampleMod'!
+Caused by: java.lang.NullPointerException: Item id not set
+""".strip()
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload=None,
+            exit_code=1,
+            latest_log=latest_log,
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.CRASH
+    assert result.reason == "target mod failed during Minecraft startup"
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.metadata["target_startup_failure"] is True
