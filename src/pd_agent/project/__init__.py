@@ -15,6 +15,7 @@ from .models import (
     ProjectSnapshot,
     WrapperSnapshot,
 )
+from .mutation_paths import MutationPathResolutionError, resolve_logical_resource_path
 
 __all__ = [
     "DetectedValue",
@@ -29,5 +30,6 @@ __all__ = [
     "ProjectInspector",
     "ProjectSnapshot",
     "WrapperSnapshot",
+    "MutationPathResolutionError",
+    "resolve_logical_resource_path",
 ]
-

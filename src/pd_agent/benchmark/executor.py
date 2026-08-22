@@ -26,7 +26,12 @@ from pd_agent.minecraft import (
     MinecraftTestStatus,
 )
 from pd_agent.minecraft.errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
-from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
+from pd_agent.project import (
+    ProjectInspector,
+    ProjectInspectionStatus,
+    ProjectSnapshot,
+    resolve_logical_resource_path,
+)
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
 
@@ -139,7 +144,7 @@ def _task_knowledge_needs(task: BenchmarkTask, *, environment: KnowledgeEnvironm
     return ()
 
 
-def _task_mutation_targets(task: BenchmarkTask) -> tuple[str, ...]:
+def _task_mutation_targets(task: BenchmarkTask, project_snapshot: ProjectSnapshot) -> tuple[str, ...]:
     """Expose minimal source/resource targets as internal progress metadata."""
 
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
@@ -149,7 +154,7 @@ def _task_mutation_targets(task: BenchmarkTask) -> tuple[str, ...]:
     targets: list[str] = ["role:source"] if task.validation.source_change else []
     for resource in raw_resources:
         if isinstance(resource, Mapping) and resource.get("path"):
-            targets.append(Path(str(resource["path"])).as_posix())
+            targets.append(resolve_logical_resource_path(project_snapshot, str(resource["path"])))
     return tuple(dict.fromkeys(targets))
 
 
@@ -472,7 +477,7 @@ class BenchmarkExecutor:
                 task.prompt,
                 external_context=external_context,
                 model_config=dict(config.model_config),
-                pending_mutation_targets=_task_mutation_targets(task),
+                pending_mutation_targets=_task_mutation_targets(task, project_snapshot),
             )
 
             runtime_mod_dependency_resolution_error: RuntimeModDependencyResolutionError | None = None
