@@ -15,6 +15,10 @@ from .contracts import (
     ToolCall,
     ToolResult,
     ToolResultStatus,
+    ValidationResult,
+    ValidationStage,
+    ValidationStatus,
+    ValidationViolation,
 )
 from .errors import (
     ArtifactValidationError,
@@ -62,5 +66,9 @@ __all__ = [
     "ToolResult",
     "ToolResultStatus",
     "ToolValidationError",
+    "ValidationResult",
+    "ValidationStage",
+    "ValidationStatus",
+    "ValidationViolation",
     "generate_run_id",
 ]

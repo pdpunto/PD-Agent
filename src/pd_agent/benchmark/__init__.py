@@ -19,6 +19,15 @@ from .environment import (
 )
 from .executor import BenchmarkExecutionResult, BenchmarkExecutor
 from .pacing import BenchmarkPacedProvider, BenchmarkRequestPacer
+from .public_validation import (
+    PUBLIC_VALIDATION_SCHEMA_VERSION,
+    PublicJsonPointerAssertion,
+    PublicPreservationRequirements,
+    PublicRegistryObservation,
+    PublicResourceRequirement,
+    PublicValidationContract,
+    build_public_validation_contract,
+)
 from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionResumeError, BenchmarkExecutionRunner
 from .scheduler import (
     BenchmarkSchedule,
@@ -103,6 +112,13 @@ __all__ = [
     "BenchmarkSchemaError",
     "BenchmarkRun",
     "BenchmarkRequestPacer",
+    "PUBLIC_VALIDATION_SCHEMA_VERSION",
+    "PublicJsonPointerAssertion",
+    "PublicPreservationRequirements",
+    "PublicRegistryObservation",
+    "PublicResourceRequirement",
+    "PublicValidationContract",
+    "build_public_validation_contract",
     "BenchmarkTask",
     "BenchmarkTaskOutcome",
     "BenchmarkTaskReference",

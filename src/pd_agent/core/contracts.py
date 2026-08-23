@@ -42,6 +42,130 @@ class ToolResultStatus(StrEnum):
     TIMEOUT = "timeout"
 
 
+class ValidationStage(StrEnum):
+    """Stage at which a validation result was produced."""
+
+    PRE_BUILD = "PRE_BUILD"
+    POST_ARTIFACT = "POST_ARTIFACT"
+    RUNTIME = "RUNTIME"
+
+
+class ValidationStatus(StrEnum):
+    """Provider-neutral validation outcome."""
+
+    PASS = "PASS"
+    REPAIRABLE_FAIL = "REPAIRABLE_FAIL"
+    BLOCKED = "BLOCKED"
+
+
+def _validation_text(value: Any, *, field_name: str) -> str:
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{field_name} must not be empty")
+    return text
+
+
+def _validation_json_ready(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _validation_json_ready(item)
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        }
+    if isinstance(value, tuple):
+        return [_validation_json_ready(item) for item in value]
+    if isinstance(value, list):
+        return [_validation_json_ready(item) for item in value]
+    if isinstance(value, set):
+        return [_validation_json_ready(item) for item in sorted(value, key=repr)]
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return value.as_posix()
+    return value
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ValidationViolation:
+    """Deterministic description of one validation violation."""
+
+    code: str
+    requirement: str
+    observed: Any
+    message: str
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", _validation_text(self.code, field_name="code"))
+        object.__setattr__(
+            self,
+            "requirement",
+            _validation_text(self.requirement, field_name="requirement"),
+        )
+        object.__setattr__(self, "message", _validation_text(self.message, field_name="message"))
+        refs = tuple(_validation_text(ref, field_name="evidence_ref") for ref in self.evidence_refs)
+        object.__setattr__(self, "evidence_refs", refs)
+        object.__setattr__(self, "observed", _validation_json_ready(self.observed))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "requirement": self.requirement,
+            "observed": self.observed,
+            "message": self.message,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ValidationViolation":
+        return cls(
+            code=str(data["code"]),
+            requirement=str(data["requirement"]),
+            observed=data.get("observed"),
+            message=str(data["message"]),
+            evidence_refs=tuple(str(item) for item in data.get("evidence_refs", [])),
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ValidationResult:
+    """Serializable aggregate validation result."""
+
+    stage: ValidationStage
+    status: ValidationStatus
+    summary: str
+    violations: tuple[ValidationViolation, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "stage", ValidationStage(self.stage))
+        object.__setattr__(self, "status", ValidationStatus(self.status))
+        object.__setattr__(self, "summary", _validation_text(self.summary, field_name="summary"))
+        object.__setattr__(self, "violations", tuple(self.violations))
+        refs = tuple(_validation_text(ref, field_name="evidence_ref") for ref in self.evidence_refs)
+        object.__setattr__(self, "evidence_refs", refs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage.value,
+            "status": self.status.value,
+            "summary": self.summary,
+            "violations": [violation.to_dict() for violation in self.violations],
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ValidationResult":
+        return cls(
+            stage=ValidationStage(str(data["stage"])),
+            status=ValidationStatus(str(data["status"])),
+            summary=str(data["summary"]),
+            violations=tuple(
+                ValidationViolation.from_dict(item) for item in data.get("violations", [])
+            ),
+            evidence_refs=tuple(str(item) for item in data.get("evidence_refs", [])),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class AgentMessage:
     """Single provider-neutral message."""
