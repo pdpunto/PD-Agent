@@ -50,9 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    launch_root = args.launch_root.resolve(strict=False)
+def initialize_experimental_roots(launch_root: Path) -> tuple[str, Path]:
+    """Create the isolated roots before Gradle resolves the execution path."""
+
+    launch_root = Path(launch_root).resolve(strict=False)
     if launch_root.exists():
         raise ValueError("--launch-root must be new and unused")
     launch_root.mkdir(parents=True, exist_ok=False)
@@ -60,6 +61,37 @@ def main(argv: list[str] | None = None) -> int:
     execution_root = launch_root / "ExecutionRoot" / execution_id
     if execution_root.exists():
         raise ValueError("ExecutionRoot already exists")
+    execution_root.mkdir(parents=True, exist_ok=False)
+    return execution_id, execution_root
+
+
+def _write_experimental_manifest(path: Path, *, execution_id: str, run_id: str, launch_root: Path, execution_root: Path, task_id: str, task_version: str, **extra: object) -> None:
+    manifest = build_luna_experimental_manifest(
+        execution_id=execution_id,
+        run_id=run_id,
+        launch_root=str(launch_root),
+        task_id=task_id,
+        task_version=task_version,
+    )
+    manifest.update({"execution_root": str(execution_root), **extra})
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    launch_root = args.launch_root.resolve(strict=False)
+    execution_id, execution_root = initialize_experimental_roots(launch_root)
+    manifest_path = execution_root / "experimental-manifest.json"
+    _write_experimental_manifest(
+        manifest_path,
+        execution_id=execution_id,
+        run_id="pending",
+        launch_root=launch_root,
+        execution_root=execution_root,
+        task_id="F6-T2",
+        task_version="5",
+        lifecycle_status="INITIALIZING",
+    )
 
     catalog = BenchmarkCatalog.load(args.catalog_root)
     config = _load_one_config(args.configs_json)
@@ -121,21 +153,19 @@ def main(argv: list[str] | None = None) -> int:
         pd_agent_commit=args.pd_agent_commit,
         preserve_workspace=True,
     )
-    manifest = build_luna_experimental_manifest(
+    _write_experimental_manifest(
+        manifest_path,
         execution_id=execution_id,
         run_id=result.run_state.run_id,
-        launch_root=str(launch_root),
+        launch_root=launch_root,
+        execution_root=execution_root,
         task_id=task.task_id,
         task_version=task.task_version,
+        lifecycle_status="COMPLETED",
+        benchmark_run_path=str(result.benchmark_run_path),
+        budget_metadata=guard.metadata(),
     )
-    manifest["execution_root"] = str(execution_root)
-    manifest["benchmark_run_path"] = str(result.benchmark_run_path)
-    manifest["budget_metadata"] = guard.metadata()
-    (execution_root / "experimental-manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    print(execution_root / "experimental-manifest.json")
+    print(manifest_path)
     return 0
 
 
