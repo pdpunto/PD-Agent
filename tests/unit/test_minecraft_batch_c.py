@@ -747,6 +747,38 @@ Caused by: java.lang.NullPointerException: Item id not set
     assert runtime_metadata["classification"] == "CRASH"
     assert runtime_metadata["target_startup_failure"] is True
     assert "provided by 'pdagentl11'" in runtime_metadata["target_startup_failure_evidence"]
+    assert result.target_failure_reason == "Item id not set"
+    assert runtime_metadata["target_failure_reason"] == "Item id not set"
+
+
+@pytest.mark.parametrize("cause", ["Item id not set", "Block id not set"])
+def test_target_startup_failure_preserves_compact_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cause: str,
+) -> None:
+    _make_jar(tmp_path)
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(target_jar=Path("build/libs/target.jar"), **_spec())
+    run_id = f"run-target-startup-{cause.split()[0].casefold()}"
+    latest_log = f"""
+[main/ERROR]: Failed to start the minecraft server
+java.lang.RuntimeException: Could not execute entrypoint stage 'main' due to errors, provided by 'pdagentl11' at 'dev.pdpunto.l11.ExampleMod'!
+Caused by: java.lang.ExceptionInInitializerError
+Caused by: java.lang.NullPointerException: {cause}
+""".strip()
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(root=self.project_root, run_id=run_id, payload=None, exit_code=1, latest_log=latest_log)
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+    result = runner.run(spec, run_id=run_id, java_version="21")
+
+    assert result.status is MinecraftTestStatus.CRASH
+    assert result.reason == "target mod failed during Minecraft startup"
+    assert result.target_failure_reason == cause
+    assert result.runtime_evidence is not None
+    assert result.runtime_evidence.metadata["target_failure_reason"] == cause
 
 
 def test_run_missing_harness_result_without_target_failure_remains_infra_error(

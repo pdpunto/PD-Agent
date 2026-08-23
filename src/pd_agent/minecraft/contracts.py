@@ -410,6 +410,7 @@ class MinecraftTestResult:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     duration_seconds: float | None = None
+    target_failure_reason: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @property
@@ -421,6 +422,7 @@ class MinecraftTestResult:
             "run_id": self.run_id,
             "status": self.status.value,
             "reason": self.reason,
+            "target_failure_reason": self.target_failure_reason,
             "spec": self.spec.to_dict(),
             "target": self.target.to_dict(),
             "evidence_paths": self.evidence_paths.to_dict(),
@@ -477,6 +479,11 @@ class MinecraftTestResult:
             duration_seconds=(
                 float(data["duration_seconds"])
                 if data.get("duration_seconds") is not None
+                else None
+            ),
+            target_failure_reason=(
+                str(data["target_failure_reason"])
+                if data.get("target_failure_reason") is not None
                 else None
             ),
             metadata=dict(data.get("metadata", {})),

@@ -364,6 +364,7 @@ def test_result_serialization_and_pass_property(tmp_path: Path) -> None:
         started_at=datetime.now(timezone.utc),
         finished_at=datetime.now(timezone.utc),
         duration_seconds=0.0,
+        target_failure_reason="Item id not set",
         metadata={"phase": "batch-a"},
     )
 
@@ -371,6 +372,7 @@ def test_result_serialization_and_pass_property(tmp_path: Path) -> None:
     assert encoded["status"] == "INFRA_ERROR"
     assert encoded["spec"]["target_mod_id"] == "pdagentl11"
     assert encoded["target"]["sha256"] == target.sha256
+    assert encoded["target_failure_reason"] == "Item id not set"
     assert not result.passed
     assert MinecraftTestResult.from_dict(encoded) == result
     assert json.dumps(encoded, sort_keys=True) == json.dumps(result.to_dict(), sort_keys=True)

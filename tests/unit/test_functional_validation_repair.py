@@ -238,17 +238,34 @@ def test_t3_like_post_artifact_then_runtime_repair(tmp_path: Path) -> None:
     assert any(item.stage is ValidationStage.RUNTIME and item.status is ValidationStatus.REPAIRABLE_FAIL for item in state.validation_results)
 
 
-def test_item_id_not_set_is_repairable_feedback(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cause", ["Item id not set", "Block id not set", "target initialization exception"])
+def test_target_startup_causes_are_repairable_feedback(tmp_path: Path, cause: str) -> None:
     jar = tmp_path / "artifact.jar"
     with zipfile.ZipFile(jar, "w") as archive:
         archive.writestr("fabric.mod.json", "{}")
     artifact = type("Artifact", (), {"path": jar})()
     validator = BenchmarkFunctionalValidator(
         acceptance_spec={"required_resources": []},
-        runtime_check=lambda artifact, run_id: _minecraft_result(MinecraftTestStatus.CRASH, "Item id not set"),
+        runtime_check=lambda artifact, run_id: _minecraft_result(MinecraftTestStatus.CRASH, cause),
     )
     result = validator.validate(tmp_path, artifact, None, "run")
     assert result.status is ValidationStatus.REPAIRABLE_FAIL
+    assert result.violations[0].message == cause
+
+
+@pytest.mark.parametrize("status", [MinecraftTestStatus.CRASH, MinecraftTestStatus.INFRA_ERROR, MinecraftTestStatus.TIMEOUT])
+def test_unknown_or_non_target_runtime_failures_are_blocked(tmp_path: Path, status: MinecraftTestStatus) -> None:
+    jar = tmp_path / "artifact.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("fabric.mod.json", "{}")
+    artifact = type("Artifact", (), {"path": jar})()
+    reason = "unknown startup failure" if status is MinecraftTestStatus.CRASH else "runtime unavailable"
+    validator = BenchmarkFunctionalValidator(
+        acceptance_spec={"required_resources": []},
+        runtime_check=lambda artifact, run_id: _minecraft_result(status, reason),
+    )
+    result = validator.validate(tmp_path, artifact, None, "run")
+    assert result.status is ValidationStatus.BLOCKED
 
 
 @pytest.mark.parametrize("stage", [ValidationStage.POST_ARTIFACT, ValidationStage.RUNTIME])

@@ -25,6 +25,24 @@ def _resource_violation_code(entry: Mapping[str, Any]) -> str:
     return "RESOURCE_INVALID"
 
 
+def _target_failure_reason(result: MinecraftTestResult) -> str:
+    if result.target_failure_reason:
+        return result.target_failure_reason
+    if result.runtime_evidence is not None:
+        value = result.runtime_evidence.metadata.get("target_failure_reason")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return result.reason
+
+
+def _is_repairable_target_crash(result: MinecraftTestResult) -> bool:
+    reason = _target_failure_reason(result).casefold()
+    return any(
+        marker in reason
+        for marker in ("item id not set", "block id not set", "target initialization exception")
+    )
+
+
 @dataclass(slots=True)
 class BenchmarkFunctionalValidator:
     """Run cheap artifact checks and one Minecraft validation per artifact."""
@@ -129,14 +147,10 @@ class BenchmarkFunctionalValidator:
         if result.status in {MinecraftTestStatus.INFRA_ERROR, MinecraftTestStatus.TIMEOUT}:
             status = ValidationStatus.BLOCKED
         elif result.status is MinecraftTestStatus.CRASH:
-            reason = result.reason.casefold()
-            status = (
-                ValidationStatus.REPAIRABLE_FAIL
-                if "item id not set" in reason or "target initialization exception" in reason
-                else ValidationStatus.BLOCKED
-            )
+            status = ValidationStatus.REPAIRABLE_FAIL if _is_repairable_target_crash(result) else ValidationStatus.BLOCKED
         else:
             status = ValidationStatus.REPAIRABLE_FAIL
+        specific_reason = _target_failure_reason(result)
         requirement = "runtime observations"
         spec = self.acceptance_spec.get("observation_params") if isinstance(self.acceptance_spec, Mapping) else None
         if isinstance(spec, Mapping):
@@ -148,8 +162,12 @@ class BenchmarkFunctionalValidator:
         violation = ValidationViolation(
             code=code,
             requirement=requirement,
-            observed={"category": result.status.value, "reason": result.reason},
-            message=result.reason or "runtime requirement failed",
+            observed={
+                "category": result.status.value,
+                "reason": result.reason,
+                "target_failure_reason": result.target_failure_reason,
+            },
+            message=specific_reason or "runtime requirement failed",
             evidence_refs=evidence,
         )
         return ValidationResult(

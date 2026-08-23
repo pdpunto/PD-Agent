@@ -421,6 +421,7 @@ class MinecraftTestRunner:
             started_at=process["started_at"],
             finished_at=process["finished_at"],
             duration_seconds=process["duration_seconds"],
+            target_failure_reason=runtime_metadata.get("target_failure_reason"),
             metadata={
                 "phase": "runtime",
                 "launch_mode": launch_mode,
@@ -450,6 +451,7 @@ class MinecraftTestRunner:
                 started_at=final_result.started_at,
                 finished_at=final_result.finished_at,
                 duration_seconds=final_result.duration_seconds,
+                target_failure_reason=final_result.target_failure_reason,
                 metadata={
                     **dict(final_result.metadata),
                     "runtime_mod_dependencies": list(runtime_dependency_records),
@@ -677,6 +679,9 @@ class MinecraftTestRunner:
                 metadata["classification"] = "CRASH"
                 metadata["target_startup_failure"] = True
                 metadata["target_startup_failure_evidence"] = target_startup_failure
+                target_failure_reason = self._target_startup_failure_reason(target_startup_failure)
+                if target_failure_reason is not None:
+                    metadata["target_failure_reason"] = target_failure_reason
                 return (
                     MinecraftTestStatus.CRASH,
                     "target mod failed during Minecraft startup",
@@ -736,6 +741,15 @@ class MinecraftTestRunner:
 
         metadata["classification"] = "PASS"
         return MinecraftTestStatus.PASS, reason, metadata
+
+    @staticmethod
+    def _target_startup_failure_reason(evidence: str) -> str | None:
+        """Extract one compact, target-attributable startup cause from evidence."""
+
+        for marker in ("Item id not set", "Block id not set", "target initialization exception"):
+            if marker.casefold() in evidence.casefold():
+                return marker
+        return None
 
     def _finalize_runtime_failure(
         self,
