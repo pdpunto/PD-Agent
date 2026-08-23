@@ -19,6 +19,7 @@ from .models import (
     BenchmarkRun,
     BenchmarkTaskReference,
     BenchmarkExecutionStatus,
+    BenchmarkFailureCode,
     BenchmarkExecutionState,
 )
 from .scheduler import BenchmarkSchedule, BenchmarkScheduledAttempt, BenchmarkScheduler
@@ -473,12 +474,53 @@ class BenchmarkExecutionRunner:
                     knowledge_needs=knowledge_needs_by_task.get((task.task_id, task.task_version), ()) if knowledge_needs_by_task else None,
                     preserve_workspace=preserve_workspaces,
                 )
-                schedule.record_completed_run(result.benchmark_run)
-                completed_keys.add(attempt_key)
                 logical_requests_used += max(
                     self._logical_request_count_from_result(result),
                     0,
                 )
+                if self._is_rate_limit_result(result):
+                    current_state = BenchmarkExecutionState(
+                        execution_id=manifest.execution_id,
+                        batch_status=BenchmarkBatchStatus.RATE_LIMIT_PAUSED,
+                        logical_budget_cap=self.logical_session_cap,
+                        logical_budget_used=logical_requests_used,
+                        logical_budget_remaining=max(self.logical_session_cap - logical_requests_used, 0),
+                        attempt_reservation=reservation,
+                        pause_reason=result.classification.reason,
+                        paused_at=datetime.now(timezone.utc),
+                        next_pending_schedule_item=attempt.to_dict(),
+                        session_id=current_state.session_id,
+                        session_index=current_state.session_index,
+                        resume_count=current_state.resume_count,
+                    )
+                    schedule_path = _write_json(execution_dir / "schedule.json", schedule.to_dict())
+                    execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+                    comparison = self._aggregate_comparison(
+                        _completed_runs(schedule),
+                        dataset=dataset,
+                        configs=configs,
+                        tasks=tasks,
+                    )
+                    comparison_json_path = _write_json(execution_dir / "comparison.json", comparison.to_dict())
+                    comparison_md_path = execution_dir / "comparison.md"
+                    comparison_md_path.write_text(render_comparison_markdown(comparison), encoding="utf-8")
+                    return BenchmarkExecutionBatch(
+                        execution_id=manifest.execution_id,
+                        execution_root=execution_dir,
+                        batch_status=BenchmarkBatchStatus.RATE_LIMIT_PAUSED,
+                        manifest=manifest,
+                        schedule=schedule,
+                        execution_state=current_state,
+                        comparison=comparison,
+                        runs=_completed_runs(schedule),
+                        manifest_path=manifest_path,
+                        schedule_path=schedule_path,
+                        execution_state_path=execution_state_path,
+                        comparison_json_path=comparison_json_path,
+                        comparison_md_path=comparison_md_path,
+                    )
+                schedule.record_completed_run(result.benchmark_run)
+                completed_keys.add(attempt_key)
                 if result.benchmark_run.execution_status in {BenchmarkExecutionStatus.BLOCKED, BenchmarkExecutionStatus.INVALID}:
                     replacement = schedule.next_replacement(
                         attempt.task_id,
@@ -671,7 +713,12 @@ class BenchmarkExecutionRunner:
         next_pending = _next_pending_attempt(schedule, completed_keys)
         state_next_pending = execution_state.next_pending_schedule_item
         if next_pending is None:
-            if execution_state.batch_status not in {BenchmarkBatchStatus.COMPLETED, BenchmarkBatchStatus.BUDGET_PAUSED, BenchmarkBatchStatus.RUNNING}:
+            if execution_state.batch_status not in {
+                BenchmarkBatchStatus.COMPLETED,
+                BenchmarkBatchStatus.BUDGET_PAUSED,
+                BenchmarkBatchStatus.RATE_LIMIT_PAUSED,
+                BenchmarkBatchStatus.RUNNING,
+            }:
                 raise BenchmarkExecutionResumeError("invalid resume state", code="RESUME_INVALID_STATE")
             return
         if state_next_pending is None:
@@ -701,6 +748,13 @@ class BenchmarkExecutionRunner:
             if isinstance(value, int):
                 return value
         return 0
+
+    def _is_rate_limit_result(self, result: BenchmarkExecutionResult) -> bool:
+        return (
+            getattr(result.benchmark_run, "failure_code", None) == BenchmarkFailureCode.PROVIDER_RATE_LIMIT
+            or getattr(getattr(result, "classification", None), "failure_code", None)
+            == BenchmarkFailureCode.PROVIDER_RATE_LIMIT
+        )
 
     def _config_for(
         self,

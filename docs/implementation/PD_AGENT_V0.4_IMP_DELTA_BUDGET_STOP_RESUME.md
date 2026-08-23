@@ -247,6 +247,11 @@ Todo PASS y sin cambios en dataset, acceptance o Brain.
 - introducir el estado/envelope necesario para `BUDGET_PAUSED`;
 - mantener compatibilidad JSON con payloads actuales.
 
+Para provider `429`/`RESOURCE_EXHAUSTED`, el estado de lote es
+`RATE_LIMIT_PAUSED`. El intento afectado conserva su evidencia y uso real,
+pero no entra en `completed_runs`, no consume `max_attempts_per_cell`, no
+genera replacement y permanece como el mismo pending item para `resume()`.
+
 ### `src/pd_agent/benchmark/pacing.py`
 
 - conservar pacing monotono;

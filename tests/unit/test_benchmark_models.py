@@ -240,6 +240,7 @@ def test_enums_cover_expected_values() -> None:
     assert BenchmarkExecutionStatus.INVALID.value == "INVALID"
     assert BenchmarkBatchStatus.RUNNING.value == "RUNNING"
     assert BenchmarkBatchStatus.BUDGET_PAUSED.value == "BUDGET_PAUSED"
+    assert BenchmarkBatchStatus.RATE_LIMIT_PAUSED.value == "RATE_LIMIT_PAUSED"
     assert BenchmarkBatchStatus.COMPLETED.value == "COMPLETED"
     assert BenchmarkTaskOutcome.PASS.value == "PASS"
     assert BenchmarkTaskOutcome.FAIL.value == "FAIL"

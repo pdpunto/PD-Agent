@@ -500,6 +500,22 @@ def test_error_normalization_by_exception_name(error: Exception, expected_kind: 
     assert excinfo.value.retryable is retryable
 
 
+def test_resource_exhausted_message_is_rate_limit_without_overmatching_generic_quota_errors() -> None:
+    provider = _provider(client=_FakeClient(Exception("429 RESOURCE_EXHAUSTED: quota exceeded for generate_content")))
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.execute(_request(messages=(AgentMessage(role="user", content="hi"),), model_config={"model": "gemini-test"}))
+
+    assert excinfo.value.kind == "rate_limit"
+    assert excinfo.value.retryable is True
+
+    provider = _provider(client=_FakeClient(Exception("quota exceeded for generate_content")))
+    with pytest.raises(ProviderError) as excinfo:
+        provider.execute(_request(messages=(AgentMessage(role="user", content="hi"),), model_config={"model": "gemini-test"}))
+
+    assert excinfo.value.kind == "unavailable"
+
+
 def test_timeout_and_retry_configuration_stays_under_control() -> None:
     response = SimpleNamespace(text="done", usage_metadata=_Usage())
     provider = _provider(client=_FakeClient(response), timeout_seconds=3.25, provider_retry_limit=4)

@@ -81,6 +81,7 @@ class BenchmarkBatchStatus(StrEnum):
 
     RUNNING = "RUNNING"
     BUDGET_PAUSED = "BUDGET_PAUSED"
+    RATE_LIMIT_PAUSED = "RATE_LIMIT_PAUSED"
     COMPLETED = "COMPLETED"
 
 

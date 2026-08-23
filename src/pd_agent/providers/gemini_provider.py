@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 
 from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ProviderContinuation, ToolCall, ToolResult
@@ -463,12 +464,15 @@ class GeminiProvider(ModelProvider):
         status_code = self._first_present(self._coerce_mapping(exc), "status_code", "status", "code")
         if status_code is None:
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        status_code_int = int(status_code) if isinstance(status_code, int) or (isinstance(status_code, str) and status_code.isdigit()) else None
+        message = str(exc).strip()
+        message_upper = message.upper()
 
         kind = "unavailable"
         retryable = False
         if name in {"AuthenticationError", "PermissionDeniedError", "UnauthenticatedError", "OAuthError"} or "auth" in lowered_name or "permission" in lowered_name:
             kind = "authentication"
-        elif name in {"RateLimitError", "TooManyRequestsError"} or "rate_limit" in lowered_name or "ratelimit" in lowered_name or "too_many" in lowered_name or status_code == 429:
+        elif name in {"RateLimitError", "TooManyRequestsError"} or "rate_limit" in lowered_name or "ratelimit" in lowered_name or "too_many" in lowered_name or status_code_int == 429:
             kind = "rate_limit"
             retryable = True
         elif name in {"APITimeoutError", "TimeoutError", "DeadlineExceededError"} or "timeout" in lowered_name or "deadline" in lowered_name:
@@ -477,19 +481,19 @@ class GeminiProvider(ModelProvider):
         elif name in {"BadRequestError", "InvalidArgumentError", "ResponseValidationError", "ValidationError"} or "badrequest" in lowered_name or "invalidargument" in lowered_name or "validation" in lowered_name or "schema" in lowered_name or status_code in {400, 404, 422}:
             kind = "protocol"
         elif name in {"InternalServerError", "ServiceUnavailableError", "UnavailableError", "ConflictError"} or "unavailable" in lowered_name or "servererror" in lowered_name or (
-            isinstance(status_code, int) and status_code >= 500
+            isinstance(status_code_int, int) and status_code_int >= 500
         ):
             kind = "unavailable"
             retryable = True
 
-        if status_code in {401, 403}:
+        if status_code_int in {401, 403}:
             kind = "authentication"
-        elif status_code == 429:
+        elif status_code_int == 429 or "RESOURCE_EXHAUSTED" in message_upper or re.search(r"\b429\b", message_upper):
             kind = "rate_limit"
             retryable = True
 
         request_id = self._first_present(self._coerce_mapping(exc), "request_id", "_request_id")
-        message = self.redactor.redact_text(str(exc).strip() or f"Gemini provider {kind} error")
+        message = self.redactor.redact_text(message or f"Gemini provider {kind} error")
         details = {
             "exception_type": name,
             "model": model,
@@ -503,7 +507,7 @@ class GeminiProvider(ModelProvider):
             message,
             kind=kind,
             request_id=str(request_id) if request_id is not None else None,
-            status_code=int(status_code) if isinstance(status_code, int) else None,
+            status_code=status_code_int,
             retryable=retryable,
             provider="gemini",
             details=details,
