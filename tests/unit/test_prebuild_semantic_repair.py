@@ -70,11 +70,12 @@ def test_prebuild_reports_missing_invalid_pointer_and_mismatch(tmp_path: Path) -
     assert [item.code for item in failed.violations] == ["JSON_POINTER_MISSING", "JSON_POINTER_MISMATCH"]
 
 
-def test_t2_and_t3_contracts_pass_prebuild(tmp_path: Path) -> None:
+def test_t2_and_t3_contracts_pass_prebuild_from_fabric_resource_root(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
-    (root / "assets/examplemod/lang").mkdir(parents=True)
-    (root / "data/examplemod/recipe").mkdir(parents=True)
-    (root / "assets/examplemod/lang/en_us.json").write_text(
+    resource_root = root / "src/main/resources"
+    (resource_root / "assets/examplemod/lang").mkdir(parents=True)
+    (resource_root / "data/examplemod/recipe").mkdir(parents=True)
+    (resource_root / "assets/examplemod/lang/en_us.json").write_text(
         json.dumps(
             {
                 "block.examplemod.marble_lantern": "Marble Lantern",
@@ -85,11 +86,11 @@ def test_t2_and_t3_contracts_pass_prebuild(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (root / "data/examplemod/recipe/server_core.json").write_text(
+    (resource_root / "data/examplemod/recipe/server_core.json").write_text(
         json.dumps({"result": {"id": "examplemod:server_core", "count": 1}}),
         encoding="utf-8",
     )
-    validator = PreBuildWorkspaceValidator()
+    validator = PreBuildWorkspaceValidator(resource_roots=(resource_root,))
     for task_id in ("F6-T2", "F6-T3"):
         task = json.loads((Path("benchmarks/tasks") / f"{task_id}-v5.json").read_text(encoding="utf-8"))
         contract = build_public_validation_contract(BenchmarkAcceptanceSpec.from_dict(task["acceptance"]))

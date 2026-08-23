@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from pd_agent.core import ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
+from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot, resolve_logical_resource_path
 
 
 class PreBuildValidationError(ValueError):
@@ -54,6 +55,9 @@ def _contract_mapping(contract: Any) -> Mapping[str, Any]:
 class PreBuildWorkspaceValidator:
     """Validate only required files and JSON pointer requirements."""
 
+    def __init__(self, *, resource_roots: tuple[Path, ...] = ()) -> None:
+        self.resource_roots = tuple(Path(root) for root in resource_roots)
+
     def validate(self, project_root: Path, contract: Any) -> ValidationResult:
         data = _contract_mapping(contract)
         raw_resources = data.get("required_resources", ())
@@ -69,7 +73,22 @@ class PreBuildWorkspaceValidator:
             resource_type = str(raw_resource.get("resource_type", raw_resource.get("type", "json"))).strip().casefold()
             if resource_type not in {"json", "text"}:
                 raise PreBuildValidationError(f"unsupported resource type: {resource_type}")
-            candidate = (root / Path(path)).resolve(strict=False)
+            if self.resource_roots:
+                try:
+                    physical_path = resolve_logical_resource_path(
+                        ProjectSnapshot(
+                            project_root=root,
+                            status=ProjectInspectionStatus.READY,
+                            resource_roots=self.resource_roots,
+                            target_subproject=root,
+                        ),
+                        path,
+                    )
+                except ValueError as exc:
+                    raise PreBuildValidationError(str(exc)) from exc
+                candidate = (root / Path(physical_path)).resolve(strict=False)
+            else:
+                candidate = (root / Path(path)).resolve(strict=False)
             if root not in candidate.parents and candidate != root:
                 raise PreBuildValidationError(f"resource path escapes workspace: {path!r}")
             evidence_ref = f"workspace/{path}"

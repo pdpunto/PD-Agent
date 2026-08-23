@@ -523,7 +523,9 @@ class BenchmarkExecutor:
                 tool_executor=self.tool_executor,
                 limits=execution_limits,
                 model_config=dict(config.model_config),
-                pre_build_validator=PreBuildWorkspaceValidator(),
+                pre_build_validator=PreBuildWorkspaceValidator(
+                    resource_roots=project_snapshot.resource_roots,
+                ),
                 functional_validator=functional_validator,
             )
             run_kwargs = {
