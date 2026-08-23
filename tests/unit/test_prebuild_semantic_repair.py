@@ -154,9 +154,9 @@ def test_repeated_same_failure_stops_without_build(tmp_path: Path) -> None:
     )
 
     assert run_state.state.value == "FAILED"
-    assert run_state.termination_reason == "repeated semantic validation failure"
+    assert run_state.termination_reason == "semantic repair produced no mutation"
     assert run_state.build_attempt_count == 0
-    assert run_state.validation_repeat_count == 1
+    assert run_state.validation_repeat_count == 0
 
 
 def test_malformed_contract_is_not_agent_repair_feedback(tmp_path: Path) -> None:

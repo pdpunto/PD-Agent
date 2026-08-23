@@ -281,7 +281,65 @@ def test_repeated_functional_violation_is_terminal(tmp_path: Path, stage: Valida
     controller.functional_validator = functional
     state, _report = controller.run(root, "stall", validation_contract={"schema_version": 1, "required_resources": []})
     assert state.state.value == "FAILED"
-    assert state.termination_reason == "repeated semantic validation failure"
+    assert state.termination_reason == "semantic repair produced no mutation"
+
+
+def test_noop_repair_does_not_trigger_stale_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "noop-repair", build_state="pass")
+    provider = ScriptedProvider([
+        AgentResponse(
+            assistant_message="source",
+            tool_calls=(ToolCall(
+                call_id="1",
+                tool_name="write_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod { int signal; }\n"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect only",
+            tool_calls=(ToolCall(
+                call_id="2",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
+    ])
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.REPAIRABLE_FAIL,
+    ])
+
+    state, _report = controller.run(root, "noop repair", validation_contract={"schema_version": 1, "required_resources": []})
+
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "semantic repair produced no mutation"
+    assert state.build_attempt_count == 1
+
+
+def test_multiple_mutations_pair_latest_artifact_with_latest_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "latest-artifact", build_state="pass")
+    controller, _storage = _controller(root, _repair_provider())
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    functional = SequenceFunctionalValidator([
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.PASS,
+    ])
+    controller.functional_validator = functional
+
+    state, report = controller.run(root, "latest artifact", validation_contract={"schema_version": 1, "required_resources": []})
+
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count == 3
+    assert report.final_build is not None
+    assert report.final_build.attempt == 3
+    assert report.artifact is state.artifact_result
+    assert len(functional.artifacts) == 3
+    timestamps = [artifact.timestamp for artifact in functional.artifacts]
+    assert timestamps == sorted(timestamps)
+    assert report.artifact.timestamp == timestamps[-1]
 
 
 def test_blocked_runtime_does_not_repair_or_build_again(tmp_path: Path) -> None:

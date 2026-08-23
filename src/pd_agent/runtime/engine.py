@@ -67,6 +67,7 @@ class _LoopTelemetry:
     action_pressure_level: str = "normal"
     retained_file_evidence: dict[str, _RetainedFileEvidence] = field(default_factory=dict)
     validation_repair_pending: bool = False
+    validation_repair_mutated: bool = False
 
 
 class ActionGateState(StrEnum):
@@ -232,6 +233,8 @@ class AgentRuntime:
 
                     gate_violation_detected = any(result.metadata.get("gate_violation") for result in tool_results)
                     progress_detected = self._tool_results_have_change(tool_results)
+                    if progress_detected and self._telemetry.validation_repair_pending:
+                        self._telemetry.validation_repair_mutated = True
                     pending_tool_calls = response.tool_calls
                     pending_tool_results = tool_results
                     pending_provider_continuations = response.provider_continuations
@@ -309,7 +312,12 @@ class AgentRuntime:
                     elif run_state.state == RunStatus.CORRECTING:
                         if self._telemetry.validation_repair_pending:
                             self._telemetry.validation_repair_pending = False
-                            run_state.transition_to(RunStatus.EDITING)
+                            if not self._telemetry.validation_repair_mutated:
+                                run_state.state = RunStatus.FAILED
+                                run_state.termination_reason = "semantic repair produced no mutation"
+                            else:
+                                self._telemetry.validation_repair_mutated = False
+                                run_state.transition_to(RunStatus.EDITING)
                         else:
                             run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
@@ -829,6 +837,7 @@ class AgentRuntime:
         )
         history.append(AgentMessage(role="user", content=feedback))
         self._telemetry.validation_repair_pending = True
+        self._telemetry.validation_repair_mutated = False
         self._reset_action_pressure(run_state)
         run_state.transition_to(RunStatus.CORRECTING)
         return "REPAIR"
@@ -887,6 +896,7 @@ class AgentRuntime:
                 )
                 history.append(AgentMessage(role="user", content=feedback))
                 self._telemetry.validation_repair_pending = True
+                self._telemetry.validation_repair_mutated = False
                 self._reset_action_pressure(run_state)
                 run_state.transition_to(RunStatus.CORRECTING)
                 return "REPAIR"
