@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import UUID, uuid4
 
-from .contracts import ArtifactResult, BuildResult
+from .contracts import ArtifactResult, BuildResult, ValidationResult
 from .errors import LimitReachedError, RunStateError, StateTransitionError
 
 
@@ -66,7 +66,7 @@ VALID_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         {RunStatus.PLANNING, *NON_SUCCESS_TERMINAL_STATUSES}
     ),
     RunStatus.PLANNING: frozenset({RunStatus.EDITING, *NON_SUCCESS_TERMINAL_STATUSES}),
-    RunStatus.EDITING: frozenset({RunStatus.BUILDING, *NON_SUCCESS_TERMINAL_STATUSES}),
+    RunStatus.EDITING: frozenset({RunStatus.BUILDING, RunStatus.CORRECTING, *NON_SUCCESS_TERMINAL_STATUSES}),
     RunStatus.BUILDING: frozenset(
         {
             RunStatus.VALIDATING_ARTIFACT,
@@ -75,7 +75,7 @@ VALID_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         }
     ),
     RunStatus.DIAGNOSING: frozenset({RunStatus.CORRECTING, *NON_SUCCESS_TERMINAL_STATUSES}),
-    RunStatus.CORRECTING: frozenset({RunStatus.BUILDING, *NON_SUCCESS_TERMINAL_STATUSES}),
+    RunStatus.CORRECTING: frozenset({RunStatus.EDITING, RunStatus.BUILDING, *NON_SUCCESS_TERMINAL_STATUSES}),
     RunStatus.VALIDATING_ARTIFACT: frozenset(
         {RunStatus.REPORTING, *NON_SUCCESS_TERMINAL_STATUSES}
     ),
@@ -168,6 +168,9 @@ class RunState:
     consecutive_recoverable_rejections: int = 0
     build_results: tuple[BuildResult, ...] = ()
     artifact_result: ArtifactResult | None = None
+    validation_results: tuple[ValidationResult, ...] = ()
+    last_validation_signature: str | None = None
+    validation_repeat_count: int = 0
     last_error: str | None = None
     provider_error_kind: str | None = None
     provider_error_message: str | None = None
@@ -202,6 +205,22 @@ class RunState:
 
     def record_build_attempt(self) -> None:
         self.build_attempt_count += 1
+
+    def record_validation_result(self, result: ValidationResult, signature: str | None = None) -> None:
+        self.validation_results = (*self.validation_results, result)
+        if result.status.value != "REPAIRABLE_FAIL" or signature is None:
+            self.last_validation_signature = None
+            self.validation_repeat_count = 0
+            return
+        if signature == self.last_validation_signature:
+            self.validation_repeat_count += 1
+        else:
+            self.last_validation_signature = signature
+            self.validation_repeat_count = 0
+
+    def reset_validation_stall(self) -> None:
+        self.last_validation_signature = None
+        self.validation_repeat_count = 0
 
     def record_changed_file(self, path: Path | str) -> None:
         normalized = Path(path).as_posix()
@@ -281,6 +300,9 @@ class RunState:
             "artifact_result": (
                 self.artifact_result.to_dict() if self.artifact_result is not None else None
             ),
+            "validation_results": [item.to_dict() for item in self.validation_results],
+            "last_validation_signature": self.last_validation_signature,
+            "validation_repeat_count": self.validation_repeat_count,
             "last_error": self.last_error,
             "provider_error_kind": self.provider_error_kind,
             "provider_error_message": self.provider_error_message,
@@ -319,6 +341,11 @@ class RunState:
                 if data.get("artifact_result") is not None
                 else None
             ),
+            validation_results=tuple(
+                ValidationResult.from_dict(item) for item in data.get("validation_results", [])
+            ),
+            last_validation_signature=data.get("last_validation_signature"),
+            validation_repeat_count=int(data.get("validation_repeat_count", 0)),
             last_error=data.get("last_error"),
             provider_error_kind=data.get("provider_error_kind"),
             provider_error_message=data.get("provider_error_message"),

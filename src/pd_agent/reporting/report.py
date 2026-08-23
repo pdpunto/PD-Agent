@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..core import ArtifactResult, BuildResult, RunStatus
+from ..core import ArtifactResult, BuildResult, RunStatus, ValidationResult
 from .redaction import Redactor, json_ready
 
 MINECRAFT_RUNTIME_VALIDATION_NOTE = "NOT PERFORMED (v0.1)"
@@ -27,6 +27,7 @@ class FinalReport:
     build_attempts: tuple[BuildResult, ...] = ()
     final_build: BuildResult | None = None
     artifact: ArtifactResult | None = None
+    validation_results: tuple[ValidationResult, ...] = ()
     limits_usage: Mapping[str, int] | None = None
     warnings: tuple[str, ...] = ()
     termination_reason: str | None = None
@@ -45,6 +46,7 @@ class FinalReport:
             "build_attempts": [item.to_dict() for item in self.build_attempts],
             "final_build": self.final_build.to_dict() if self.final_build else None,
             "artifact": self.artifact.to_dict() if self.artifact else None,
+            "validation_results": [item.to_dict() for item in self.validation_results],
             "limits_usage": dict(self.limits_usage) if self.limits_usage is not None else None,
             "warnings": list(self.warnings),
             "termination_reason": self.termination_reason,
@@ -145,6 +147,9 @@ class FinalReport:
                 ArtifactResult.from_dict(data["artifact"])
                 if data.get("artifact") is not None
                 else None
+            ),
+            validation_results=tuple(
+                ValidationResult.from_dict(item) for item in data.get("validation_results", [])
             ),
             limits_usage=(
                 dict(data["limits_usage"])

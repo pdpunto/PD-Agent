@@ -166,6 +166,14 @@ class ValidationResult:
         )
 
 
+@runtime_checkable
+class PreBuildValidator(Protocol):
+    """Generic workspace validator injected into the runtime."""
+
+    def validate(self, project_root: Path, contract: Any) -> ValidationResult:
+        """Validate cheap requirements before a build."""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentMessage:
     """Single provider-neutral message."""

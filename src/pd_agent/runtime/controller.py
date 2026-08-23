@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager
-from pd_agent.core import ExecutionLimits, RunState, RunStatus
+from pd_agent.core import ExecutionLimits, PreBuildValidator, RunState, RunStatus
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
@@ -30,6 +30,7 @@ class RunController:
     project_inspector: ProjectInspector = ProjectInspector()
     limits: ExecutionLimits = ExecutionLimits()
     model_config: Mapping[str, Any] | None = None
+    pre_build_validator: PreBuildValidator | None = None
 
     def __post_init__(self) -> None:
         if self.tool_executor is None:
@@ -43,6 +44,7 @@ class RunController:
         external_context: tuple[Any, ...] = (),
         model_config: Mapping[str, Any] | None = None,
         pending_mutation_targets: tuple[str, ...] = (),
+        validation_contract: Any | None = None,
     ) -> tuple[RunState, FinalReport]:
         snapshot = self.project_inspector.inspect(project_root)
         run_state = RunState(project_root=project_root, task=task)
@@ -64,6 +66,8 @@ class RunController:
             context_manager=self.context_manager,
             reporting=self.storage,
             model_config=model_config or self.model_config or {},
+            pre_build_validator=self.pre_build_validator,
+            validation_contract=validation_contract,
         )
         run_state, report = runtime.run(
             run_state=run_state,

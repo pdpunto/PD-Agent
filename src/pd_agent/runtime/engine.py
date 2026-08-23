@@ -19,6 +19,7 @@ from pd_agent.core import (
     BuildResult,
     ExecutionLimits,
     ModelProvider,
+    PreBuildValidator,
     ProviderError,
     ProviderContinuation,
     RunState,
@@ -26,6 +27,8 @@ from pd_agent.core import (
     ToolCall,
     ToolResult,
     ToolResultStatus,
+    ValidationResult,
+    ValidationStatus,
 )
 from pd_agent.core.errors import BuildError, LimitReachedError
 from pd_agent.core.errors import ArtifactValidationError
@@ -62,6 +65,7 @@ class _LoopTelemetry:
     last_operational_progress_step: int = 0
     action_pressure_level: str = "normal"
     retained_file_evidence: dict[str, _RetainedFileEvidence] = field(default_factory=dict)
+    validation_repair_pending: bool = False
 
 
 class ActionGateState(StrEnum):
@@ -100,6 +104,8 @@ class AgentRuntime:
         reporting: RunStorage | None = None,
         model_config: Mapping[str, Any] | None = None,
         filesystem_tools: Iterable[Any] = (),
+        pre_build_validator: PreBuildValidator | None = None,
+        validation_contract: Any | None = None,
     ) -> None:
         self.provider = provider
         self.tool_executor = tool_executor or ToolExecutor(tools=tuple(filesystem_tools) or create_filesystem_tools())
@@ -108,6 +114,8 @@ class AgentRuntime:
         self.context_manager = context_manager
         self.reporting = reporting
         self.model_config = dict(model_config or {})
+        self.pre_build_validator = pre_build_validator
+        self.validation_contract = validation_contract
         self._telemetry = _LoopTelemetry()
         self._knowledge_trace_hashes: dict[str, set[str]] = {}
         self._knowledge_trace_refs: dict[str, list[str]] = {}
@@ -296,12 +304,21 @@ class AgentRuntime:
                         if run_state.state == RunStatus.FAILED:
                             run_state.termination_reason = "diagnosis produced no correction"
                     elif run_state.state == RunStatus.CORRECTING:
-                        run_state.transition_to(RunStatus.BUILDING)
+                        if self._telemetry.validation_repair_pending:
+                            self._telemetry.validation_repair_pending = False
+                            run_state.transition_to(RunStatus.EDITING)
+                        else:
+                            run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
                         if run_state.pending_mutation_targets:
                             editing_continuation_available = True
                         else:
-                            run_state.transition_to(RunStatus.BUILDING)
+                            validation_status = self._run_prebuild_validation(run_state, project_snapshot, history)
+                            if validation_status == "PASS":
+                                run_state.transition_to(RunStatus.BUILDING)
+                            elif validation_status == "BLOCKED" or run_state.state.is_terminal():
+                                self._persist_state(run_state)
+                                break
                     self._persist_state(run_state)
                     continue
 
@@ -309,6 +326,12 @@ class AgentRuntime:
                     if run_state.pending_mutation_targets:
                         editing_continuation_available = True
                         self._persist_state(run_state)
+                        continue
+                    validation_status = self._run_prebuild_validation(run_state, project_snapshot, history)
+                    if validation_status != "PASS":
+                        self._persist_state(run_state)
+                        if validation_status == "BLOCKED" or run_state.state.is_terminal():
+                            break
                         continue
                     run_state.transition_to(RunStatus.BUILDING)
                     self._persist_state(run_state)
@@ -734,6 +757,7 @@ class AgentRuntime:
             build_attempts=run_state.build_results,
             final_build=run_state.build_results[-1] if run_state.build_results else None,
             artifact=run_state.artifact_result,
+            validation_results=run_state.validation_results,
             limits_usage=self._limits_usage(run_state, limits),
             warnings=(),
             termination_reason=run_state.termination_reason,
@@ -744,6 +768,83 @@ class AgentRuntime:
             self.reporting.write_final_report(report)
             self._emit(run_state.run_id, RunEventType.RUN_FINISHED, {"final_state": run_state.state.value, "summary": summary})
         return run_state, report
+
+    def _run_prebuild_validation(
+        self,
+        run_state: RunState,
+        project_snapshot: ProjectSnapshot,
+        history: list[AgentMessage],
+    ) -> str:
+        if self.pre_build_validator is None:
+            return "PASS"
+        result = self.pre_build_validator.validate(
+            project_snapshot.project_root,
+            self.validation_contract,
+        )
+        if not isinstance(result, ValidationResult):
+            raise TypeError("pre-build validator must return ValidationResult")
+        signature = self._validation_signature(result)
+        run_state.record_validation_result(result, signature)
+        self._emit(
+            run_state.run_id,
+            RunEventType.VALIDATION_COMPLETED,
+            {"result": result.to_dict(), "signature": signature},
+        )
+        if result.status == ValidationStatus.PASS:
+            run_state.reset_validation_stall()
+            return "PASS"
+        if result.status == ValidationStatus.BLOCKED:
+            run_state.state = RunStatus.BLOCKED
+            run_state.termination_reason = "pre-build validation blocked"
+            return "BLOCKED"
+
+        if run_state.validation_repeat_count >= 1:
+            run_state.state = RunStatus.FAILED
+            run_state.termination_reason = "repeated semantic validation failure"
+            return "FAILED"
+        feedback = self._validation_feedback(result)
+        self._emit(
+            run_state.run_id,
+            RunEventType.SEMANTIC_REPAIR_FEEDBACK,
+            {"stage": result.stage.value, "signature": signature, "feedback": feedback},
+        )
+        history.append(AgentMessage(role="user", content=feedback))
+        self._telemetry.validation_repair_pending = True
+        self._reset_action_pressure(run_state)
+        run_state.transition_to(RunStatus.CORRECTING)
+        return "REPAIR"
+
+    def _validation_feedback(self, result: ValidationResult) -> str:
+        lines = ["Semantic validation failed before build:"]
+        for violation in result.violations:
+            lines.append(
+                f"- {violation.code}: {violation.requirement}; {violation.message}"
+            )
+        return "\n".join(lines)
+
+    def _validation_signature(self, result: ValidationResult) -> str:
+        payload = {
+            "stage": result.stage.value,
+            "violations": [
+                {
+                    "code": violation.code,
+                    "requirement": violation.requirement,
+                    "observed_category": self._observed_category(violation.observed),
+                }
+                for violation in result.violations
+            ],
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _observed_category(self, observed: Any) -> str:
+        if isinstance(observed, Mapping):
+            category = observed.get("category")
+            if category is not None:
+                return str(category)
+            if "present" in observed:
+                return "present" if bool(observed["present"]) else "missing"
+        return type(observed).__name__
 
     def _tool_specs(self, gate_state: ActionGateState) -> Iterable[Mapping[str, Any]]:
         for tool in self.tool_executor._tools.values():  # noqa: SLF001
@@ -950,6 +1051,7 @@ class AgentRuntime:
             if any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results):
                 self._telemetry.last_tool_signature = None
                 self._telemetry.tool_repeat_count = 0
+                run_state.reset_validation_stall()
             else:
                 signature = self._tool_signature(tool_results)
                 if signature == self._telemetry.last_tool_signature:
