@@ -235,6 +235,7 @@ class BenchmarkClassifier:
             and collection.termination_reason
             in {
                 "tool rejected",
+                "repeated recoverable tool rejection without operational progress",
                 "repeated build failure",
             }
         )
