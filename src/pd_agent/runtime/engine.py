@@ -33,6 +33,14 @@ from pd_agent.core import (
 )
 from pd_agent.core.errors import BuildError, LimitReachedError
 from pd_agent.core.errors import ArtifactValidationError
+from pd_agent.core.terminal_reasons import (
+    REPEATED_ACTION_GATE_VIOLATION,
+    REPEATED_BUILD_FAILURE,
+    REPEATED_RECOVERABLE_TOOL_REJECTION,
+    REPEATED_UNRESOLVED_MUTATION_TARGETS,
+    SEMANTIC_REPAIR_NO_MUTATION,
+    TOOL_REJECTED,
+)
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.tools import ToolExecutionContext, ToolExecutor, create_filesystem_tools
@@ -219,7 +227,7 @@ class AgentRuntime:
                     fatal_rejection = self._tool_results_have_fatal_rejection(tool_results)
                     if fatal_rejection:
                         run_state.state = RunStatus.FAILED
-                        run_state.termination_reason = "tool rejected"
+                        run_state.termination_reason = TOOL_REJECTED
                         break
 
                     self._record_action_telemetry(
@@ -267,7 +275,7 @@ class AgentRuntime:
                         if self._telemetry.consecutive_gate_violations >= 2:
                             run_state.state = RunStatus.FAILED
                             run_state.termination_reason = (
-                                "repeated unresolved mutation targets without operational progress"
+                                REPEATED_UNRESOLVED_MUTATION_TARGETS
                             )
                             break
                         self._persist_state(run_state)
@@ -284,7 +292,7 @@ class AgentRuntime:
                         run_state.consecutive_recoverable_rejections = self._telemetry.consecutive_recoverable_rejections
                         if self._telemetry.consecutive_recoverable_rejections >= 2:
                             run_state.state = RunStatus.FAILED
-                            run_state.termination_reason = "repeated recoverable tool rejection without operational progress"
+                            run_state.termination_reason = REPEATED_RECOVERABLE_TOOL_REJECTION
                             break
                         if run_state.state == RunStatus.EDITING and run_state.pending_mutation_targets:
                             editing_continuation_available = True
@@ -314,7 +322,7 @@ class AgentRuntime:
                             self._telemetry.validation_repair_pending = False
                             if not self._telemetry.validation_repair_mutated:
                                 run_state.state = RunStatus.FAILED
-                                run_state.termination_reason = "semantic repair produced no mutation"
+                                run_state.termination_reason = SEMANTIC_REPAIR_NO_MUTATION
                             else:
                                 self._telemetry.validation_repair_mutated = False
                                 run_state.transition_to(RunStatus.EDITING)
@@ -1172,7 +1180,7 @@ class AgentRuntime:
                 self._telemetry.failure_repeat_count = 0
             if self._telemetry.failure_repeat_count >= 1:
                 run_state.state = RunStatus.FAILED
-                run_state.termination_reason = "repeated build failure"
+                run_state.termination_reason = REPEATED_BUILD_FAILURE
                 return
 
     def _record_action_telemetry(
@@ -1205,7 +1213,7 @@ class AgentRuntime:
             self._telemetry.consecutive_gate_violations += 1
             if self._telemetry.consecutive_gate_violations >= 2:
                 run_state.state = RunStatus.FAILED
-                run_state.termination_reason = "repeated action gate violation without operational progress"
+                run_state.termination_reason = REPEATED_ACTION_GATE_VIOLATION
             return
 
         if not inspection_only_step:

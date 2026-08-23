@@ -7,6 +7,7 @@ from typing import Any
 
 from pd_agent.core import BuildResult, RunStatus
 from pd_agent.core.errors import BuildError, LimitReachedError, ProviderError
+from pd_agent.core.terminal_reasons import is_agent_terminal_failure
 from pd_agent.minecraft import MinecraftTestStatus
 
 from .collector import BenchmarkCollection
@@ -232,12 +233,7 @@ class BenchmarkClassifier:
     def _is_agent_terminal_failure(self, collection: BenchmarkCollection) -> bool:
         return (
             collection.final_state == RunStatus.FAILED
-            and collection.termination_reason
-            in {
-                "tool rejected",
-                "repeated recoverable tool rejection without operational progress",
-                "repeated build failure",
-            }
+            and is_agent_terminal_failure(collection.termination_reason)
         )
 
     def _invalid(self, reason: str) -> BenchmarkClassification:

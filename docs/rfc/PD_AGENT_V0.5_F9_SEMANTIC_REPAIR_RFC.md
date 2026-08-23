@@ -139,6 +139,23 @@ relevante deben terminar como agent failure, siguiendo el patron de presion y
 rechazos recuperables ya existente. El IMP debe confirmar el punto exacto de
 integracion y evitar doble conteo de limites.
 
+## 9.1 Clasificacion de terminaciones agent
+
+El runtime publica un catalogo central de razones terminales agent que consume
+el classifier. Las razones reconocidas son: `tool rejected`, `repeated
+recoverable tool rejection without operational progress`, `repeated build
+failure`, `semantic repair produced no mutation`, `repeated unresolved
+mutation targets without operational progress` y `repeated action gate
+violation without operational progress`.
+
+Si el estado final es `FAILED` y la razon pertenece a ese catalogo, el
+resultado benchmark es `COMPLETED + FAIL`, con `failure_origin=AGENT` y
+`failure_code=AGENT_TASK_FAILURE`. Esta decision precede la exigencia de
+evidencia de build, artifact o Minecraft porque su ausencia es consecuencia
+legitima de terminar antes de esas fases. No se crea replacement. Provider,
+limites, infraestructura o harness siguen siendo `BLOCKED`; contaminacion,
+contradiccion o evidencia metodologicamente invalida siguen siendo `INVALID`.
+
 ## 10. Action Gate
 
 El Action Gate se conserva. Una validacion semantica fallida:

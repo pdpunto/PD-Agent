@@ -223,6 +223,43 @@ def test_runner_appends_replacement_attempts(tmp_path: Path) -> None:
     assert batch.comparison.comparison_status == BenchmarkComparisonStatus.COMPLETE
 
 
+def test_runner_does_not_replace_completed_agent_failure(tmp_path: Path) -> None:
+    task = _task()
+    config = _config()
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    runner = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(
+            task,
+            config,
+            first_execution_status=BenchmarkExecutionStatus.COMPLETED,
+            first_task_outcome=BenchmarkTaskOutcome.FAIL,
+            first_failure_code=BenchmarkFailureCode.AGENT_TASK_FAILURE,
+        ),
+        scheduler=BenchmarkScheduler(),
+        target_valid_repetitions=1,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+
+    batch = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+
+    assert len(batch.runs) == 1
+    assert batch.runs[0].execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert batch.runs[0].task_outcome == BenchmarkTaskOutcome.FAIL
+    assert batch.schedule.cells[0].attempted == 1
+
+
 def test_runner_pauses_before_next_attempt_when_budget_is_insufficient(tmp_path: Path) -> None:
     task = _task()
     config = BenchmarkConfig(

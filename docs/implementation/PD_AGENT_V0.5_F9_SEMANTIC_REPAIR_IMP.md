@@ -25,11 +25,33 @@ La auditoria contra `122e52a73cdc162c499abd8e72f6cf655bcb2de5` encontro:
 - `MinecraftTestRunner` y sus contratos ya producen evidencia estructurada;
 - reporting ya persiste `RunState`, `FinalReport` y eventos JSONL;
 - mutation targets ya bloquean build cuando quedan pendientes;
+- el runtime persiste razones terminales agent explicitas, pero el classifier
+  solo reconocia el subconjunto historico de tres razones;
 - no existe aun un contrato generico de validation ni un repair loop funcional.
 
 La ausencia de `VALIDATING_FUNCTIONAL` es la discrepancia principal. Los lotes
 de abajo deben anadirlo solo despues de confirmar el punto exacto de transicion
 y serializacion.
+
+## 2.1 Delta de clasificacion terminal
+
+La implementacion debe mantener un catalogo central en el boundary core/runtime
+para que `AgentRuntime` y `BenchmarkClassifier` compartan exactamente las
+razones agent-terminal. La clasificacion de una razon reconocida tiene
+precedencia sobre los gates de evidencia downstream y produce
+`COMPLETED + FAIL`, `AGENT`, `AGENT_TASK_FAILURE`, incluso cuando no hay build,
+artifact o Minecraft porque la ejecucion termino antes de esas fases.
+
+La separacion contractual es:
+
+- `FAIL`: terminacion agent explicita o fallo atribuible al cambio del agente;
+- `BLOCKED`: provider, limite, build environment o Minecraft harness que
+  impiden evaluar;
+- `INVALID`: contaminacion, contradiccion o evidencia metodologicamente
+  invalida.
+
+El runner solo crea replacements para `BLOCKED` e `INVALID`; un
+`COMPLETED + FAIL` no consume replacement.
 
 ## 3. Batch 1 - contratos y contexto publico
 

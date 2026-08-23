@@ -115,6 +115,23 @@ La validacion debe distinguir:
 La correccion de un requisito semantico no revierte la finalizacion fisica de
 un mutation target. Son dimensiones distintas.
 
+### 7.1 Fallos terminales del agente
+
+Una ejecucion real que termina con una razon terminal explicita atribuible al
+agente se clasifica como `COMPLETED + FAIL`, aunque la terminacion ocurra antes
+de build, artifact o Minecraft y por ello no exista evidencia downstream.
+El runtime y el classifier comparten un catalogo central de razones para evitar
+que una nueva terminacion quede desincronizada. Incluye rechazo fatal,
+repeticion de rechazo recuperable, repeticion de build fallido, reparacion
+semantica sin mutacion, targets de mutacion irresueltos y violacion repetida
+del Action Gate.
+
+La precedencia es: error de provider, limite o bloqueo de infraestructura;
+despues razon terminal agent explicita; despues inconsistencias o gates de
+evidencia. `BLOCKED` queda reservado a provider, infraestructura, harness o
+limites; `INVALID` queda reservado a contaminacion, contradiccion o evidencia
+metodologicamente invalida.
+
 ## 8. Criterios de exito
 
 - T1, T2 y T3 tienen contratos publicos sin leakage;

@@ -251,6 +251,50 @@ def test_classifier_repeated_recoverable_rejection_is_agent_failure_before_evide
     assert "repeated recoverable tool rejection" in classification.reason
 
 
+@pytest.mark.parametrize(
+    "termination_reason",
+    [
+        "semantic repair produced no mutation",
+        "repeated unresolved mutation targets without operational progress",
+        "repeated action gate violation without operational progress",
+    ],
+)
+def test_classifier_semantic_terminal_failures_precede_downstream_evidence_gates(
+    termination_reason: str,
+) -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(
+            build_present=False,
+            artifact_classification="MISSING",
+            minecraft_status=None,
+            final_state=RunStatus.FAILED,
+            termination_reason=termination_reason,
+        )
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_TASK_FAILURE
+
+
+def test_classifier_terminal_prebuild_failure_does_not_require_downstream_evidence() -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(
+            build_present=False,
+            artifact_classification="MISSING",
+            minecraft_status=None,
+            final_state=RunStatus.FAILED,
+            termination_reason="semantic repair produced no mutation",
+        )
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_TASK_FAILURE
+
+
 def test_classifier_missing_required_minecraft_is_not_pass() -> None:
     collection = _collection(minecraft_status=None)
     classification = BenchmarkClassifier().classify(collection)
