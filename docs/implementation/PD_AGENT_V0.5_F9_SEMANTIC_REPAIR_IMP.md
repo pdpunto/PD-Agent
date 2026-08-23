@@ -159,4 +159,3 @@ smoke live controlada y separada antes de reabrir la matriz oficial F9.
 Este IMP queda listo para Batch 1 documentalmente cuando la auditoria no
 encuentra contradicciones sin documentar. La implementacion de Batch 1 sigue
 requiriendo una instruccion posterior y commit independiente.
-
