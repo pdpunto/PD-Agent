@@ -69,6 +69,7 @@ class OpenAIProvider(ModelProvider):
         provider_retry_limit: int = 2,
         client: Any | None = None,
         redactor: Redactor | None = None,
+        budget_guard: Any | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -79,6 +80,7 @@ class OpenAIProvider(ModelProvider):
         self.timeout_seconds = timeout_seconds
         self.provider_retry_limit = provider_retry_limit
         self.redactor = redactor or Redactor((api_key,) if api_key else ())
+        self.budget_guard = budget_guard
         self._client = client or self._build_client()
 
     def __repr__(self) -> str:
@@ -100,7 +102,11 @@ class OpenAIProvider(ModelProvider):
         request_client = self._request_client(timeout_seconds)
         last_error: ProviderError | None = None
         physical_request_count = 0
+        if self.budget_guard is not None:
+            self.budget_guard.begin_logical_turn()
         for attempt in range(retry_limit + 1):
+            if self.budget_guard is not None:
+                self.budget_guard.before_request(payload, retry_count=attempt)
             physical_request_count += 1
             try:
                 response = request_client.responses.create(
@@ -108,6 +114,8 @@ class OpenAIProvider(ModelProvider):
                     **payload,
                 )
             except Exception as exc:  # pragma: no cover - normalized boundary
+                if self.budget_guard is not None:
+                    self.budget_guard.on_failure_without_usage(retry_count=attempt)
                 last_error = self._normalize_error(exc, model=model)
                 if not last_error.retryable or attempt >= retry_limit:
                     last_error.details.update(
@@ -118,10 +126,21 @@ class OpenAIProvider(ModelProvider):
                     )
                     raise last_error from None
                 continue
+            budget_metadata = None
+            if self.budget_guard is not None:
+                normalized_usage = self._normalize_usage(getattr(response, "usage", None))
+                budget_metadata = self.budget_guard.account_response(normalized_usage)
+                if isinstance(normalized_usage, dict):
+                    normalized_usage.update(budget_metadata)
+                    try:
+                        response.usage = normalized_usage
+                    except Exception:
+                        pass
             return self._to_agent_response(
                 response,
                 model=model,
                 physical_request_count=physical_request_count,
+                budget_metadata=budget_metadata,
             )
         assert last_error is not None  # pragma: no cover - defensive
         raise last_error
@@ -339,6 +358,7 @@ class OpenAIProvider(ModelProvider):
         *,
         model: str,
         physical_request_count: int = 1,
+        budget_metadata: Mapping[str, Any] | None = None,
     ) -> AgentResponse:
         assistant_texts: list[str] = []
         tool_calls: list[ToolCall] = []
@@ -371,6 +391,10 @@ class OpenAIProvider(ModelProvider):
             "physical_request_count": physical_request_count,
             "provider_retry_count": physical_request_count - 1,
         }
+        if self.budget_guard is not None:
+            provider_metadata.update(self.budget_guard.metadata())
+        if budget_metadata is not None:
+            provider_metadata["budget_last_response"] = dict(budget_metadata)
         return AgentResponse(
             assistant_message="\n".join(assistant_texts) if assistant_texts else None,
             tool_calls=tuple(tool_calls),

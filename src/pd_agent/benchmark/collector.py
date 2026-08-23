@@ -511,7 +511,12 @@ class BenchmarkCollector:
             reasoning_or_thinking_tokens=reasoning_or_thinking_tokens,
             tool_use_prompt_tokens=tool_use_prompt_tokens,
             total_tokens=total_tokens,
-            cost=usage.get("cost") if usage is not None and isinstance(usage.get("cost"), (int, float)) else None,
+            cost=(
+                usage.get("cost", usage.get("derived_cost_usd"))
+                if usage is not None
+                and isinstance(usage.get("cost", usage.get("derived_cost_usd")), (int, float))
+                else None
+            ),
             extra={
                 "provider": provider,
                 "model": model,
