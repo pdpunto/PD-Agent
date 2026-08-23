@@ -96,10 +96,19 @@ de la superficie secreta del provider.
 
 ## 7. OpenAI compatibility
 
-OpenAIProvider no cambia de semantica.
-Si el campo llega vacio, se ignora.
-Si en algun momento OpenAI necesitara metadata opaca, se maneja con el mismo
-contrato neutral, no con tipos OpenAI dentro del core.
+OpenAIProvider puede consumir el mismo contrato neutral cuando el protocolo
+Responses requiere conservar items de reasoning en una continuacion stateless.
+El adapter propietario:
+
+- solicita `reasoning.encrypted_content` cuando reasoning esta activo;
+- convierte los output items de reasoning en continuations opacas;
+- reemite solo las continuations cuyo owner es `openai`, respetando posicion;
+- conserva `function_call` y `function_call_output` fuera del core;
+- mantiene `store=false` y no usa `previous_response_id`.
+
+El core/runtime no interpreta el payload ni importa tipos OpenAI. Una
+continuation corrupta o conflictiva produce `ProviderError(kind=protocol)`.
+Continuations de otro provider no son consumidas por OpenAIProvider.
 
 ## 8. Acceptance
 

@@ -472,6 +472,9 @@ class BenchmarkCollector:
 
         input_tokens = self._usage_value(usage, "input_tokens", "prompt_token_count", "input_token_count")
         cached_input_tokens = self._usage_value(usage, "cached_input_tokens", "cached_content_token_count")
+        if cached_input_tokens is None:
+            cached_details = _as_mapping(usage.get("input_tokens_details")) if usage is not None else None
+            cached_input_tokens = self._usage_value(cached_details, "cached_tokens")
         output_tokens = self._usage_value(
             usage,
             "output_tokens",
@@ -486,6 +489,9 @@ class BenchmarkCollector:
             "thinking_tokens",
             "thoughts_token_count",
         )
+        if reasoning_or_thinking_tokens is None:
+            output_details = _as_mapping(usage.get("output_tokens_details")) if usage is not None else None
+            reasoning_or_thinking_tokens = self._usage_value(output_details, "reasoning_tokens")
         tool_use_prompt_tokens = self._usage_value(
             usage,
             "tool_use_prompt_tokens",

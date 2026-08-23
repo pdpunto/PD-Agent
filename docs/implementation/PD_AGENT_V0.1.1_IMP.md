@@ -11,7 +11,8 @@ Objetivo:
 - transportar continuations entre `AgentResponse` y `AgentRequest`;
 - permitir que `GeminiProvider` reemita `thought_signature` en el `Part`
   correcto;
-- no tocar el comportamiento actual de `OpenAIProvider`;
+- mantener `OpenAIProvider` provider-local, incluyendo el mapping opcional de
+  reasoning stateless mediante `ProviderContinuation`;
 - no cambiar `AgentRuntime` a provider-aware.
 
 Archivos previstos:
@@ -30,7 +31,21 @@ Archivos previstos:
 3. Pasarlo por `AgentRuntime` sin interpretar.
 4. Añadirlo a `AgentRequest`.
 5. Usarlo solo dentro de `GeminiProvider`.
-6. Mantener `OpenAIProvider` igual o con ignorado vacio.
+6. OpenAIProvider interpreta solo continuations con owner `openai` y mantiene
+   `store=false`; el resto se ignora sin cruzar ownership.
+
+### O1 - OpenAI reasoning continuation
+
+Cuando `model_config.reasoning` esta activo, el adapter solicita el include
+`reasoning.encrypted_content` sin duplicar includes existentes. Cada reasoning
+output item se convierte en una `ProviderContinuation` con `position`,
+identidad y payload JSON-safe opaco. En el request siguiente se reinyecta antes
+de los function calls y outputs, respetando el orden de continuations.
+
+El encrypted content no se incluye en metadata, eventos ni reporting. Las
+continuations OpenAI malformadas, duplicadas o conflictivas terminan como error
+de protocolo. La telemetria conserva usage anidado de cache/reasoning y expone
+el numero de intentos fisicos y retries en metadata neutral.
 
 ## Reglas de construccion
 
@@ -75,7 +90,13 @@ GEMINI:
 OPENAI:
 
 - regresion de comportamiento actual;
-- campo vacio no rompe nada.
+- campo vacio no rompe nada;
+- reasoning medium e include encrypted content;
+- extraction y replay de una/multiples continuations;
+- rechazo de payload corrupto/conflictivo;
+- physical attempts y retries;
+- usage cached/reasoning tokens;
+- no filtracion de encrypted content.
 
 ## Validacion
 
