@@ -12,6 +12,7 @@ from .contracts import (
     ModelProvider,
     ProviderContinuation,
     PreBuildValidator,
+    FunctionalValidator,
     Tool,
     ToolCall,
     ToolResult,

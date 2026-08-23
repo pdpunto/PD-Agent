@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 import hashlib
+import inspect
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,7 @@ from pd_agent.project import (
 )
 from pd_agent.reporting import FinalReport, RunStorage
 from pd_agent.tools import ToolExecutor
+from pd_agent.validation import PreBuildWorkspaceValidator
 
 from .acceptance import (
     AcceptanceMinecraftObservationEvaluation,
@@ -60,6 +62,8 @@ from .models import (
 )
 from .scheduler import BenchmarkScheduledAttempt
 from .workspace import BenchmarkWorkspace, BenchmarkWorkspaceError, compute_fixture_identity, prepare_workspace
+from .functional import BenchmarkFunctionalValidator
+from .public_validation import build_public_validation_contract
 from pd_agent.core import RunStatus
 from pd_agent.runtime import RunController
 from dataclasses import replace
@@ -462,24 +466,6 @@ class BenchmarkExecutor:
             context_manager = self.context_manager_factory(config.brain_enabled)
             runtime_storage = RunStorage(run_root / "runtime")
             execution_limits = _benchmark_execution_limits(config)
-            controller = RunController(
-                provider=self.provider,
-                storage=runtime_storage,
-                build_runner=self.build_runner,
-                artifact_validator=self.artifact_validator,
-                context_manager=context_manager,
-                tool_executor=self.tool_executor,
-                limits=execution_limits,
-                model_config=dict(config.model_config),
-            )
-            run_state, final_report = controller.run(
-                workspace.workspace_root,
-                task.prompt,
-                external_context=external_context,
-                model_config=dict(config.model_config),
-                pending_mutation_targets=_task_mutation_targets(task, project_snapshot),
-            )
-
             runtime_mod_dependency_resolution_error: RuntimeModDependencyResolutionError | None = None
             if self.gradle_environment is not None:
                 try:
@@ -491,6 +477,63 @@ class BenchmarkExecutor:
                 except RuntimeModDependencyResolutionError as exc:
                     runtime_mod_dependency_resolution_error = exc
                     resolved_runtime_mod_dependencies = ()
+
+            try:
+                public_validation_contract = build_public_validation_contract(task.acceptance)
+            except ValueError:
+                # Legacy acceptance remains on the executor fallback until its
+                # public contract is explicitly compatible with Batch 3.
+                public_validation_contract = None
+            functional_validator = None
+            if public_validation_contract is not None and (task.validation.artifact or task.validation.minecraft):
+                functional_validator = BenchmarkFunctionalValidator(
+                    acceptance_spec=_task_acceptance_spec(task),
+                    runtime_check=lambda artifact, run_id: (
+                        _minecraft_infra_error_result(
+                            task=task,
+                            artifact=artifact,
+                            run_id=run_id,
+                            reason=str(runtime_mod_dependency_resolution_error),
+                            target_jar=Path(artifact.path) if artifact.path is not None else workspace.workspace_root,
+                            evidence_root=workspace.workspace_root / "evidence" / "minecraft",
+                            default_timeout_seconds=execution_limits.process_timeout_seconds,
+                        )
+                        if runtime_mod_dependency_resolution_error is not None
+                        else self._maybe_run_minecraft(
+                            task,
+                            config,
+                            run_state=None,
+                            final_report=None,
+                            workspace=workspace,
+                            project_snapshot=project_snapshot,
+                            benchmark_run_id=benchmark_run_id,
+                            filesystem_run_id=run_id,
+                            minecraft_runner=minecraft_runner or self.minecraft_runner,
+                            runtime_mod_dependencies=resolved_runtime_mod_dependencies,
+                            artifact_override=artifact,
+                        )
+                    ),
+                )
+            controller = RunController(
+                provider=self.provider,
+                storage=runtime_storage,
+                build_runner=self.build_runner,
+                artifact_validator=self.artifact_validator,
+                context_manager=context_manager,
+                tool_executor=self.tool_executor,
+                limits=execution_limits,
+                model_config=dict(config.model_config),
+                pre_build_validator=PreBuildWorkspaceValidator(),
+                functional_validator=functional_validator,
+            )
+            run_kwargs = {
+                "external_context": external_context,
+                "model_config": dict(config.model_config),
+                "pending_mutation_targets": _task_mutation_targets(task, project_snapshot),
+            }
+            if "validation_contract" in inspect.signature(controller.run).parameters:
+                run_kwargs["validation_contract"] = public_validation_contract
+            run_state, final_report = controller.run(workspace.workspace_root, task.prompt, **run_kwargs)
 
             if runtime_mod_dependency_resolution_error is not None:
                 artifact = final_report.artifact or run_state.artifact_result
@@ -504,7 +547,12 @@ class BenchmarkExecutor:
                     evidence_root=workspace.workspace_root / "evidence" / "minecraft",
                     default_timeout_seconds=execution_limits.process_timeout_seconds,
                 )
-            else:
+            elif functional_validator is None or not any(
+                result.stage.value in {"POST_ARTIFACT", "RUNTIME"}
+                for result in final_report.validation_results
+            ):
+                # Test doubles and older controller integrations do not expose
+                # the Batch 3 evidence yet; retain the legacy collector path.
                 minecraft = self._maybe_run_minecraft(
                     task,
                     config,
@@ -517,6 +565,8 @@ class BenchmarkExecutor:
                     minecraft_runner=minecraft_runner or self.minecraft_runner,
                     runtime_mod_dependencies=resolved_runtime_mod_dependencies,
                 )
+            else:
+                minecraft = functional_validator.last_minecraft_result
             runtime_mod_dependency_records = tuple(dependency.to_dict() for dependency in resolved_runtime_mod_dependencies)
             if minecraft is not None and runtime_mod_dependency_records:
                 minecraft = replace(
@@ -611,21 +661,23 @@ class BenchmarkExecutor:
         task: BenchmarkTask,
         config: BenchmarkConfig,
         *,
-        run_state: RunState,
-        final_report: FinalReport,
+        run_state: RunState | None,
+        final_report: FinalReport | None,
         workspace: BenchmarkWorkspace,
         project_snapshot: ProjectSnapshot,
         benchmark_run_id: str,
         filesystem_run_id: str,
         minecraft_runner: MinecraftTestRunner | None,
         runtime_mod_dependencies: Sequence[ResolvedRuntimeModDependency] | None = None,
+        artifact_override: Any | None = None,
     ) -> MinecraftTestResult | None:
         if not task.validation.minecraft:
             return None
         runner = minecraft_runner
-        final_build = final_report.final_build or (run_state.build_results[-1] if run_state.build_results else None)
-        artifact = final_report.artifact or run_state.artifact_result
-        if final_build is None or artifact is None or artifact.path is None:
+        artifact = artifact_override or (final_report.artifact if final_report is not None else None)
+        if artifact is None and run_state is not None:
+            artifact = run_state.artifact_result
+        if artifact is None or artifact.path is None:
             return None
         target_root = Path(runner.project_root) if runner is not None else workspace.workspace_root
         execution_limits = _benchmark_execution_limits(config)

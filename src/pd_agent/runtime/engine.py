@@ -20,6 +20,7 @@ from pd_agent.core import (
     ExecutionLimits,
     ModelProvider,
     PreBuildValidator,
+    FunctionalValidator,
     ProviderError,
     ProviderContinuation,
     RunState,
@@ -105,6 +106,7 @@ class AgentRuntime:
         model_config: Mapping[str, Any] | None = None,
         filesystem_tools: Iterable[Any] = (),
         pre_build_validator: PreBuildValidator | None = None,
+        functional_validator: FunctionalValidator | None = None,
         validation_contract: Any | None = None,
     ) -> None:
         self.provider = provider
@@ -115,6 +117,7 @@ class AgentRuntime:
         self.reporting = reporting
         self.model_config = dict(model_config or {})
         self.pre_build_validator = pre_build_validator
+        self.functional_validator = functional_validator
         self.validation_contract = validation_contract
         self._telemetry = _LoopTelemetry()
         self._knowledge_trace_hashes: dict[str, set[str]] = {}
@@ -390,12 +393,29 @@ class AgentRuntime:
                         {"classification": artifact.classification, "valid": artifact.classification == "VALID"},
                     )
                     if artifact.classification == "VALID":
-                        run_state.transition_to(RunStatus.REPORTING)
+                        run_state.transition_to(
+                            RunStatus.VALIDATING_FUNCTIONAL
+                            if self.functional_validator is not None
+                            else RunStatus.REPORTING
+                        )
                         self._persist_state(run_state)
                         continue
                     run_state.state = RunStatus.FAILED
                     run_state.termination_reason = "artifact validation failed"
                     break
+
+                if run_state.state == RunStatus.VALIDATING_FUNCTIONAL:
+                    self._check_limits(run_state, limits)
+                    functional_status = self._run_functional_validation(run_state, project_snapshot, history)
+                    if functional_status == "PASS":
+                        run_state.transition_to(RunStatus.REPORTING)
+                        self._persist_state(run_state)
+                        continue
+                    if functional_status in {"BLOCKED", "FAILED"} or run_state.state.is_terminal():
+                        self._persist_state(run_state)
+                        break
+                    self._persist_state(run_state)
+                    continue
 
                 if run_state.state == RunStatus.REPORTING:
                     run_state.state = RunStatus.COMPLETED
@@ -791,7 +811,6 @@ class AgentRuntime:
             {"result": result.to_dict(), "signature": signature},
         )
         if result.status == ValidationStatus.PASS:
-            run_state.reset_validation_stall()
             return "PASS"
         if result.status == ValidationStatus.BLOCKED:
             run_state.state = RunStatus.BLOCKED
@@ -813,6 +832,72 @@ class AgentRuntime:
         self._reset_action_pressure(run_state)
         run_state.transition_to(RunStatus.CORRECTING)
         return "REPAIR"
+
+    def _run_functional_validation(
+        self,
+        run_state: RunState,
+        project_snapshot: ProjectSnapshot,
+        history: list[AgentMessage],
+    ) -> str:
+        validator = self.functional_validator
+        artifact = run_state.artifact_result
+        if validator is None:
+            return "PASS"
+        if artifact is None:
+            run_state.state = RunStatus.BLOCKED
+            run_state.termination_reason = "functional validation missing artifact"
+            return "BLOCKED"
+        result = validator.validate(
+            project_snapshot.project_root,
+            artifact,
+            self.validation_contract,
+            run_state.run_id,
+        )
+        if not isinstance(result, ValidationResult):
+            raise TypeError("functional validator must return ValidationResult")
+        staged_results = getattr(validator, "last_results", (result,))
+        if not isinstance(staged_results, (tuple, list)):
+            staged_results = (result,)
+        if result not in staged_results:
+            staged_results = (*staged_results, result)
+        for staged_result in staged_results:
+            if not isinstance(staged_result, ValidationResult):
+                raise TypeError("functional validator last_results must contain ValidationResult")
+            signature = self._validation_signature(staged_result)
+            run_state.record_validation_result(staged_result, signature)
+            self._emit(
+                run_state.run_id,
+                RunEventType.VALIDATION_COMPLETED,
+                {"result": staged_result.to_dict(), "signature": signature},
+            )
+            if staged_result.status == ValidationStatus.BLOCKED:
+                run_state.state = RunStatus.BLOCKED
+                run_state.termination_reason = "functional validation blocked"
+                return "BLOCKED"
+            if staged_result.status == ValidationStatus.REPAIRABLE_FAIL:
+                if run_state.validation_repeat_count >= 1:
+                    run_state.state = RunStatus.FAILED
+                    run_state.termination_reason = "repeated semantic validation failure"
+                    return "FAILED"
+                feedback = self._functional_validation_feedback(staged_result)
+                self._emit(
+                    run_state.run_id,
+                    RunEventType.SEMANTIC_REPAIR_FEEDBACK,
+                    {"stage": staged_result.stage.value, "signature": signature, "feedback": feedback},
+                )
+                history.append(AgentMessage(role="user", content=feedback))
+                self._telemetry.validation_repair_pending = True
+                self._reset_action_pressure(run_state)
+                run_state.transition_to(RunStatus.CORRECTING)
+                return "REPAIR"
+        run_state.reset_validation_stall()
+        return "PASS"
+
+    def _functional_validation_feedback(self, result: ValidationResult) -> str:
+        lines = [f"{result.stage.value.title().replace('_', ' ')} validation failed:"]
+        for violation in result.violations:
+            lines.append(f"- {violation.requirement}: {violation.message}")
+        return "\n".join(lines)
 
     def _validation_feedback(self, result: ValidationResult) -> str:
         lines = ["Semantic validation failed before build:"]

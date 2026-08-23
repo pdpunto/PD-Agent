@@ -28,6 +28,7 @@ from .public_validation import (
     PublicValidationContract,
     build_public_validation_contract,
 )
+from .functional import BenchmarkFunctionalValidator
 from .runner import BenchmarkExecutionBatch, BenchmarkExecutionManifest, BenchmarkExecutionResumeError, BenchmarkExecutionRunner
 from .scheduler import (
     BenchmarkSchedule,
@@ -119,6 +120,7 @@ __all__ = [
     "PublicResourceRequirement",
     "PublicValidationContract",
     "build_public_validation_contract",
+    "BenchmarkFunctionalValidator",
     "BenchmarkTask",
     "BenchmarkTaskOutcome",
     "BenchmarkTaskReference",

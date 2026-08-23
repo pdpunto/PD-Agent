@@ -174,6 +174,20 @@ class PreBuildValidator(Protocol):
         """Validate cheap requirements before a build."""
 
 
+@runtime_checkable
+class FunctionalValidator(Protocol):
+    """Generic post-artifact/runtime validator injected into the runtime."""
+
+    def validate(
+        self,
+        project_root: Path,
+        artifact: ArtifactResult,
+        contract: Any,
+        run_id: str,
+    ) -> ValidationResult:
+        """Validate the produced artifact or its runtime behavior."""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentMessage:
     """Single provider-neutral message."""

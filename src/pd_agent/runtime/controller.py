@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager
-from pd_agent.core import ExecutionLimits, PreBuildValidator, RunState, RunStatus
+from pd_agent.core import ExecutionLimits, FunctionalValidator, PreBuildValidator, RunState, RunStatus
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
@@ -31,6 +31,7 @@ class RunController:
     limits: ExecutionLimits = ExecutionLimits()
     model_config: Mapping[str, Any] | None = None
     pre_build_validator: PreBuildValidator | None = None
+    functional_validator: FunctionalValidator | None = None
 
     def __post_init__(self) -> None:
         if self.tool_executor is None:
@@ -67,6 +68,7 @@ class RunController:
             reporting=self.storage,
             model_config=model_config or self.model_config or {},
             pre_build_validator=self.pre_build_validator,
+            functional_validator=self.functional_validator,
             validation_contract=validation_contract,
         )
         run_state, report = runtime.run(
