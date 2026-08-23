@@ -213,8 +213,6 @@ class RunState:
     def record_validation_result(self, result: ValidationResult, signature: str | None = None) -> None:
         self.validation_results = (*self.validation_results, result)
         if result.status.value != "REPAIRABLE_FAIL" or signature is None:
-            self.last_validation_signature = None
-            self.validation_repeat_count = 0
             return
         if signature == self.last_validation_signature:
             self.validation_repeat_count += 1

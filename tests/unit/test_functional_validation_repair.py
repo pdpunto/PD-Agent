@@ -3,7 +3,9 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-from pd_agent.core import AgentResponse, ToolCall, ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
+import pytest
+
+from pd_agent.core import AgentResponse, ExecutionLimits, RunStatus, ToolCall, ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
 from pd_agent.minecraft import MinecraftEvidencePaths, MinecraftTargetMetadata, MinecraftTestResult, MinecraftTestSpec, MinecraftTestStatus
 from pd_agent.benchmark.functional import BenchmarkFunctionalValidator
 from pd_agent.validation import PreBuildWorkspaceValidator
@@ -128,3 +130,247 @@ def test_functional_validator_maps_infrastructure_to_blocked(tmp_path: Path) -> 
     result = validator.validate(tmp_path, artifact, None, "run")
     assert result.status is ValidationStatus.BLOCKED
     assert result.stage is ValidationStage.RUNTIME
+
+
+class SequenceFunctionalValidator:
+    def __init__(self, runtime_statuses: list[ValidationStatus], *, post_failures: int = 0) -> None:
+        self.runtime_statuses = list(runtime_statuses)
+        self.post_failures = post_failures
+        self.calls = 0
+        self.last_results: tuple[ValidationResult, ...] = ()
+        self.artifacts: list[object] = []
+
+    def validate(self, project_root, artifact, contract, run_id):  # noqa: ANN001
+        del project_root, contract, run_id
+        self.calls += 1
+        self.artifacts.append(artifact)
+        if self.post_failures >= self.calls:
+            post = ValidationResult(
+                stage=ValidationStage.POST_ARTIFACT,
+                status=ValidationStatus.REPAIRABLE_FAIL,
+                summary="post artifact failed",
+                violations=(ValidationViolation(
+                    code="JSON_POINTER_MISMATCH",
+                    requirement="assets/examplemod/lang/en_us.json:/item.examplemod.server_core",
+                    observed={"category": "mismatch"},
+                    message="required artifact value was not delivered",
+                ),),
+            )
+            self.last_results = (post,)
+            return post
+        post = ValidationResult(stage=ValidationStage.POST_ARTIFACT, status=ValidationStatus.PASS, summary="artifact ok")
+        status = self.runtime_statuses[min(self.calls - self.post_failures - 1, len(self.runtime_statuses) - 1)]
+        if status is ValidationStatus.PASS:
+            runtime = ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary="runtime ok")
+        else:
+            runtime = ValidationResult(
+                stage=ValidationStage.RUNTIME,
+                status=status,
+                summary="runtime failed",
+                violations=(ValidationViolation(
+                    code="REGISTRY_ENTRY_PRESENT",
+                    requirement="item registry entry examplemod:signal_charm",
+                    observed={"category": "missing"},
+                    message="required item registry entry was not observed",
+                ),),
+            )
+        self.last_results = (post, runtime)
+        return runtime
+
+
+def _repair_provider() -> ScriptedProvider:
+    return ScriptedProvider([
+        AgentResponse(
+            assistant_message="source",
+            tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),),
+        ),
+        AgentResponse(
+            assistant_message="repair resources",
+            tool_calls=(ToolCall(call_id="2", tool_name="create_file", arguments={"path": "assets/examplemod/lang/en_us.json", "content": '{"item.examplemod.server_core":"Server Core"}\n'}),),
+        ),
+        AgentResponse(
+            assistant_message="repair runtime",
+            tool_calls=(ToolCall(call_id="3", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod { int registered; }\n"}),),
+        ),
+    ])
+
+
+def test_t2_like_end_to_end_prebuild_then_runtime_repair(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "t2", build_state="pass")
+    controller, storage = _controller(root, _repair_provider())
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    functional = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL, ValidationStatus.PASS], post_failures=0)
+    controller.functional_validator = functional
+    contract = {
+        "schema_version": 1,
+        "required_resources": [{
+            "path": "assets/examplemod/lang/en_us.json",
+            "resource_type": "json",
+            "assertions": [{"kind": "json_pointer_present", "path": "/item.examplemod.server_core"}],
+        }],
+    }
+    state, report = controller.run(root, "Marble Lantern", validation_contract=contract, pending_mutation_targets=("role:source",))
+
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count >= 2
+    assert functional.calls == 2
+    assert len(functional.artifacts) == state.build_attempt_count
+    assert any(item.stage is ValidationStage.PRE_BUILD and item.status is ValidationStatus.REPAIRABLE_FAIL for item in state.validation_results)
+    assert any(item.stage is ValidationStage.RUNTIME and item.status is ValidationStatus.REPAIRABLE_FAIL for item in state.validation_results)
+    assert report.validation_results[-1].status is ValidationStatus.PASS
+    assert state.pending_mutation_targets == ()
+    feedback = [event.payload["feedback"] for event in storage.read_events(state.run_id) if event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK"]
+    assert len(feedback) == 2
+    assert all("reference" not in item.casefold() and "api" not in item.casefold() for item in feedback)
+
+
+def test_t3_like_post_artifact_then_runtime_repair(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "t3", build_state="pass")
+    controller, _storage = _controller(root, _repair_provider())
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    functional = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL, ValidationStatus.PASS], post_failures=1)
+    controller.functional_validator = functional
+    state, _report = controller.run(root, "Server Core", validation_contract={"schema_version": 1, "required_resources": []})
+
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count >= 2
+    assert [item.stage for item in state.validation_results].count(ValidationStage.POST_ARTIFACT) >= 2
+    assert any(item.stage is ValidationStage.RUNTIME and item.status is ValidationStatus.REPAIRABLE_FAIL for item in state.validation_results)
+
+
+def test_item_id_not_set_is_repairable_feedback(tmp_path: Path) -> None:
+    jar = tmp_path / "artifact.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("fabric.mod.json", "{}")
+    artifact = type("Artifact", (), {"path": jar})()
+    validator = BenchmarkFunctionalValidator(
+        acceptance_spec={"required_resources": []},
+        runtime_check=lambda artifact, run_id: _minecraft_result(MinecraftTestStatus.CRASH, "Item id not set"),
+    )
+    result = validator.validate(tmp_path, artifact, None, "run")
+    assert result.status is ValidationStatus.REPAIRABLE_FAIL
+
+
+@pytest.mark.parametrize("stage", [ValidationStage.POST_ARTIFACT, ValidationStage.RUNTIME])
+def test_repeated_functional_violation_is_terminal(tmp_path: Path, stage: ValidationStage) -> None:
+    root = _runtime_project(tmp_path / stage.value, build_state="pass")
+    provider = ScriptedProvider([
+        AgentResponse(assistant_message="source", tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),)),
+        AgentResponse(assistant_message="same repair", tool_calls=()),
+    ])
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    functional = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL, ValidationStatus.REPAIRABLE_FAIL], post_failures=2 if stage is ValidationStage.POST_ARTIFACT else 0)
+    controller.functional_validator = functional
+    state, _report = controller.run(root, "stall", validation_contract={"schema_version": 1, "required_resources": []})
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "repeated semantic validation failure"
+
+
+def test_blocked_runtime_does_not_repair_or_build_again(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "blocked", build_state="pass")
+    provider = ScriptedProvider([AgentResponse(assistant_message="source", tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),))])
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    functional = SequenceFunctionalValidator([ValidationStatus.BLOCKED])
+    controller.functional_validator = functional
+    state, _report = controller.run(root, "blocked", validation_contract={"schema_version": 1, "required_resources": []})
+    assert state.state.value == "BLOCKED"
+    assert state.build_attempt_count == 1
+    assert len(provider.requests) == 1
+
+
+def test_real_edit_progress_resets_functional_stall(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "progress", build_state="pass")
+    controller, _storage = _controller(root, _repair_provider())
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.PASS,
+    ])
+    state, _report = controller.run(root, "progress", validation_contract={"schema_version": 1, "required_resources": []})
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count == 3
+
+
+@pytest.mark.parametrize("status", [MinecraftTestStatus.TIMEOUT])
+def test_runtime_timeout_and_missing_result_are_blocked(tmp_path: Path, status: MinecraftTestStatus) -> None:
+    jar = tmp_path / "artifact.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("fabric.mod.json", "{}")
+    artifact = type("Artifact", (), {"path": jar})()
+    for runtime_result in (lambda artifact, run_id: _minecraft_result(status, "timeout"), lambda artifact, run_id: None):
+        validator = BenchmarkFunctionalValidator(acceptance_spec={"required_resources": []}, runtime_check=runtime_result)
+        result = validator.validate(tmp_path, artifact, None, "run")
+        assert result.status is ValidationStatus.BLOCKED
+
+
+def test_functional_repair_respects_build_limit(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "limit", build_state="pass")
+    controller, _storage = _controller(
+        root,
+        ScriptedProvider([AgentResponse(assistant_message="source", tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),))]),
+        limits=ExecutionLimits(max_build_attempts=1),
+    )
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL])
+    state, _report = controller.run(root, "limit", validation_contract={"schema_version": 1, "required_resources": []})
+    assert state.state.value == "LIMIT_REACHED"
+    assert state.build_attempt_count == 1
+
+
+def test_validation_evidence_round_trip(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "roundtrip", build_state="pass")
+    controller, storage = _controller(root, _repair_provider())
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL, ValidationStatus.PASS])
+    state, report = controller.run(root, "roundtrip", validation_contract={"schema_version": 1, "required_resources": []})
+    restored_state = type(state).from_dict(state.to_dict())
+    restored_report = type(report).from_dict(report.to_dict())
+    events = storage.read_events(state.run_id)
+    assert restored_state.validation_results == state.validation_results
+    assert restored_report.validation_results == report.validation_results
+    assert any(event.event_type.value == "VALIDATION_COMPLETED" for event in events)
+    assert any(event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK" for event in events)
+
+
+def test_executor_does_not_double_run_minecraft_after_controller_evidence(monkeypatch, tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from pd_agent.benchmark.executor import BenchmarkExecutor
+    from tests.unit.test_benchmark_executor import _artifact_jar, _config, _fixture_root, _final_report, _run_state, _task
+
+    class ControllerWithFunctionalEvidence:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            self.storage = kwargs["storage"]
+
+        def run(self, project_root, task, *, external_context=(), model_config=None, pending_mutation_targets=(), validation_contract=None):  # noqa: ANN001
+            del external_context, model_config, pending_mutation_targets, validation_contract
+            state = _run_state(project_root, task, status=RunStatus.COMPLETED)
+            state.artifact_result = _artifact_jar(project_root)
+            state.validation_results = (
+                ValidationResult(stage=ValidationStage.POST_ARTIFACT, status=ValidationStatus.PASS, summary="artifact ok"),
+                ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.PASS, summary="runtime ok"),
+            )
+            report = replace(_final_report(state), validation_results=state.validation_results)
+            return state, report
+
+    class CountingRunner:
+        project_root = tmp_path / "runner-root"
+        calls = []
+
+        def run(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            self.calls.append((args, kwargs))
+            raise AssertionError("Minecraft was executed twice after controller functional evidence")
+
+    monkeypatch.setattr("pd_agent.benchmark.executor.RunController", ControllerWithFunctionalEvidence)
+    executor = BenchmarkExecutor(provider=object(), build_runner=object(), artifact_validator=object())
+    task = _task(
+        minecraft=True,
+        observation_type="REGISTRY_ENTRY_PRESENT",
+        observation_params={"registry_kind": "item", "identifier": "examplemod:signal_charm"},
+    )
+    attempt = type("Attempt", (), {"scheduled_attempt_id": "no-double", "attempt_index": 1, "repetition_index": 0})()
+    result = executor.execute(task, _config(brain_enabled=False), attempt, fixture_root=_fixture_root(), execution_root=tmp_path / "exec", minecraft_runner=CountingRunner())
+    assert result.run_state.validation_results[-1].stage is ValidationStage.RUNTIME
