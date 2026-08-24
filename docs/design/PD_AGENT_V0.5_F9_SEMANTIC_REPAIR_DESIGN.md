@@ -122,7 +122,9 @@ agente se clasifica como `COMPLETED + FAIL`, aunque la terminacion ocurra antes
 de build, artifact o Minecraft y por ello no exista evidencia downstream.
 El runtime y el classifier comparten un catalogo central de razones para evitar
 que una nueva terminacion quede desincronizada. Incluye rechazo fatal,
-repeticion de rechazo recuperable, repeticion de build fallido, reparacion
+repeticion de rechazo recuperable, repeticion de build fallido, diagnostico
+sin correccion, repeticion de validacion semantica, no-op repetido,
+exploracion estancada y hard gate de mutation targets, reparacion
 semantica sin mutacion, targets de mutacion irresueltos y violacion repetida
 del Action Gate.
 

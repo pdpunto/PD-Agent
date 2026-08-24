@@ -144,9 +144,15 @@ integracion y evitar doble conteo de limites.
 El runtime publica un catalogo central de razones terminales agent que consume
 el classifier. Las razones reconocidas son: `tool rejected`, `repeated
 recoverable tool rejection without operational progress`, `repeated build
-failure`, `semantic repair produced no mutation`, `repeated unresolved
+failure`, `diagnosis produced no correction`, `repeated semantic validation failure`,
+`repeated no-op tool calls`, `exploration stalled without operational progress`,
+`pending mutation targets block build`, `semantic repair produced no mutation`, `repeated unresolved
 mutation targets without operational progress` y `repeated action gate
 violation without operational progress`.
+
+La autoridad unica es `src/pd_agent/core/terminal_reasons.py`. Runtime y
+classifier deben importar sus constantes o su predicado, sin mantener listas
+locales independientes.
 
 Si el estado final es `FAILED` y la razon pertenece a ese catalogo, el
 resultado benchmark es `COMPLETED + FAIL`, con `failure_origin=AGENT` y

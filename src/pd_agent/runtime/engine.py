@@ -34,9 +34,14 @@ from pd_agent.core import (
 from pd_agent.core.errors import BuildError, LimitReachedError
 from pd_agent.core.errors import ArtifactValidationError
 from pd_agent.core.terminal_reasons import (
+    DIAGNOSIS_NO_CORRECTION,
+    EXPLORATION_STALLED,
+    PENDING_MUTATION_TARGETS_BLOCK_BUILD,
     REPEATED_ACTION_GATE_VIOLATION,
     REPEATED_BUILD_FAILURE,
     REPEATED_RECOVERABLE_TOOL_REJECTION,
+    REPEATED_NO_OP_TOOL_CALLS,
+    REPEATED_SEMANTIC_VALIDATION_FAILURE,
     REPEATED_UNRESOLVED_MUTATION_TARGETS,
     TOOL_REJECTED,
 )
@@ -315,7 +320,7 @@ class AgentRuntime:
                         self._reset_action_pressure(run_state)
                         run_state.transition_to(RunStatus.CORRECTING if tool_results else RunStatus.FAILED)
                         if run_state.state == RunStatus.FAILED:
-                            run_state.termination_reason = "diagnosis produced no correction"
+                            run_state.termination_reason = DIAGNOSIS_NO_CORRECTION
                     elif run_state.state == RunStatus.CORRECTING:
                         if self._telemetry.validation_repair_pending:
                             if self._telemetry.validation_repair_mutated:
@@ -368,7 +373,7 @@ class AgentRuntime:
                 if run_state.state == RunStatus.BUILDING:
                     if run_state.pending_mutation_targets:
                         run_state.state = RunStatus.FAILED
-                        run_state.termination_reason = "pending mutation targets block build"
+                        run_state.termination_reason = PENDING_MUTATION_TARGETS_BLOCK_BUILD
                         self._emit(
                             run_state.run_id,
                             RunEventType.ACTION_GATE_VIOLATION,
@@ -844,7 +849,7 @@ class AgentRuntime:
 
         if run_state.validation_repeat_count >= 1:
             run_state.state = RunStatus.FAILED
-            run_state.termination_reason = "repeated semantic validation failure"
+            run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
             return "FAILED"
         feedback = self._validation_feedback(result)
         self._emit(
@@ -903,7 +908,7 @@ class AgentRuntime:
             if staged_result.status == ValidationStatus.REPAIRABLE_FAIL:
                 if run_state.validation_repeat_count >= 1:
                     run_state.state = RunStatus.FAILED
-                    run_state.termination_reason = "repeated semantic validation failure"
+                    run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
                     return "FAILED"
                 feedback = self._functional_validation_feedback(staged_result)
                 self._emit(
@@ -1176,7 +1181,7 @@ class AgentRuntime:
                     run_state.termination_reason = (
                         "semantic repair produced no mutation"
                         if self._telemetry.validation_repair_pending
-                        else "repeated no-op tool calls"
+                        else REPEATED_NO_OP_TOOL_CALLS
                     )
                     return
 
@@ -1249,7 +1254,7 @@ class AgentRuntime:
             run_state.termination_reason = (
                 "semantic repair produced no mutation"
                 if self._telemetry.validation_repair_pending
-                else "exploration stalled without operational progress"
+                else EXPLORATION_STALLED
             )
         elif self._telemetry.consecutive_inspection_steps >= _ACTION_ONLY_STEP:
             self._telemetry.action_pressure_level = ActionGateState.ACTION_ONLY.value

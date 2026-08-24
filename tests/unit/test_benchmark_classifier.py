@@ -17,6 +17,7 @@ from pd_agent.benchmark import (
 )
 from pd_agent.core import ArtifactResult, BuildResult, RunStatus
 from pd_agent.core.errors import BuildError, LimitReachedError, ProviderError
+from pd_agent.core.terminal_reasons import AGENT_TERMINAL_FAILURE_REASONS
 from pd_agent.minecraft import (
     MinecraftEvidencePaths,
     MinecraftRuntimeEvidence,
@@ -253,11 +254,7 @@ def test_classifier_repeated_recoverable_rejection_is_agent_failure_before_evide
 
 @pytest.mark.parametrize(
     "termination_reason",
-    [
-        "semantic repair produced no mutation",
-        "repeated unresolved mutation targets without operational progress",
-        "repeated action gate violation without operational progress",
-    ],
+    [*sorted(AGENT_TERMINAL_FAILURE_REASONS)],
 )
 def test_classifier_semantic_terminal_failures_precede_downstream_evidence_gates(
     termination_reason: str,
@@ -286,6 +283,24 @@ def test_classifier_terminal_prebuild_failure_does_not_require_downstream_eviden
             minecraft_status=None,
             final_state=RunStatus.FAILED,
             termination_reason="semantic repair produced no mutation",
+        )
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.COMPLETED
+    assert classification.task_outcome == BenchmarkTaskOutcome.FAIL
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.AGENT_TASK_FAILURE
+
+
+def test_classifier_diagnosis_no_correction_is_agent_failure_without_downstream_evidence() -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(
+            build_success=False,
+            build_present=False,
+            artifact_classification="MISSING",
+            minecraft_status=None,
+            final_state=RunStatus.FAILED,
+            termination_reason="diagnosis produced no correction",
         )
     )
 

@@ -25,8 +25,9 @@ La auditoria contra `122e52a73cdc162c499abd8e72f6cf655bcb2de5` encontro:
 - `MinecraftTestRunner` y sus contratos ya producen evidencia estructurada;
 - reporting ya persiste `RunState`, `FinalReport` y eventos JSONL;
 - mutation targets ya bloquean build cuando quedan pendientes;
-- el runtime persiste razones terminales agent explicitas, pero el classifier
-  solo reconocia el subconjunto historico de tres razones;
+- el runtime persiste razones terminales agent explicitas y el classifier debe
+  consumir el catalogo central completo; una razon emitida fuera de ese
+  catalogo es un drift de contrato;
 - no existe aun un contrato generico de validation ni un repair loop funcional.
 
 La ausencia de `VALIDATING_FUNCTIONAL` es la discrepancia principal. Los lotes
@@ -41,6 +42,15 @@ razones agent-terminal. La clasificacion de una razon reconocida tiene
 precedencia sobre los gates de evidencia downstream y produce
 `COMPLETED + FAIL`, `AGENT`, `AGENT_TASK_FAILURE`, incluso cuando no hay build,
 artifact o Minecraft porque la ejecucion termino antes de esas fases.
+
+El runtime publica `diagnosis produced no correction` mediante la constante
+central correspondiente. Esta razon representa un fallo atribuible al agente,
+no evidencia invalida, y no consume replacement.
+
+El mismo catalogo cubre las terminaciones agent de validacion semantica
+repetida, no-op repetido, exploracion estancada y hard gate por mutation targets
+pendientes. Las terminaciones de provider, limites, infraestructura y harness
+siguen fuera de este catalogo y conservan `BLOCKED`.
 
 La separacion contractual es:
 
