@@ -89,6 +89,15 @@ def _usage_from_event(event: RunEvent) -> dict[str, Any] | None:
 
 
 def _aggregate_usage(usages: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    # Provider events contain both per-response deltas and cumulative snapshots.
+    # Summing every numeric field double-counts the latter across a run.
+    cumulative_keys = {
+        "accumulated_cost_usd",
+        "remaining_budget_usd",
+        "physical_request_count",
+        "logical_provider_turn_count",
+        "provider_retry_count",
+    }
     aggregate: dict[str, Any] = {}
     seen_usage = False
     for usage in usages:
@@ -102,6 +111,9 @@ def _aggregate_usage(usages: Sequence[Mapping[str, Any]]) -> dict[str, Any] | No
             if isinstance(value, bool):
                 if key not in aggregate:
                     aggregate[key] = value
+                continue
+            if key in cumulative_keys:
+                aggregate[key] = value
                 continue
             if isinstance(value, (int, float)):
                 if isinstance(existing, (int, float)) and not isinstance(existing, bool):

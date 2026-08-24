@@ -482,6 +482,125 @@ def test_collects_multiple_model_responses_as_run_level_usage(tmp_path: Path) ->
     assert collection.inconsistencies == ()
 
 
+def test_usage_aggregation_preserves_luna_cumulative_cost_snapshots(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "22222222-2222-4222-8222-222222222226"
+    run_state = RunState(
+        run_id=run_id,
+        task="luna accounting",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T11:30:00"),
+        logical_provider_request_count=2,
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="agent failure",
+            generated_at=_utc("2026-08-11T11:30:02"),
+        )
+    )
+    writer = storage.event_writer(run_id)
+    for sequence, usage in enumerate(
+        (
+            {
+                "input_tokens": 100,
+                "output_tokens": 10,
+                "total_tokens": 110,
+                "reasoning_tokens": 4,
+                "derived_cost_usd": 0.001,
+                "accumulated_cost_usd": 0.001,
+                "remaining_budget_usd": 0.999,
+                "physical_request_count": 1,
+                "provider_retry_count": 0,
+            },
+            {
+                "input_tokens": 200,
+                "output_tokens": 20,
+                "total_tokens": 220,
+                "reasoning_tokens": 6,
+                "derived_cost_usd": 0.002,
+                "accumulated_cost_usd": 0.003,
+                "remaining_budget_usd": 0.997,
+                "physical_request_count": 2,
+                "provider_retry_count": 1,
+            },
+        ),
+        start=1,
+    ):
+        writer.append(RunEvent(run_id=run_id, event_type=RunEventType.MODEL_RESPONDED, payload={"usage": usage, "sequence": sequence}))
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.usage is not None
+    assert collection.usage["derived_cost_usd"] == 0.003
+    assert collection.usage["accumulated_cost_usd"] == 0.003
+    assert collection.usage["remaining_budget_usd"] == 0.997
+    assert collection.usage["physical_request_count"] == 2
+    assert collection.usage["provider_retry_count"] == 1
+    assert collection.usage["reasoning_tokens"] == 10
+
+
+def test_historical_luna_usage_cost_and_remaining_are_not_double_counted(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    run_id = "22222222-2222-4222-8222-222222222227"
+    run_state = RunState(
+        run_id=run_id,
+        task="historical luna smoke",
+        project_root=tmp_path / "project",
+        state=RunStatus.FAILED,
+        started_at=_utc("2026-08-11T11:40:00"),
+        logical_provider_request_count=8,
+    )
+    storage.write_run_state(run_state)
+    storage.write_final_report(
+        FinalReport(
+            run_id=run_id,
+            final_state=RunStatus.FAILED,
+            summary="summary",
+            termination_reason="agent failure",
+            generated_at=_utc("2026-08-11T11:40:02"),
+        )
+    )
+    writer = storage.event_writer(run_id)
+    costs = (0.0007384, 0.0010782, 0.0010284, 0.0010512, 0.0010484, 0.0018058, 0.0011206, 0.001115)
+    accumulated = 0.0
+    for index, cost in enumerate(costs, start=1):
+        accumulated = round(accumulated + cost, 7)
+        writer.append(
+            RunEvent(
+                run_id=run_id,
+                event_type=RunEventType.MODEL_RESPONDED,
+                payload={
+                    "usage": {
+                        "input_tokens": (2984, 4869, 4620, 4842, 4678, 5357, 5297, 4825)[index - 1],
+                        "output_tokens": (118, 87, 87, 69, 94, 612, 51, 125)[index - 1],
+                        "total_tokens": (3102, 4956, 4707, 4911, 4772, 5969, 5348, 4950)[index - 1],
+                        "reasoning_tokens": (15, 9, 8, 10, 10, 287, 0, 25)[index - 1],
+                        "derived_cost_usd": cost,
+                        "accumulated_cost_usd": accumulated,
+                        "remaining_budget_usd": round(1.0 - accumulated, 7),
+                    },
+                },
+            )
+        )
+
+    collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
+
+    assert collection.usage is not None
+    assert collection.usage["input_tokens"] == 37472
+    assert collection.usage["output_tokens"] == 1243
+    assert collection.usage["total_tokens"] == 38715
+    assert collection.usage["reasoning_tokens"] == 364
+    assert collection.usage["derived_cost_usd"] == 0.008986
+    assert collection.usage["accumulated_cost_usd"] == 0.008986
+    assert collection.usage["remaining_budget_usd"] == 0.991014
+    assert collection.usage["remaining_budget_usd"] <= 1.0
+
+
 def test_collects_legacy_model_called_without_logical_count_is_tolerated(tmp_path: Path) -> None:
     storage = RunStorage(tmp_path / "runs")
     run_id = "22222222-2222-4222-8222-222222222223"
