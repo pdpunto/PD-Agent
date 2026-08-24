@@ -18,6 +18,17 @@ from .environment import (
     BenchmarkGradleSeedManifest,
 )
 from .executor import BenchmarkExecutionResult, BenchmarkExecutor
+from .experimental_ab import (
+    CANONICAL_ORDER,
+    ExperimentalABCell,
+    ExperimentalABSchedule,
+    ExperimentalABState,
+    ExperimentalABStatus,
+    aggregate_experimental_runs,
+    classify_attempt,
+    provider_for_config,
+    validate_ab_configs,
+)
 from .pacing import BenchmarkPacedProvider, BenchmarkRequestPacer
 from .public_validation import (
     PUBLIC_VALIDATION_SCHEMA_VERSION,
@@ -93,6 +104,15 @@ __all__ = [
     "BenchmarkExecutionResult",
     "BenchmarkExecutionRunner",
     "BenchmarkExecutor",
+    "CANONICAL_ORDER",
+    "ExperimentalABCell",
+    "ExperimentalABSchedule",
+    "ExperimentalABState",
+    "ExperimentalABStatus",
+    "aggregate_experimental_runs",
+    "classify_attempt",
+    "provider_for_config",
+    "validate_ab_configs",
     "BenchmarkPacedProvider",
     "BenchmarkAcceptanceSpec",
     "BenchmarkAggregateMetrics",
