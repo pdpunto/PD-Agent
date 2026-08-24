@@ -71,6 +71,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def validate_experimental_prelaunch_paths(launch_root: Path, config_path: Path) -> tuple[Path, Path]:
+    """Validate external staging before acquiring the exclusive launch root."""
+
+    launch_root = Path(launch_root).resolve(strict=False)
+    config_path = Path(config_path).resolve(strict=False)
+    if launch_root.exists():
+        raise ValueError("--launch-root must be new and unused")
+    try:
+        config_path.relative_to(launch_root)
+    except ValueError:
+        if not config_path.is_file():
+            raise FileNotFoundError(f"runtime config does not exist: {config_path}")
+        return launch_root, config_path
+    raise ValueError("runtime config must be staged outside --launch-root")
+
+
 def initialize_experimental_roots(launch_root: Path) -> tuple[str, Path]:
     """Create the isolated roots before Gradle resolves the execution path."""
 
@@ -114,7 +130,7 @@ def _write_experimental_manifest(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    launch_root = args.launch_root.resolve(strict=False)
+    launch_root, config_path = validate_experimental_prelaunch_paths(args.launch_root, args.configs_json)
     execution_id, execution_root = initialize_experimental_roots(launch_root)
     pricing = LunaPricingSnapshot()
     manifest_path = execution_root / "experimental-manifest.json"
@@ -132,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     catalog = BenchmarkCatalog.load(args.catalog_root)
-    config = _load_one_config(args.configs_json)
+    config = _load_one_config(config_path)
     dataset = catalog.dataset_for("PD_AGENT_BENCHMARK_DATASET_V0.5_5", "0.5.5")
     task = catalog.task_for("F6-T2", "5")
     if task.fixture.fixture_identity != "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396":

@@ -13,6 +13,7 @@ from scripts.benchmark.run_luna_experimental import (
     _positive_budget,
     build_parser,
     initialize_experimental_roots,
+    validate_experimental_prelaunch_paths,
 )
 from pd_agent.benchmark import BenchmarkGradleEnvironment
 from pd_agent.providers import OpenAIProvider
@@ -79,6 +80,41 @@ def test_existing_launch_root_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="new and unused"):
         initialize_experimental_roots(launch_root)
+
+
+def test_preflight_keeps_launch_root_absent_with_external_config(tmp_path: Path) -> None:
+    launch_root = tmp_path / "future-launch"
+    config_path = tmp_path / "staging" / "runtime-configs.json"
+    config_path.parent.mkdir()
+    config_path.write_text(json.dumps(_config_payload()), encoding="utf-8")
+
+    validated_launch, validated_config = validate_experimental_prelaunch_paths(launch_root, config_path)
+
+    assert validated_launch == launch_root.resolve()
+    assert validated_config == config_path.resolve()
+    assert not launch_root.exists()
+    assert _load_one_config(validated_config).model == "gpt-5.6-luna"
+
+
+def test_preflight_rejects_config_inside_future_launch_root(tmp_path: Path) -> None:
+    launch_root = tmp_path / "future-launch"
+    config_path = launch_root / "runtime-configs.json"
+    with pytest.raises(ValueError, match="staged outside"):
+        validate_experimental_prelaunch_paths(launch_root, config_path)
+
+
+def test_preflight_rejects_missing_external_config(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="runtime config does not exist"):
+        validate_experimental_prelaunch_paths(tmp_path / "future-launch", tmp_path / "missing.json")
+
+
+def test_existing_nonempty_launch_root_is_rejected(tmp_path: Path) -> None:
+    launch_root = tmp_path / "existing-launch"
+    launch_root.mkdir()
+    (launch_root / "stale.txt").write_text("stale", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="new and unused"):
+        validate_experimental_prelaunch_paths(launch_root, tmp_path / "runtime-configs.json")
 
 
 def test_config_list_with_one_element_is_accepted(tmp_path: Path) -> None:
