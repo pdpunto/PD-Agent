@@ -137,6 +137,12 @@ Reanudar una ejecucion existente usando su batch directory y su schedule persist
 6. reconstruir el estado minimo necesario;
 7. continuar el siguiente pending item exacto.
 
+La evidencia historica es solo preservacion: no se reutiliza como
+`ExecutionDir` de una matriz nueva ni se reanuda con el HEAD actual. La nueva
+F9 debe crear su propio LaunchRoot, ExecutionRoot, execution id y schedule en
+zero-state. Su resume readiness se valida unicamente despues de que ese nuevo
+ExecutionDir exista y siempre exige el mismo commit persistido en su manifest.
+
 ### Drift checks obligatorios
 
 Comparar y rechazar si cambian:
@@ -153,7 +159,7 @@ Comparar y rechazar si cambian:
 - `scheduling_seed`;
 - canonical schedule;
 - Gradle seed identity / manifest;
-- baseline/commit si la politica lo exige.
+- baseline/commit exacto; cualquier drift cross-commit debe rechazarse.
 
 ### Tests
 

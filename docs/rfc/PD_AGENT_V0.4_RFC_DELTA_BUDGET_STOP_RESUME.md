@@ -206,6 +206,16 @@ El resume debe usar la misma batch identity y el mismo execution directory ya cr
 
 Si se pasa un `--resume` contra un directorio ajeno, inexistente o incompatible, el comando debe rechazarlo explicitamente.
 
+La preservacion de una ejecucion historica no implica que sea reanudable sobre
+el HEAD actual. Una ejecucion historica conserva su propio commit, manifest,
+schedule y evidencia, y no es un candidato de resume para una matriz nueva.
+Una nueva matriz debe crear un LaunchRoot, ExecutionRoot, execution id y
+schedule nuevos desde cero.
+
+Para una matriz nueva, la disponibilidad de resume solo se evalua despues de
+crear su propio ExecutionDir: si queda pausada, debe reanudarse sobre ese mismo
+directorio y el mismo commit que figura en su manifest.
+
 ## 9. Drift validation
 
 El resume debe rechazar drift si cambia cualquiera de estos identificadores o contratos:
@@ -224,7 +234,9 @@ El resume debe rechazar drift si cambia cualquiera de estos identificadores o co
 - `scheduling_seed`;
 - canonical schedule;
 - Gradle seed identity / manifest identity;
-- PD Agent commit o baseline, segun la politica final acordada para resume.
+- PD Agent commit o baseline. El commit debe coincidir exactamente con el
+  commit persistido en el manifest; un mismatch cross-commit debe producir
+  `pd_agent_commit drift detected`.
 
 Si el drift es material, el resume debe fallar de forma explicita con un error de drift, no con un BLOCKED generico.
 
