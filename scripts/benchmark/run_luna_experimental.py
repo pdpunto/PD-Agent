@@ -22,6 +22,7 @@ from pd_agent.benchmark.scheduler import BenchmarkScheduledAttempt
 from pd_agent.experimental import (
     LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
     LunaBudgetGuard,
+    LunaPricingSnapshot,
     build_luna_experimental_manifest,
 )
 from pd_agent.minecraft import MinecraftTestRunner
@@ -95,6 +96,7 @@ def _write_experimental_manifest(
     task_id: str,
     task_version: str,
     hard_budget_usd: Decimal,
+    pricing: LunaPricingSnapshot,
     **extra: object,
 ) -> None:
     manifest = build_luna_experimental_manifest(
@@ -104,6 +106,7 @@ def _write_experimental_manifest(
         task_id=task_id,
         task_version=task_version,
         hard_budget_usd=hard_budget_usd,
+        pricing=pricing,
     )
     manifest.update({"execution_root": str(execution_root), **extra})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -113,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     launch_root = args.launch_root.resolve(strict=False)
     execution_id, execution_root = initialize_experimental_roots(launch_root)
+    pricing = LunaPricingSnapshot()
     manifest_path = execution_root / "experimental-manifest.json"
     _write_experimental_manifest(
         manifest_path,
@@ -123,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         task_id="F6-T2",
         task_version="5",
         hard_budget_usd=args.hard_budget_usd,
+        pricing=pricing,
         lifecycle_status="INITIALIZING",
     )
 
@@ -142,13 +147,15 @@ def main(argv: list[str] | None = None) -> int:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY missing")
-    guard = LunaBudgetGuard(hard_budget_usd=args.hard_budget_usd)
+    guard = LunaBudgetGuard(hard_budget_usd=args.hard_budget_usd, pricing=pricing)
     provider = BenchmarkPacedProvider(
         provider=OpenAIProvider(
             model=config.model,
             api_key=api_key,
             provider_retry_limit=config.execution_limits.provider_retry_limit,
             budget_guard=guard,
+            service_tier=pricing.service_tier,
+            prompt_cache_options={"mode": "explicit", "ttl": "30m"},
         ),
         pacer=BenchmarkRequestPacer(min_interval_seconds=4.5),
     )
@@ -195,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         task_id=task.task_id,
         task_version=task.task_version,
         hard_budget_usd=args.hard_budget_usd,
+        pricing=pricing,
         lifecycle_status="COMPLETED",
         benchmark_run_path=str(result.benchmark_run_path),
         budget_metadata=guard.metadata(),

@@ -44,7 +44,7 @@ def _usage(input_tokens: int = 100, output_tokens: int = 50, cached_tokens: int 
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": input_tokens + output_tokens,
-        "input_tokens_details": {"cached_tokens": cached_tokens},
+        "input_tokens_details": {"cached_tokens": cached_tokens, "cache_write_tokens": 0},
         "output_tokens_details": {"reasoning_tokens": reasoning_tokens},
     }
 
@@ -104,6 +104,22 @@ def test_cached_input_pricing_is_lower_and_reasoning_is_not_double_charged() -> 
     assert Decimal(str(record["derived_cost_usd"])) == expected
 
 
+def test_cache_write_is_accounted_at_official_multiplier() -> None:
+    guard = LunaBudgetGuard()
+    guard.before_request({"input": []}, retry_count=0)
+    usage = _usage(input_tokens=1_000, output_tokens=500)
+    usage["input_tokens_details"]["cache_write_tokens"] = 200
+    record = guard.account_response(usage)
+
+    expected = (
+        Decimal("800") / Decimal("1_000_000") * Decimal("0.20")
+        + Decimal("200") / Decimal("1_000_000") * Decimal("0.20") * Decimal("1.25")
+        + Decimal("500") / Decimal("1_000_000") * Decimal("1.20")
+    )
+    assert Decimal(str(record["derived_cost_usd"])) == expected
+    assert record["cache_write_tokens"] == 200
+
+
 def test_long_context_pricing_applies_to_input_and_output() -> None:
     guard = LunaBudgetGuard()
     guard.before_request({"input": []}, retry_count=0)
@@ -111,6 +127,34 @@ def test_long_context_pricing_applies_to_input_and_output() -> None:
 
     assert record["long_context"] is True
     assert Decimal(str(record["derived_cost_usd"])) == Decimal("0.1218")
+
+
+def test_reservation_uses_cache_write_worst_case() -> None:
+    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    payload = {"input": []}
+    decision = guard.before_request(payload, retry_count=0)
+
+    input_tokens = guard._conservative_input_tokens(payload)
+    expected = (
+        Decimal(input_tokens) / Decimal("1_000_000") * Decimal("0.20") * Decimal("1.25")
+        + Decimal("128000") / Decimal("1_000_000") * Decimal("1.20")
+    )
+    assert Decimal(str(decision["projected_worst_case_cost_usd"])) == expected
+    assert decision["decision"] == "ALLOW"
+
+
+def test_reservation_equal_remaining_allows_and_greater_blocks() -> None:
+    payload = {"input": []}
+    reference = LunaBudgetGuard()
+    reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload))
+
+    equal = LunaBudgetGuard(hard_budget_usd=reserve)
+    assert equal.before_request(payload, retry_count=0)["decision"] == "ALLOW"
+
+    greater = LunaBudgetGuard(hard_budget_usd=reserve - Decimal("0.0000001"))
+    with pytest.raises(ProviderError) as error:
+        greater.before_request(payload, retry_count=0)
+    assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
 
 
 def test_retry_is_checked_by_guard() -> None:

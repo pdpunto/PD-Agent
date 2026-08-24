@@ -70,6 +70,8 @@ class OpenAIProvider(ModelProvider):
         client: Any | None = None,
         redactor: Redactor | None = None,
         budget_guard: Any | None = None,
+        service_tier: str | None = None,
+        prompt_cache_options: Mapping[str, Any] | None = None,
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
@@ -81,6 +83,8 @@ class OpenAIProvider(ModelProvider):
         self.provider_retry_limit = provider_retry_limit
         self.redactor = redactor or Redactor((api_key,) if api_key else ())
         self.budget_guard = budget_guard
+        self.service_tier = service_tier
+        self.prompt_cache_options = dict(prompt_cache_options) if prompt_cache_options is not None else None
         self._client = client or self._build_client()
 
     def __repr__(self) -> str:
@@ -209,6 +213,10 @@ class OpenAIProvider(ModelProvider):
             if key in request.model_config and request.model_config[key] is not None:
                 payload[key] = request.model_config[key]
         payload["store"] = False
+        if self.service_tier is not None and "service_tier" not in payload:
+            payload["service_tier"] = self.service_tier
+        if self.prompt_cache_options is not None and "prompt_cache_options" not in payload:
+            payload["prompt_cache_options"] = dict(self.prompt_cache_options)
         if request.model_config.get("reasoning"):
             payload["include"] = self._merge_reasoning_include(request.model_config.get("include"))
         instructions = request.model_config.get("instructions")

@@ -123,6 +123,8 @@ def _provider(
     retry_limit: int = 2,
     api_key: str | None = None,
     redactor: Redactor | None = None,
+    service_tier: str | None = None,
+    prompt_cache_options=None,
 ) -> OpenAIProvider:
     return OpenAIProvider(
         model=model,
@@ -130,6 +132,8 @@ def _provider(
         provider_retry_limit=retry_limit,
         client=client or _FakeClient([]),
         redactor=redactor,
+        service_tier=service_tier,
+        prompt_cache_options=prompt_cache_options,
     )
 
 
@@ -219,6 +223,24 @@ def test_request_mapping_and_response_mapping() -> None:
                 "provider_retry_count": 0,
             },
     )
+
+
+def test_experimental_provider_adds_explicit_standard_tier_and_cache_policy() -> None:
+    response = SimpleNamespace(id="resp_1", model="gpt-5.6-luna", status="completed", usage=_Usage(1, 1), output=[])
+    client = _FakeClient([response])
+    provider = _provider(
+        client=client,
+        model="gpt-5.6-luna",
+        service_tier="default",
+        prompt_cache_options={"mode": "explicit", "ttl": "30m"},
+    )
+
+    provider.execute(_request(messages=(AgentMessage(role="user", content="hello"),)))
+
+    call = client.responses.calls[0]
+    assert call["service_tier"] == "default"
+    assert call["prompt_cache_options"] == {"mode": "explicit", "ttl": "30m"}
+    assert call["store"] is False
 
 
 def test_store_is_forced_false_even_if_requested_true() -> None:

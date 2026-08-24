@@ -17,11 +17,13 @@ LUNA_EXPERIMENTAL_HARD_BUDGET_USD = Decimal("1.00")
 class LunaPricingSnapshot:
     """Pricing isolated to the experimental Luna smoke."""
 
-    date: str = "2026-08-23"
+    date: str = "2026-08-25"
     model: str = "gpt-5.6-luna"
-    processing: str = "Standard"
+    service_tier: str = "default"
+    pricing_mode: str = "standard"
     short_context_input_per_million: Decimal = Decimal("0.20")
     short_context_cached_input_per_million: Decimal = Decimal("0.02")
+    cache_write_multiplier: Decimal = Decimal("1.25")
     short_context_output_per_million: Decimal = Decimal("1.20")
     long_context_threshold_tokens: int = 272_000
     long_context_input_multiplier: Decimal = Decimal("2.0")
@@ -33,9 +35,11 @@ class LunaPricingSnapshot:
         return {
             "date": self.date,
             "model": self.model,
-            "processing": self.processing,
+            "service_tier": self.service_tier,
+            "pricing_mode": self.pricing_mode,
             "short_context_input_per_million": float(self.short_context_input_per_million),
             "short_context_cached_input_per_million": float(self.short_context_cached_input_per_million),
+            "cache_write_multiplier": float(self.cache_write_multiplier),
             "short_context_output_per_million": float(self.short_context_output_per_million),
             "long_context_threshold_tokens": self.long_context_threshold_tokens,
             "long_context_input_multiplier": float(self.long_context_input_multiplier),
@@ -43,6 +47,8 @@ class LunaPricingSnapshot:
             "max_context_tokens": self.max_context_tokens,
             "max_output_tokens": self.max_output_tokens,
             "reasoning_tokens_billed_as": "output",
+            "cache_write_policy": "disabled_explicit_mode_without_breakpoints",
+            "hosted_tools_cost": "0; function tools only",
         }
 
 
@@ -62,7 +68,7 @@ class LunaBudgetGuard:
     response_records: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if not self.hard_budget_usd.is_finite() or self.hard_budget_usd <= 0:
+        if not isinstance(self.hard_budget_usd, Decimal) or not self.hard_budget_usd.is_finite() or self.hard_budget_usd <= 0:
             raise ValueError("hard_budget_usd must be a finite positive Decimal")
 
     def begin_logical_turn(self) -> None:
@@ -101,27 +107,39 @@ class LunaBudgetGuard:
         if total_tokens != input_tokens + output_tokens:
             raise self._abort("INCOHERENT_USAGE")
         cached_tokens = self._nested_int(normalized, "input_tokens_details", "cached_tokens")
+        cache_write_tokens = self._nested_int(normalized, "input_tokens_details", "cache_write_tokens")
         if cached_tokens is None:
-            cached_tokens = normalized.get("cached_input_tokens", 0)
+            cached_tokens = normalized.get("cached_input_tokens")
+        if cache_write_tokens is None:
+            cache_write_tokens = normalized.get("cache_write_tokens")
         reasoning_tokens = self._nested_int(normalized, "output_tokens_details", "reasoning_tokens")
         if reasoning_tokens is None:
             reasoning_tokens = normalized.get("reasoning_tokens", 0)
-        if not isinstance(cached_tokens, int) or not isinstance(reasoning_tokens, int):
+        if not isinstance(cached_tokens, int) or not isinstance(cache_write_tokens, int) or not isinstance(reasoning_tokens, int):
             raise self._abort("INCOHERENT_USAGE")
-        if cached_tokens < 0 or cached_tokens > input_tokens or reasoning_tokens < 0 or reasoning_tokens > output_tokens:
+        if (
+            cached_tokens < 0
+            or cache_write_tokens < 0
+            or cached_tokens + cache_write_tokens > input_tokens
+            or reasoning_tokens < 0
+            or reasoning_tokens > output_tokens
+        ):
             raise self._abort("INCOHERENT_USAGE")
         long_context = input_tokens > self.pricing.long_context_threshold_tokens
         input_rate = self.pricing.short_context_input_per_million
         cached_rate = self.pricing.short_context_cached_input_per_million
         output_rate = self.pricing.short_context_output_per_million
+        cache_write_rate = input_rate * self.pricing.cache_write_multiplier
         if long_context:
             input_rate *= self.pricing.long_context_input_multiplier
             cached_rate *= self.pricing.long_context_input_multiplier
+            cache_write_rate *= self.pricing.long_context_input_multiplier
             output_rate *= self.pricing.long_context_output_multiplier
-        uncached_tokens = input_tokens - cached_tokens
+        uncached_tokens = input_tokens - cached_tokens - cache_write_tokens
         derived = (
             Decimal(uncached_tokens) / Decimal(1_000_000) * input_rate
             + Decimal(cached_tokens) / Decimal(1_000_000) * cached_rate
+            + Decimal(cache_write_tokens) / Decimal(1_000_000) * cache_write_rate
             + Decimal(output_tokens) / Decimal(1_000_000) * output_rate
         )
         self.accumulated_cost_usd += derived
@@ -130,6 +148,7 @@ class LunaBudgetGuard:
         record = {
             "input_tokens": input_tokens,
             "cached_tokens": cached_tokens,
+            "cache_write_tokens": cache_write_tokens,
             "uncached_input_tokens": uncached_tokens,
             "output_tokens": output_tokens,
             "reasoning_tokens": reasoning_tokens,
@@ -169,11 +188,13 @@ class LunaBudgetGuard:
         long_context = input_tokens > self.pricing.long_context_threshold_tokens
         input_rate = self.pricing.short_context_input_per_million
         output_rate = self.pricing.short_context_output_per_million
+        cache_write_rate = input_rate * self.pricing.cache_write_multiplier
         if long_context:
             input_rate *= self.pricing.long_context_input_multiplier
+            cache_write_rate *= self.pricing.long_context_input_multiplier
             output_rate *= self.pricing.long_context_output_multiplier
         return (
-            Decimal(input_tokens) / Decimal(1_000_000) * input_rate
+            Decimal(input_tokens) / Decimal(1_000_000) * max(input_rate, cache_write_rate)
             + Decimal(self.pricing.max_output_tokens) / Decimal(1_000_000) * output_rate
         )
 
@@ -231,6 +252,7 @@ def build_luna_experimental_manifest(
     task_id: str,
     task_version: str,
     hard_budget_usd: Decimal = LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
+    pricing: LunaPricingSnapshot = LunaPricingSnapshot(),
 ) -> dict[str, Any]:
     """Build only safe, non-official identity metadata for a future smoke."""
 
@@ -248,7 +270,11 @@ def build_luna_experimental_manifest(
         "experimental": True,
         "non_official": True,
         "hard_budget_usd": float(hard_budget_usd),
-        "pricing_snapshot": LunaPricingSnapshot().to_dict(),
+        "service_tier_requested": pricing.service_tier,
+        "pricing_mode": pricing.pricing_mode,
+        "pricing_snapshot_date": pricing.date,
+        "cache_write_policy": "disabled_explicit_mode_without_breakpoints",
+        "pricing_snapshot": pricing.to_dict(),
         "official_repetition": None,
         "official_attempt": None,
         "replacement": False,
