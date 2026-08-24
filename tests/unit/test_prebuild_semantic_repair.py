@@ -134,6 +134,100 @@ def test_repair_feedback_allows_write_then_build_and_rechecks(tmp_path: Path) ->
     assert "Fabric" not in feedback
 
 
+def test_repair_feedback_allows_inspection_before_next_mutation(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multiturn-repair", build_state="pass")
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="source",
+                tool_calls=(ToolCall(
+                    call_id="1",
+                    tool_name="write_file",
+                    arguments={
+                        "path": "src/main/java/com/example/ExampleMod.java",
+                        "content": "class ExampleMod {}\n",
+                    },
+                ),),
+            ),
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(ToolCall(
+                    call_id="2",
+                    tool_name="read_file",
+                    arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+                ),),
+            ),
+            AgentResponse(
+                assistant_message="repair resource",
+                tool_calls=(ToolCall(
+                    call_id="3",
+                    tool_name="create_file",
+                    arguments={
+                        "path": "assets/examplemod/lang/en_us.json",
+                        "content": '{"item.example": "Example"}\n',
+                    },
+                ),),
+            ),
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+
+    state, _report = controller.run(
+        root,
+        "repair after inspection",
+        validation_contract=_contract(_json_resource("assets/examplemod/lang/en_us.json", {"kind": "json_pointer_present", "path": "/item.example"})),
+    )
+
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count == 1
+    assert len(provider.requests) == 3
+
+
+def test_semantic_repair_inspection_stall_is_bounded_without_build(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "multiturn-stall", build_state="pass")
+    inspections = [
+        AgentResponse(
+            assistant_message=f"inspect {index}",
+            tool_calls=(ToolCall(
+                call_id=str(index),
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        )
+        for index in range(1, 9)
+    ]
+    provider = ScriptedProvider(
+        [
+            AgentResponse(
+                assistant_message="source",
+                tool_calls=(ToolCall(
+                    call_id="source",
+                    tool_name="write_file",
+                    arguments={
+                        "path": "src/main/java/com/example/ExampleMod.java",
+                        "content": "class ExampleMod {}\n",
+                    },
+                ),),
+            ),
+            *inspections,
+        ]
+    )
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+
+    state, _report = controller.run(
+        root,
+        "bounded repair stall",
+        validation_contract=_contract(_json_resource("assets/missing.json")),
+    )
+
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "semantic repair produced no mutation"
+    assert state.build_attempt_count == 0
+    assert len(provider.requests) == 3
+
+
 def test_repeated_same_failure_stops_without_build(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "stall", build_state="pass")
     provider = ScriptedProvider(
@@ -142,7 +236,22 @@ def test_repeated_same_failure_stops_without_build(tmp_path: Path) -> None:
                 assistant_message="source",
                 tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),),
             ),
-            AgentResponse(assistant_message="no repair", tool_calls=()),
+            AgentResponse(
+                assistant_message="inspect",
+                tool_calls=(ToolCall(
+                    call_id="2",
+                    tool_name="read_file",
+                    arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+                ),),
+            ),
+            AgentResponse(
+                assistant_message="inspect again",
+                tool_calls=(ToolCall(
+                    call_id="3",
+                    tool_name="read_file",
+                    arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+                ),),
+            ),
         ]
     )
     controller, _storage = _controller(root, provider)

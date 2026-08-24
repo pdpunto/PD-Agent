@@ -273,7 +273,22 @@ def test_repeated_functional_violation_is_terminal(tmp_path: Path, stage: Valida
     root = _runtime_project(tmp_path / stage.value, build_state="pass")
     provider = ScriptedProvider([
         AgentResponse(assistant_message="source", tool_calls=(ToolCall(call_id="1", tool_name="write_file", arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"}),)),
-        AgentResponse(assistant_message="same repair", tool_calls=()),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="2",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect again",
+            tool_calls=(ToolCall(
+                call_id="3",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
     ])
     controller, _storage = _controller(root, provider)
     controller.pre_build_validator = PreBuildWorkspaceValidator()
@@ -303,19 +318,29 @@ def test_noop_repair_does_not_trigger_stale_build(tmp_path: Path) -> None:
                 arguments={"path": "src/main/java/com/example/ExampleMod.java"},
             ),),
         ),
+        AgentResponse(
+            assistant_message="repair after inspection",
+            tool_calls=(ToolCall(
+                call_id="3",
+                tool_name="write_file",
+                arguments={
+                    "path": "src/main/java/com/example/ExampleMod.java",
+                    "content": "class ExampleMod { int repaired; }\n",
+                },
+            ),),
+        ),
     ])
     controller, _storage = _controller(root, provider)
     controller.pre_build_validator = PreBuildWorkspaceValidator()
     controller.functional_validator = SequenceFunctionalValidator([
         ValidationStatus.REPAIRABLE_FAIL,
-        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.PASS,
     ])
 
     state, _report = controller.run(root, "noop repair", validation_contract={"schema_version": 1, "required_resources": []})
 
-    assert state.state.value == "FAILED"
-    assert state.termination_reason == "semantic repair produced no mutation"
-    assert state.build_attempt_count == 1
+    assert state.state.value == "COMPLETED"
+    assert state.build_attempt_count == 2
 
 
 def test_multiple_mutations_pair_latest_artifact_with_latest_build(tmp_path: Path) -> None:

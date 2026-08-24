@@ -38,7 +38,6 @@ from pd_agent.core.terminal_reasons import (
     REPEATED_BUILD_FAILURE,
     REPEATED_RECOVERABLE_TOOL_REJECTION,
     REPEATED_UNRESOLVED_MUTATION_TARGETS,
-    SEMANTIC_REPAIR_NO_MUTATION,
     TOOL_REJECTED,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
@@ -319,16 +318,26 @@ class AgentRuntime:
                             run_state.termination_reason = "diagnosis produced no correction"
                     elif run_state.state == RunStatus.CORRECTING:
                         if self._telemetry.validation_repair_pending:
-                            self._telemetry.validation_repair_pending = False
-                            if not self._telemetry.validation_repair_mutated:
-                                run_state.state = RunStatus.FAILED
-                                run_state.termination_reason = SEMANTIC_REPAIR_NO_MUTATION
-                            else:
+                            if self._telemetry.validation_repair_mutated:
+                                self._telemetry.validation_repair_pending = False
                                 self._telemetry.validation_repair_mutated = False
                                 run_state.transition_to(RunStatus.EDITING)
+                            else:
+                                # Inspection is a valid repair step; keep the repair
+                                # phase open until progress or an existing stall limit.
+                                run_state.transition_to(RunStatus.EDITING)
+                                editing_continuation_available = True
                         else:
                             run_state.transition_to(RunStatus.BUILDING)
                     elif run_state.state == RunStatus.EDITING:
+                        if self._telemetry.validation_repair_pending:
+                            if self._telemetry.validation_repair_mutated:
+                                self._telemetry.validation_repair_pending = False
+                                self._telemetry.validation_repair_mutated = False
+                            else:
+                                editing_continuation_available = True
+                                self._persist_state(run_state)
+                                continue
                         if run_state.pending_mutation_targets:
                             editing_continuation_available = True
                         else:
@@ -1164,7 +1173,11 @@ class AgentRuntime:
                     self._telemetry.tool_repeat_count = 0
                 if self._telemetry.tool_repeat_count >= 1:
                     run_state.state = RunStatus.FAILED
-                    run_state.termination_reason = "repeated no-op tool calls"
+                    run_state.termination_reason = (
+                        "semantic repair produced no mutation"
+                        if self._telemetry.validation_repair_pending
+                        else "repeated no-op tool calls"
+                    )
                     return
 
         if build_result is not None:
@@ -1233,7 +1246,11 @@ class AgentRuntime:
         if self._telemetry.consecutive_inspection_steps >= _ACTION_STALL_STEP:
             self._telemetry.action_pressure_level = ActionGateState.STALLED.value
             run_state.state = RunStatus.FAILED
-            run_state.termination_reason = "exploration stalled without operational progress"
+            run_state.termination_reason = (
+                "semantic repair produced no mutation"
+                if self._telemetry.validation_repair_pending
+                else "exploration stalled without operational progress"
+            )
         elif self._telemetry.consecutive_inspection_steps >= _ACTION_ONLY_STEP:
             self._telemetry.action_pressure_level = ActionGateState.ACTION_ONLY.value
         elif self._telemetry.consecutive_inspection_steps >= _FOCUSED_ACTION_STEP:
