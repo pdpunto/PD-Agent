@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import argparse
 import inspect
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from scripts.benchmark.run_luna_experimental import (
     _load_one_config,
+    _positive_budget,
+    build_parser,
     initialize_experimental_roots,
 )
 from pd_agent.benchmark import BenchmarkGradleEnvironment
@@ -101,3 +105,23 @@ def test_runner_does_not_reference_f9_scheduler_or_execution_dir() -> None:
     source = Path("scripts/benchmark/run_luna_experimental.py").read_text(encoding="utf-8")
     assert "BenchmarkExecutionRunner" not in source
     assert "RATE_LIMIT_PAUSED" not in source
+
+
+def test_cli_accepts_configurable_budget() -> None:
+    args = build_parser().parse_args([
+        "--catalog-root", "benchmarks",
+        "--configs-json", "configs.json",
+        "--launch-root", "launch",
+        "--gradle-seed-root", "seed",
+        "--gradle-seed-manifest", "seed.json",
+        "--pd-agent-commit", "commit",
+        "--hard-budget-usd", "0.25",
+    ])
+
+    assert args.hard_budget_usd == Decimal("0.25")
+
+
+@pytest.mark.parametrize("value", ["0", "-0.25", "NaN", "Infinity", "-Infinity", "not-money"])
+def test_cli_rejects_invalid_budget(value: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError):
+        _positive_budget(value)

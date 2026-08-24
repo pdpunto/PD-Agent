@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 
@@ -18,7 +19,11 @@ from pd_agent.benchmark import (
     BenchmarkRequestPacer,
 )
 from pd_agent.benchmark.scheduler import BenchmarkScheduledAttempt
-from pd_agent.experimental import LunaBudgetGuard, build_luna_experimental_manifest
+from pd_agent.experimental import (
+    LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
+    LunaBudgetGuard,
+    build_luna_experimental_manifest,
+)
 from pd_agent.minecraft import MinecraftTestRunner
 from pd_agent.providers import OpenAIProvider
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
@@ -39,6 +44,16 @@ def _load_one_config(path: Path) -> BenchmarkConfig:
     return config
 
 
+def _positive_budget(value: str) -> Decimal:
+    try:
+        budget = Decimal(value)
+    except (InvalidOperation, ValueError):
+        raise argparse.ArgumentTypeError("hard budget must be a finite positive decimal") from None
+    if not budget.is_finite() or budget <= 0:
+        raise argparse.ArgumentTypeError("hard budget must be a finite positive decimal")
+    return budget
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one isolated non-official Luna smoke")
     parser.add_argument("--catalog-root", required=True, type=Path)
@@ -47,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gradle-seed-root", required=True, type=Path)
     parser.add_argument("--gradle-seed-manifest", required=True, type=Path)
     parser.add_argument("--pd-agent-commit", required=True)
+    parser.add_argument(
+        "--hard-budget-usd",
+        type=_positive_budget,
+        default=LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
+    )
     return parser
 
 
@@ -65,13 +85,25 @@ def initialize_experimental_roots(launch_root: Path) -> tuple[str, Path]:
     return execution_id, execution_root
 
 
-def _write_experimental_manifest(path: Path, *, execution_id: str, run_id: str, launch_root: Path, execution_root: Path, task_id: str, task_version: str, **extra: object) -> None:
+def _write_experimental_manifest(
+    path: Path,
+    *,
+    execution_id: str,
+    run_id: str,
+    launch_root: Path,
+    execution_root: Path,
+    task_id: str,
+    task_version: str,
+    hard_budget_usd: Decimal,
+    **extra: object,
+) -> None:
     manifest = build_luna_experimental_manifest(
         execution_id=execution_id,
         run_id=run_id,
         launch_root=str(launch_root),
         task_id=task_id,
         task_version=task_version,
+        hard_budget_usd=hard_budget_usd,
     )
     manifest.update({"execution_root": str(execution_root), **extra})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
@@ -90,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_root=execution_root,
         task_id="F6-T2",
         task_version="5",
+        hard_budget_usd=args.hard_budget_usd,
         lifecycle_status="INITIALIZING",
     )
 
@@ -109,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise ValueError("OPENAI_API_KEY missing")
-    guard = LunaBudgetGuard()
+    guard = LunaBudgetGuard(hard_budget_usd=args.hard_budget_usd)
     provider = BenchmarkPacedProvider(
         provider=OpenAIProvider(
             model=config.model,
@@ -161,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         execution_root=execution_root,
         task_id=task.task_id,
         task_version=task.task_version,
+        hard_budget_usd=args.hard_budget_usd,
         lifecycle_status="COMPLETED",
         benchmark_run_path=str(result.benchmark_run_path),
         budget_metadata=guard.metadata(),

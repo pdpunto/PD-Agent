@@ -60,6 +60,31 @@ def test_request_is_allowed_and_usage_is_accounted() -> None:
     assert guard.accumulated_cost_usd < Decimal("1.00")
 
 
+def test_configured_budget_is_used_for_guard_and_accounting() -> None:
+    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    guard.before_request({"input": []}, retry_count=0)
+    record = guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
+
+    assert guard.hard_budget_usd == Decimal("0.25")
+    assert record["remaining_budget_usd"] == pytest.approx(0.2492)
+    assert guard.metadata()["hard_budget_usd"] == 0.25
+    manifest = build_luna_experimental_manifest(
+        execution_id="execution",
+        run_id="run",
+        launch_root="C:/temp/luna",
+        task_id="F6-T2",
+        task_version="5",
+        hard_budget_usd=Decimal("0.25"),
+    )
+    assert manifest["hard_budget_usd"] == 0.25
+
+
+@pytest.mark.parametrize("value", [Decimal("0"), Decimal("-0.25"), Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
+def test_guard_rejects_invalid_budget(value: Decimal) -> None:
+    with pytest.raises(ValueError):
+        LunaBudgetGuard(hard_budget_usd=value)
+
+
 def test_next_request_is_blocked_before_send() -> None:
     guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.10"))
 
@@ -93,6 +118,16 @@ def test_retry_is_checked_by_guard() -> None:
     with pytest.raises(ProviderError):
         guard.before_request({"input": []}, retry_count=0)
     assert guard.physical_request_count == 0
+
+
+def test_retry_uses_same_configured_budget() -> None:
+    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    guard.before_request({"input": []}, retry_count=0)
+    guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
+    decision = guard.before_request({"input": []}, retry_count=1)
+
+    assert decision["remaining_budget_usd"] < 0.25
+    assert guard.hard_budget_usd == Decimal("0.25")
 
 
 def test_missing_usage_fails_closed() -> None:

@@ -61,6 +61,10 @@ class LunaBudgetGuard:
     abort_reason: str | None = None
     response_records: list[dict[str, Any]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if not self.hard_budget_usd.is_finite() or self.hard_budget_usd <= 0:
+            raise ValueError("hard_budget_usd must be a finite positive Decimal")
+
     def begin_logical_turn(self) -> None:
         self.logical_provider_turn_count += 1
 
@@ -219,7 +223,15 @@ class LunaBudgetGuard:
         return self._abort(reason)
 
 
-def build_luna_experimental_manifest(*, execution_id: str, run_id: str, launch_root: str, task_id: str, task_version: str) -> dict[str, Any]:
+def build_luna_experimental_manifest(
+    *,
+    execution_id: str,
+    run_id: str,
+    launch_root: str,
+    task_id: str,
+    task_version: str,
+    hard_budget_usd: Decimal = LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
+) -> dict[str, Any]:
     """Build only safe, non-official identity metadata for a future smoke."""
 
     return {
@@ -235,7 +247,7 @@ def build_luna_experimental_manifest(*, execution_id: str, run_id: str, launch_r
         "reasoning_effort": "medium",
         "experimental": True,
         "non_official": True,
-        "hard_budget_usd": 1.0,
+        "hard_budget_usd": float(hard_budget_usd),
         "pricing_snapshot": LunaPricingSnapshot().to_dict(),
         "official_repetition": None,
         "official_attempt": None,
