@@ -124,6 +124,22 @@ class ExperimentalABSchedule:
                 "scheduling_seed": self.scheduling_seed, "canonical_order": list(CANONICAL_ORDER),
                 "attempts": [item.to_dict() for item in self.attempts], "schedule_hash": self.hash}
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ExperimentalABSchedule":
+        if int(data.get("schema_version", 1)) != 1 or data.get("canonical_order") != list(CANONICAL_ORDER):
+            raise ValueError("experimental schedule schema or canonical order drift")
+        schedule = cls(
+            attempts=tuple(BenchmarkScheduledAttempt.from_dict(item) for item in data.get("attempts", [])),
+            target_valid_runs=int(data.get("target_valid_runs", TARGET_VALID_RUNS)),
+            max_attempts_per_cell=int(data.get("max_attempts_per_cell", MAX_ATTEMPTS_PER_CELL)),
+            scheduling_seed=int(data.get("scheduling_seed", 0)),
+        )
+        if str(data.get("schedule_hash")) != schedule.hash:
+            raise ValueError("experimental schedule hash mismatch")
+        if schedule.target_valid_runs != TARGET_VALID_RUNS or schedule.max_attempts_per_cell != MAX_ATTEMPTS_PER_CELL:
+            raise ValueError("experimental schedule budget drift")
+        return schedule
+
     def append_replacement(self, original: BenchmarkScheduledAttempt) -> BenchmarkScheduledAttempt:
         replacement = BenchmarkScheduledAttempt(
             scheduled_attempt_id=f"ab-{original.config_id}-replacement-{original.attempt_index + 1}",
@@ -143,10 +159,13 @@ class ExperimentalABState:
     consumed_attempts: int = 0
     replacements: int = 0
     global_openai_exposure_usd: Decimal = Decimal("0.00")
+    reserved_luna_attempt_ids: list[str] = field(default_factory=list)
     pause_reason: str | None = None
     run_ids: list[str] = field(default_factory=list)
 
-    def reserve_luna_attempt(self, amount: Decimal = Decimal("1.00")) -> None:
+    def reserve_luna_attempt(self, amount: Decimal = Decimal("1.00"), *, attempt_id: str | None = None) -> None:
+        if attempt_id is not None and attempt_id in self.reserved_luna_attempt_ids:
+            return
         amount = Decimal(amount)
         projected = self.global_openai_exposure_usd + amount
         if projected > GLOBAL_OPENAI_EXPOSURE_CAP_USD:
@@ -154,6 +173,8 @@ class ExperimentalABState:
             self.pause_reason = "global OpenAI exposure cap exceeded before physical request"
             raise RuntimeError(self.pause_reason)
         self.global_openai_exposure_usd = projected
+        if attempt_id is not None:
+            self.reserved_luna_attempt_ids.append(attempt_id)
 
     def pause_rate_limit(self, attempt_id: str, reason: str) -> None:
         self.pending_attempt_id = attempt_id
@@ -165,7 +186,24 @@ class ExperimentalABState:
                 "execution_id": self.execution_id, "status": self.status.value,
                 "pending_attempt_id": self.pending_attempt_id, "consumed_attempts": self.consumed_attempts,
                 "replacements": self.replacements, "global_openai_exposure_usd": str(self.global_openai_exposure_usd),
-                "pause_reason": self.pause_reason, "run_ids": list(self.run_ids)}
+                "pause_reason": self.pause_reason, "run_ids": list(self.run_ids),
+                "reserved_luna_attempt_ids": list(self.reserved_luna_attempt_ids)}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ExperimentalABState":
+        if data.get("experimental") is not True or data.get("non_official") is not True:
+            raise ValueError("experimental state flags missing")
+        return cls(
+            execution_id=str(data["execution_id"]),
+            status=ExperimentalABStatus(str(data.get("status", ExperimentalABStatus.RUNNING.value))),
+            pending_attempt_id=data.get("pending_attempt_id"),
+            consumed_attempts=int(data.get("consumed_attempts", 0)),
+            replacements=int(data.get("replacements", 0)),
+            global_openai_exposure_usd=Decimal(str(data.get("global_openai_exposure_usd", "0"))),
+            pause_reason=data.get("pause_reason"),
+            run_ids=[str(item) for item in data.get("run_ids", [])],
+            reserved_luna_attempt_ids=[str(item) for item in data.get("reserved_luna_attempt_ids", [])],
+        )
 
 
 @dataclass(slots=True)
@@ -211,6 +249,28 @@ class ExperimentalABController:
             self.state.status = ExperimentalABStatus.BUDGET_PAUSED
             self.state.pending_attempt_id = attempt.scheduled_attempt_id
             self.state.pause_reason = reason
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.state.to_dict(),
+            "cells": {key: cell.to_dict() for key, cell in self.cells.items()},
+            "recorded_attempt_ids": sorted(self.recorded_attempt_ids),
+        }
+
+    @classmethod
+    def from_dict(cls, schedule: ExperimentalABSchedule, data: Mapping[str, Any]) -> "ExperimentalABController":
+        state = ExperimentalABState.from_dict(data)
+        cells = {
+            str(key): ExperimentalABCell(
+                provider=str(value["provider"]), model=str(value["model"]), config_id=str(value["config_id"]),
+                config_hash=str(value["config_hash"]), target_valid_runs=int(value.get("target_valid_runs", TARGET_VALID_RUNS)),
+                max_attempts=int(value.get("max_attempts", MAX_ATTEMPTS_PER_CELL)), attempts=[dict(item) for item in value.get("attempts", [])],
+            ) for key, value in dict(data.get("cells", {})).items()
+        }
+        if state.pending_attempt_id is not None and not any(item.scheduled_attempt_id == state.pending_attempt_id for item in schedule.attempts):
+            raise ValueError("pending attempt is not present in persisted schedule")
+        return cls(schedule=schedule, state=state, cells=cells,
+                   recorded_attempt_ids={str(item) for item in data.get("recorded_attempt_ids", [])})
 
 
 def validate_ab_configs(configs: list[Any]) -> None:

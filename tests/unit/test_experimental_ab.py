@@ -74,6 +74,40 @@ def test_rate_limit_pause_preserves_exact_pending_attempt_without_consumption():
     assert controller.next_attempt().scheduled_attempt_id == attempt.scheduled_attempt_id
 
 
+def test_persisted_pause_round_trips_exact_pending_without_consumption():
+    controller = _controller()
+    attempt = controller.next_attempt()
+    assert attempt is not None
+    controller.pause(attempt, rate_limit=True, reason="429 RESOURCE_EXHAUSTED")
+    restored_schedule = ExperimentalABSchedule.from_dict(controller.schedule.to_dict())
+    restored = ExperimentalABController.from_dict(restored_schedule, controller.to_dict())
+    assert restored.state.status == ExperimentalABStatus.RATE_LIMIT_PAUSED
+    assert restored.state.pending_attempt_id == attempt.scheduled_attempt_id
+    assert restored.state.consumed_attempts == 0
+    assert restored.state.replacements == 0
+    assert restored.next_attempt().scheduled_attempt_id == attempt.scheduled_attempt_id
+
+
+def test_resume_rejects_schedule_hash_drift():
+    controller = _controller()
+    payload = controller.schedule.to_dict()
+    payload["attempts"][0]["attempt_index"] = 2
+    with pytest.raises(ValueError, match="schedule hash mismatch"):
+        ExperimentalABSchedule.from_dict(payload)
+
+
+def test_luna_reservation_is_not_double_counted_after_resume():
+    controller = _controller()
+    luna_attempt = controller.schedule.attempts[1]
+    controller.state.reserve_luna_attempt(attempt_id=luna_attempt.scheduled_attempt_id)
+    before = controller.state.global_openai_exposure_usd
+    restored = ExperimentalABController.from_dict(
+        ExperimentalABSchedule.from_dict(controller.schedule.to_dict()), controller.to_dict()
+    )
+    restored.state.reserve_luna_attempt(attempt_id=luna_attempt.scheduled_attempt_id)
+    assert restored.state.global_openai_exposure_usd == before == Decimal("1.00")
+
+
 def test_luna_global_exposure_is_fail_closed_at_three_dollars():
     state = ExperimentalABState(execution_id="ab-test")
     for _ in range(3):
