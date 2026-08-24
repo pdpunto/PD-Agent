@@ -43,6 +43,7 @@ from pd_agent.core.terminal_reasons import (
     REPEATED_NO_OP_TOOL_CALLS,
     REPEATED_SEMANTIC_VALIDATION_FAILURE,
     REPEATED_UNRESOLVED_MUTATION_TARGETS,
+    SEMANTIC_REPAIR_NO_MUTATION,
     TOOL_REJECTED,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
@@ -286,7 +287,10 @@ class AgentRuntime:
                         continue
 
                     if gate_violation_detected and not progress_detected:
-                        if run_state.state == RunStatus.EDITING and run_state.pending_mutation_targets:
+                        if run_state.state == RunStatus.EDITING and (
+                            run_state.pending_mutation_targets
+                            or self._telemetry.validation_repair_pending
+                        ):
                             editing_continuation_available = True
                         self._persist_state(run_state)
                         continue
@@ -298,7 +302,10 @@ class AgentRuntime:
                             run_state.state = RunStatus.FAILED
                             run_state.termination_reason = REPEATED_RECOVERABLE_TOOL_REJECTION
                             break
-                        if run_state.state == RunStatus.EDITING and run_state.pending_mutation_targets:
+                        if run_state.state == RunStatus.EDITING and (
+                            run_state.pending_mutation_targets
+                            or self._telemetry.validation_repair_pending
+                        ):
                             editing_continuation_available = True
                         self._persist_state(run_state)
                         continue
@@ -356,6 +363,11 @@ class AgentRuntime:
                     continue
 
                 if run_state.state == RunStatus.EDITING:
+                    if self._telemetry.validation_repair_pending:
+                        run_state.state = RunStatus.FAILED
+                        run_state.termination_reason = SEMANTIC_REPAIR_NO_MUTATION
+                        self._persist_state(run_state)
+                        break
                     if run_state.pending_mutation_targets:
                         editing_continuation_available = True
                         self._persist_state(run_state)

@@ -98,6 +98,126 @@ def test_functional_repair_rebuilds_before_runtime_pass(tmp_path: Path) -> None:
     assert event_names.index("VALIDATION_COMPLETED") < event_names.index("BUILD_STARTED", event_names.index("VALIDATION_COMPLETED") + 1)
 
 
+def test_runtime_repair_gate_violation_without_mutation_does_not_rebuild(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "runtime-noop-gate", build_state="pass")
+    provider = ScriptedProvider([
+        AgentResponse(
+            assistant_message="source",
+            tool_calls=(ToolCall(
+                call_id="1",
+                tool_name="write_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="2",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="3",
+                tool_name="list_directory",
+                arguments={"path": "src/main"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="4",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="5",
+                tool_name="list_directory",
+                arguments={"path": "src/main"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="6",
+                tool_name="list_directory",
+                arguments={"path": "src/main"},
+            ),),
+        ),
+        AgentResponse(assistant_message="no mutation"),
+    ])
+    controller, storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL])
+
+    state, _report = controller.run(root, "runtime no-op gate", validation_contract={"schema_version": 1, "required_resources": []})
+
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "semantic repair produced no mutation"
+    assert state.build_attempt_count == 1
+    assert len([event for event in storage.read_events(state.run_id) if event.event_type.value == "BUILD_STARTED"]) == 1
+
+
+def test_each_runtime_repair_cycle_requires_its_own_mutation(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "runtime-second-noop", build_state="pass")
+    provider = ScriptedProvider([
+        AgentResponse(
+            assistant_message="source",
+            tool_calls=(ToolCall(
+                call_id="1",
+                tool_name="write_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="repair one",
+            tool_calls=(ToolCall(
+                call_id="2",
+                tool_name="write_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod { int one; }\n"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(call_id="3", tool_name="read_file", arguments={"path": "src/main/java/com/example/ExampleMod.java"}),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(call_id="4", tool_name="list_directory", arguments={"path": "src/main"}),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(call_id="5", tool_name="read_file", arguments={"path": "src/main/java/com/example/ExampleMod.java"}),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(call_id="6", tool_name="list_directory", arguments={"path": "src/main"}),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(call_id="7", tool_name="list_directory", arguments={"path": "src/main"}),),
+        ),
+        AgentResponse(assistant_message="no second mutation"),
+    ])
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.REPAIRABLE_FAIL,
+    ])
+
+    state, _report = controller.run(root, "runtime second repair", validation_contract={"schema_version": 1, "required_resources": []})
+
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "semantic repair produced no mutation"
+    assert state.build_attempt_count == 2
+
+
 def test_functional_validator_maps_post_artifact_json_failure(tmp_path: Path) -> None:
     jar = tmp_path / "artifact.jar"
     with zipfile.ZipFile(jar, "w") as archive:
