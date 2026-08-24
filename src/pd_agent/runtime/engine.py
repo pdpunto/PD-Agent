@@ -253,6 +253,16 @@ class AgentRuntime:
                     pending_provider_continuations = response.provider_continuations
 
                     if (
+                        self._telemetry.validation_repair_pending
+                        and not response.tool_calls
+                        and not tool_results
+                    ):
+                        run_state.state = RunStatus.FAILED
+                        run_state.termination_reason = SEMANTIC_REPAIR_NO_MUTATION
+                        self._persist_state(run_state)
+                        break
+
+                    if (
                         not response.tool_calls
                         and run_state.pending_mutation_targets
                         and run_state.state in {RunStatus.PLANNING, RunStatus.EDITING}

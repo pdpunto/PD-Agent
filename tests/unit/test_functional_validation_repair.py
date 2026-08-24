@@ -463,6 +463,45 @@ def test_noop_repair_does_not_trigger_stale_build(tmp_path: Path) -> None:
     assert state.build_attempt_count == 2
 
 
+def test_text_only_semantic_repair_response_does_not_start_another_provider_turn(tmp_path: Path) -> None:
+    root = _runtime_project(tmp_path / "text-only-repair", build_state="pass")
+    provider = ScriptedProvider([
+        AgentResponse(
+            assistant_message="source",
+            tool_calls=(ToolCall(
+                call_id="1",
+                tool_name="write_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java", "content": "class ExampleMod {}\n"},
+            ),),
+        ),
+        AgentResponse(
+            assistant_message="inspect",
+            tool_calls=(ToolCall(
+                call_id="2",
+                tool_name="read_file",
+                arguments={"path": "src/main/java/com/example/ExampleMod.java"},
+            ),),
+        ),
+        AgentResponse(assistant_message="I could not make the requested mutation."),
+    ])
+    controller, _storage = _controller(root, provider)
+    controller.pre_build_validator = PreBuildWorkspaceValidator()
+    controller.functional_validator = SequenceFunctionalValidator([
+        ValidationStatus.REPAIRABLE_FAIL,
+        ValidationStatus.REPAIRABLE_FAIL,
+    ])
+
+    state, _report = controller.run(
+        root,
+        "text-only repair",
+        validation_contract={"schema_version": 1, "required_resources": []},
+    )
+
+    assert state.state.value == "FAILED"
+    assert state.termination_reason == "semantic repair produced no mutation"
+    assert len(provider.requests) == 3
+
+
 def test_multiple_mutations_pair_latest_artifact_with_latest_build(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "latest-artifact", build_state="pass")
     controller, _storage = _controller(root, _repair_provider())

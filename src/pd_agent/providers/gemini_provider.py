@@ -54,6 +54,7 @@ class GeminiProvider(ModelProvider):
         model = self._effective_model(request)
         types = self._types()
         system_instruction, contents = self._build_contents(request, types)
+        self._validate_final_content(contents)
         config = self._build_generate_config(request, types, system_instruction=system_instruction)
         try:
             response = self._client.models.generate_content(
@@ -179,6 +180,18 @@ class GeminiProvider(ModelProvider):
 
         system_instruction = "\n".join(system_parts) if system_parts else None
         return system_instruction, tuple(contents)
+
+    def _validate_final_content(self, contents: tuple[Any, ...]) -> None:
+        if not contents:
+            return
+        final_role = getattr(contents[-1], "role", None)
+        if str(final_role or "").casefold() == "model":
+            raise ProviderError(
+                "Gemini request cannot end with a model turn",
+                kind="protocol",
+                provider="gemini",
+                retryable=False,
+            )
 
     def _function_call_part(self, call: ToolCall, *, continuation: ProviderContinuation | None, types: Any) -> Any:
         call_id = call.call_id.strip()

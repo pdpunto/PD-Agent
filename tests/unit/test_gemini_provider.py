@@ -178,6 +178,15 @@ def test_messages_mapping_and_system_instruction() -> None:
                 AgentMessage(role="user", content="hello"),
                 AgentMessage(role="assistant", content="model reply"),
             ),
+            tool_calls=(ToolCall(call_id="call_1", tool_name="lookup", arguments={"q": "alpha"}),),
+            tool_results=(
+                ToolResult(
+                    call_id="call_1",
+                    tool_name="lookup",
+                    status=ToolResultStatus.SUCCESS,
+                    output={"value": "ok"},
+                ),
+            ),
             model_config={"model": "gemini-test"},
         )
     )
@@ -187,11 +196,15 @@ def test_messages_mapping_and_system_instruction() -> None:
     config = call["config"]
     assert config.automatic_function_calling.disable is True
     assert config.system_instruction == "sys\ndev"
-    assert len(call["contents"]) == 2
+    assert len(call["contents"]) == 4
     assert call["contents"][0].role == "user"
     assert call["contents"][0].parts[0].text == "hello"
     assert call["contents"][1].role == "model"
     assert call["contents"][1].parts[0].text == "model reply"
+    assert call["contents"][2].role == "model"
+    assert call["contents"][2].parts[0].function_call.name == "lookup"
+    assert call["contents"][3].role == "user"
+    assert call["contents"][3].parts[0].function_response.name == "lookup"
     assert result.assistant_message == "done"
 
 
@@ -253,6 +266,26 @@ def test_function_call_response_maps_to_tool_calls_and_text() -> None:
         ToolCall(call_id="call_1", tool_name="lookup", arguments={"q": "alpha"}),
         ToolCall(call_id="call_2", tool_name="write", arguments={"path": "a.txt", "text": "ok"}),
     )
+
+
+def test_model_ending_request_is_rejected_before_sdk_call() -> None:
+    client = _FakeClient(SimpleNamespace(text="unused", usage_metadata=_Usage()))
+    provider = _provider(client=client)
+
+    with pytest.raises(ProviderError, match="Gemini request cannot end with a model turn") as excinfo:
+        provider.execute(
+            _request(
+                messages=(
+                    AgentMessage(role="user", content="continue"),
+                    AgentMessage(role="assistant", content="finished this turn"),
+                ),
+                model_config={"model": "gemini-test"},
+            )
+        )
+
+    assert excinfo.value.kind == "protocol"
+    assert excinfo.value.provider == "gemini"
+    assert client.models.calls == []
 
 
 def test_thought_signature_continuation_round_trip_and_replay() -> None:

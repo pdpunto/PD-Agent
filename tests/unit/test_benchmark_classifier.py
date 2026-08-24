@@ -136,6 +136,22 @@ def test_classifier_provider_blocks(error: ProviderError, origin: BenchmarkFailu
     assert classification.failure_code == code
 
 
+def test_classifier_protocol_provider_error_is_agent_integration_failure() -> None:
+    classification = BenchmarkClassifier().classify(
+        _collection(),
+        runtime_error=ProviderError(
+            "Gemini request cannot end with a model turn",
+            kind="protocol",
+            provider="gemini",
+        ),
+    )
+
+    assert classification.execution_status == BenchmarkExecutionStatus.BLOCKED
+    assert classification.task_outcome == BenchmarkTaskOutcome.NOT_EVALUATED
+    assert classification.failure_origin == BenchmarkFailureOrigin.AGENT
+    assert classification.failure_code == BenchmarkFailureCode.PROVIDER_INTEGRATION_PROTOCOL
+
+
 def test_classifier_unknown_provider_error_stays_unknown() -> None:
     classification = BenchmarkClassifier().classify(_collection(), runtime_error=ProviderError("boom", kind="weird"))
 

@@ -204,6 +204,14 @@ class BenchmarkClassifier:
             code = BenchmarkFailureCode.PROVIDER_RATE_LIMIT
         elif kind == "timeout":
             code = BenchmarkFailureCode.PROVIDER_TIMEOUT
+        elif kind == "protocol":
+            return BenchmarkClassification(
+                execution_status=BenchmarkExecutionStatus.BLOCKED,
+                task_outcome=BenchmarkTaskOutcome.NOT_EVALUATED,
+                failure_origin=BenchmarkFailureOrigin.AGENT,
+                failure_code=BenchmarkFailureCode.PROVIDER_INTEGRATION_PROTOCOL,
+                reason=error.message,
+            )
         elif kind == "unavailable":
             code = BenchmarkFailureCode.PROVIDER_UNAVAILABLE
         else:
