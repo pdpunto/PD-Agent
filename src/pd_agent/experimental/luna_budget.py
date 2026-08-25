@@ -21,11 +21,26 @@ RESERVED = "RESERVED"
 ACCOUNTED = "ACCOUNTED"
 RELEASED = "RELEASED"
 UNCERTAIN_CONSUMED = "UNCERTAIN_CONSUMED"
-DISPATCH_SCHEMA_VERSION = 1
+DISPATCH_SCHEMA_VERSION = 2
+LEGACY_DISPATCH_SCHEMA_VERSION = 1
 REQUEST_PREPARED = "REQUEST_PREPARED"
 RESERVATION_COMMITTED = "RESERVATION_COMMITTED"
 DISPATCH_STARTED = "DISPATCH_STARTED"
 RESPONSE_OBSERVED = "RESPONSE_OBSERVED"
+WAITING = "WAITING"
+RESPONSE_AVAILABLE = "RESPONSE_AVAILABLE"
+RESPONSE_RECOVERABLE = "RESPONSE_RECOVERABLE"
+RESPONSE_MISSING = "RESPONSE_MISSING"
+RECOVERED = "RECOVERED"
+ABANDONED = "ABANDONED"
+_FUNCTIONAL_STATES = {
+    WAITING,
+    RESPONSE_AVAILABLE,
+    RESPONSE_RECOVERABLE,
+    RESPONSE_MISSING,
+    RECOVERED,
+    ABANDONED,
+}
 
 
 def _utc_now() -> str:
@@ -63,6 +78,7 @@ class DispatchRecord:
     dispatch_started_at: str | None = None
     completed_at: str | None = None
     dispatch_state: str = REQUEST_PREPARED
+    functional_state: str = WAITING
     schema_version: int = DISPATCH_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -71,7 +87,7 @@ class DispatchRecord:
             "request_fingerprint", "client_correlation_id",
         ):
             setattr(self, field_name, _dispatch_text(getattr(self, field_name), field_name=field_name))
-        if self.schema_version != DISPATCH_SCHEMA_VERSION:
+        if self.schema_version not in {LEGACY_DISPATCH_SCHEMA_VERSION, DISPATCH_SCHEMA_VERSION}:
             raise ValueError("unsupported dispatch schema version")
         if self.recovery_generation < 0:
             raise ValueError("recovery_generation must be non-negative")
@@ -83,6 +99,8 @@ class DispatchRecord:
             raise ValueError("request_fingerprint must be a SHA-256 hex digest")
         if self.dispatch_state not in {REQUEST_PREPARED, RESERVATION_COMMITTED, DISPATCH_STARTED, RESPONSE_OBSERVED}:
             raise ValueError("unsupported dispatch state")
+        if self.functional_state not in _FUNCTIONAL_STATES:
+            raise ValueError("unsupported functional state")
         if self.dispatch_state in {RESERVATION_COMMITTED, DISPATCH_STARTED, RESPONSE_OBSERVED}:
             if not self.reservation_id or self.reservation_committed_at is None:
                 raise ValueError("reserved dispatch requires reservation identity and timestamp")
@@ -114,6 +132,7 @@ class DispatchRecord:
             "dispatch_started_at": self.dispatch_started_at,
             "completed_at": self.completed_at,
             "dispatch_state": self.dispatch_state,
+            "functional_state": self.functional_state,
         }
 
     @classmethod
@@ -132,8 +151,15 @@ class DispatchRecord:
         sanitized_error = data["sanitized_error"]
         if sanitized_error is not None and not isinstance(sanitized_error, Mapping):
             raise ValueError("sanitized_error must be an object or null")
+        schema_version = int(data["dispatch_schema_version"])
+        if schema_version == LEGACY_DISPATCH_SCHEMA_VERSION:
+            functional_state = str(data.get("functional_state", WAITING))
+        else:
+            if "functional_state" not in data:
+                raise ValueError("incomplete dispatch schema: missing functional_state")
+            functional_state = str(data["functional_state"])
         return cls(
-            schema_version=int(data["dispatch_schema_version"]),
+            schema_version=schema_version,
             physical_request_id=str(data["physical_request_id"]),
             logical_attempt_id=str(data["logical_attempt_id"]),
             recovery_generation=int(data["recovery_generation"]),
@@ -154,6 +180,7 @@ class DispatchRecord:
             dispatch_started_at=(str(data["dispatch_started_at"]) if data["dispatch_started_at"] is not None else None),
             completed_at=(str(data["completed_at"]) if data["completed_at"] is not None else None),
             dispatch_state=str(data["dispatch_state"]),
+            functional_state=functional_state,
         )
 
 
@@ -560,6 +587,18 @@ class LunaBudgetGuard:
         self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
         self._persist()
 
+    def abandon_pre_dispatch(self, dispatch_record: DispatchRecord, *, reason: str) -> None:
+        """Record a proven pre-dispatch abandonment without touching accounting."""
+
+        self._validate_dispatch_record(dispatch_record)
+        if dispatch_record.dispatch_state != REQUEST_PREPARED or dispatch_record.reservation_id is not None:
+            raise self._abort("DISPATCH_ALREADY_COMMITTED")
+        self._transition_functional(dispatch_record, ABANDONED)
+        dispatch_record.sanitized_error = {"kind": "pre_dispatch", "reason": str(reason)}
+        dispatch_record.completed_at = _utc_now()
+        self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
+        self._persist()
+
     def record_dispatch_result(
         self,
         dispatch_record: DispatchRecord,
@@ -583,6 +622,7 @@ class LunaBudgetGuard:
         dispatch_record.sanitized_error = dict(sanitized_error) if sanitized_error is not None else None
         dispatch_record.completed_at = _utc_now() if completed else dispatch_record.completed_at
         dispatch_record.dispatch_state = RESPONSE_OBSERVED if completed else DISPATCH_STARTED
+        self._transition_functional(dispatch_record, RESPONSE_AVAILABLE if completed else RESPONSE_MISSING)
         self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
         self._persist()
 
@@ -796,6 +836,16 @@ class LunaBudgetGuard:
             raise self._abort("DISPATCH_RECORD_INVALID") from exc
         if persisted.to_dict() != dispatch_record.to_dict():
             raise self._abort("DISPATCH_RECORD_IDENTITY_MISMATCH")
+
+    def _transition_functional(self, dispatch_record: DispatchRecord, target: str) -> None:
+        if target not in _FUNCTIONAL_STATES:
+            raise self._abort("FUNCTIONAL_STATE_INVALID")
+        allowed = {
+            WAITING: {RESPONSE_AVAILABLE, RESPONSE_MISSING, ABANDONED},
+        }
+        if target not in allowed.get(dispatch_record.functional_state, set()):
+            raise self._abort("FUNCTIONAL_STATE_TRANSITION_INVALID")
+        dispatch_record.functional_state = target
 
     def _conservative_input_tokens(self, payload: Mapping[str, Any]) -> int:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

@@ -9,7 +9,11 @@ import pytest
 from pd_agent.core import AgentMessage, AgentRequest
 from pd_agent.core.errors import ProviderError
 from pd_agent.experimental import (
+    ABANDONED,
+    ACCOUNTED,
     DISPATCH_STARTED,
+    RESPONSE_AVAILABLE,
+    RESPONSE_MISSING,
     REQUEST_PREPARED,
     RESERVATION_COMMITTED,
     RESPONSE_OBSERVED,
@@ -18,6 +22,7 @@ from pd_agent.experimental import (
     LunaEconomicState,
     LunaEconomicStateStore,
     LunaPricingSnapshot,
+    UNCERTAIN_CONSUMED,
 )
 from pd_agent.providers import OpenAIProvider
 
@@ -141,6 +146,68 @@ def test_write_ahead_order_is_persisted_before_provider_call() -> None:
     assert snapshots[-1] == RESPONSE_OBSERVED
 
 
+def test_success_separates_accounting_from_functional_availability() -> None:
+    state = LunaEconomicState(execution_id="success-split")
+    guard = _guard(state=state)
+    response = SimpleNamespace(id="resp-1", _request_id="req-1", status="completed", usage=_usage(), output=[])
+
+    OpenAIProvider(model="gpt-test", client=_Client(response), budget_guard=guard).execute(_request())
+
+    record = next(iter(state.dispatch_records.values()))
+    assert record["functional_state"] == RESPONSE_AVAILABLE
+    assert next(iter(state.ledger.values()))["status"] == ACCOUNTED
+
+
+def test_ambiguous_failure_separates_missing_response_from_uncertain_billing() -> None:
+    state = LunaEconomicState(execution_id="missing-split")
+    guard = _guard(state=state)
+
+    with pytest.raises(ProviderError):
+        OpenAIProvider(model="gpt-test", client=_Client(RuntimeError("transport")), budget_guard=guard).execute(_request())
+
+    record = next(iter(state.dispatch_records.values()))
+    assert record["functional_state"] == RESPONSE_MISSING
+    assert next(iter(state.ledger.values()))["status"] == UNCERTAIN_CONSUMED
+    assert next(iter(state.ledger.values()))["actual_billed_cost_usd"] is None
+
+
+def test_pre_dispatch_abandonment_is_functional_only() -> None:
+    client = _Client(SimpleNamespace(id="never", usage=_usage(), output=[]))
+    state = LunaEconomicState(
+        execution_id="abandoned",
+        global_ceiling_usd=Decimal("0.000001"),
+        attempt_ceiling_usd=Decimal("0.000001"),
+    )
+    guard = LunaBudgetGuard(
+        hard_budget_usd=Decimal("0.000001"),
+        state=state,
+        state_store=LunaEconomicStateStore(state),
+        pricing=LunaPricingSnapshot(max_output_tokens=4096),
+    )
+
+    with pytest.raises(ProviderError):
+        OpenAIProvider(model="gpt-test", client=client, budget_guard=guard).execute(_request())
+
+    record = next(iter(state.dispatch_records.values()))
+    assert record["functional_state"] == ABANDONED
+    assert state.global_uncertain_consumed_usd == Decimal("0")
+    assert state.global_accumulated_usd == Decimal("0")
+
+
+def test_invalid_functional_transition_fails_closed() -> None:
+    guard = _guard()
+    record = guard.prepare_dispatch({"input": "hello"}, provider="openai", model="m", retry_count=0)
+    guard.before_request({"input": "hello"}, retry_count=0, dispatch_record=record)
+    guard.mark_dispatch_started(record)
+    record.functional_state = RESPONSE_AVAILABLE
+    guard.state.dispatch_records[record.physical_request_id] = record.to_dict()
+
+    with pytest.raises(ProviderError) as error:
+        guard.record_dispatch_result(record, completed=False)
+
+    assert error.value.details["abort_reason"] == "FUNCTIONAL_STATE_TRANSITION_INVALID"
+
+
 def test_dispatch_record_reservation_matches_economic_ledger() -> None:
     guard = _guard()
     decision = guard.before_request({"input": "hello"}, retry_count=0)
@@ -225,3 +292,16 @@ def test_legacy_state_without_dispatch_records_remains_loadable() -> None:
 
     assert restored.dispatch_records == {}
     assert restored.reconciliation_state == "CLEAR"
+
+
+def test_r1_dispatch_schema_loads_as_waiting_without_heuristic_recovery() -> None:
+    guard = _guard()
+    record = guard.prepare_dispatch({"input": "hello"}, provider="openai", model="m", retry_count=0)
+    legacy = record.to_dict()
+    legacy["dispatch_schema_version"] = 1
+    legacy.pop("functional_state")
+
+    restored = DispatchRecord.from_dict(legacy)
+
+    assert restored.schema_version == 1
+    assert restored.functional_state == "WAITING"

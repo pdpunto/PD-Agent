@@ -118,11 +118,19 @@ class OpenAIProvider(ModelProvider):
                     model=model,
                     retry_count=attempt,
                 )
-                self.budget_guard.before_request(
-                    payload,
-                    retry_count=attempt,
-                    dispatch_record=dispatch_record,
-                )
+                try:
+                    self.budget_guard.before_request(
+                        payload,
+                        retry_count=attempt,
+                        dispatch_record=dispatch_record,
+                    )
+                except ProviderError:
+                    if dispatch_record.dispatch_state == "REQUEST_PREPARED":
+                        self.budget_guard.abandon_pre_dispatch(
+                            dispatch_record,
+                            reason="economic reservation was not committed",
+                        )
+                    raise
                 self.budget_guard.mark_dispatch_started(dispatch_record)
             physical_request_count += 1
             try:
