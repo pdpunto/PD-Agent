@@ -129,7 +129,11 @@ class LunaEconomicState:
             raise ValueError("attempt_id must not be empty")
         if self.active_attempt_id == attempt_id:
             return
-        if self.active_attempt_id is not None and (self.attempt_reserved_usd or self.attempt_accumulated_usd):
+        if self.active_attempt_id is not None and (
+            self.attempt_reserved_usd
+            or self.attempt_accumulated_usd
+            or self.attempt_uncertain_consumed_usd
+        ):
             raise ValueError("cannot replace an active economic attempt")
         self.active_attempt_id = attempt_id
         self.attempt_accumulated_usd = Decimal("0")

@@ -476,6 +476,21 @@ def test_new_attempt_preserves_global_uncertain_consumption() -> None:
     assert state.global_remaining_usd == Decimal("0.95")
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    ["attempt_accumulated_usd", "attempt_reserved_usd", "attempt_uncertain_consumed_usd"],
+)
+def test_active_attempt_with_economic_exposure_cannot_be_replaced(field_name: str) -> None:
+    state = LunaEconomicState(execution_id=f"active-{field_name}", active_attempt_id="old")
+    setattr(state, field_name, Decimal("0.01"))
+
+    with pytest.raises(ValueError, match="cannot replace an active economic attempt"):
+        state.begin_attempt("new")
+
+    assert state.active_attempt_id == "old"
+    assert getattr(state, field_name) == Decimal("0.01")
+
+
 def test_incomplete_economic_state_is_rejected_fail_closed() -> None:
     state = LunaEconomicState(execution_id="strict")
     payload = state.to_dict()
