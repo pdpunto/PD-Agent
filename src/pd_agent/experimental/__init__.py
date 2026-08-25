@@ -2,6 +2,8 @@
 
 from .luna_budget import (
     ACCOUNTED,
+    DISPATCH_SCHEMA_VERSION,
+    DISPATCH_STARTED,
     LUNA_ECONOMIC_SCHEMA_VERSION,
     LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
     LUNA_PER_ATTEMPT_HARD_BUDGET_USD,
@@ -9,6 +11,10 @@ from .luna_budget import (
     LunaEconomicStateStore,
     LunaBudgetGuard,
     LunaPricingSnapshot,
+    DispatchRecord,
+    REQUEST_PREPARED,
+    RESERVATION_COMMITTED,
+    RESPONSE_OBSERVED,
     RELEASED,
     RESERVED,
     UNCERTAIN_CONSUMED,
@@ -19,6 +25,11 @@ __all__ = [
     "LUNA_ECONOMIC_SCHEMA_VERSION",
     "RESERVED",
     "ACCOUNTED",
+    "DISPATCH_SCHEMA_VERSION",
+    "REQUEST_PREPARED",
+    "RESERVATION_COMMITTED",
+    "DISPATCH_STARTED",
+    "RESPONSE_OBSERVED",
     "RELEASED",
     "UNCERTAIN_CONSUMED",
     "LUNA_EXPERIMENTAL_HARD_BUDGET_USD",
@@ -27,5 +38,6 @@ __all__ = [
     "LunaEconomicStateStore",
     "LunaBudgetGuard",
     "LunaPricingSnapshot",
+    "DispatchRecord",
     "build_luna_experimental_manifest",
 ]

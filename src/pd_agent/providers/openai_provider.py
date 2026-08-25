@@ -30,6 +30,7 @@ from pd_agent.core import (
 )
 from pd_agent.core import ToolResult, ToolResultStatus
 from pd_agent.core.errors import ConfigurationError, ProviderError
+from pd_agent.experimental import DispatchRecord
 from pd_agent.reporting.redaction import Redactor, json_ready
 
 _ALLOWED_REQUEST_CONFIG_KEYS = {
@@ -109,8 +110,20 @@ class OpenAIProvider(ModelProvider):
         if self.budget_guard is not None:
             self.budget_guard.begin_logical_turn()
         for attempt in range(retry_limit + 1):
+            dispatch_record: DispatchRecord | None = None
             if self.budget_guard is not None:
-                self.budget_guard.before_request(payload, retry_count=attempt)
+                dispatch_record = self.budget_guard.prepare_dispatch(
+                    payload,
+                    provider="openai",
+                    model=model,
+                    retry_count=attempt,
+                )
+                self.budget_guard.before_request(
+                    payload,
+                    retry_count=attempt,
+                    dispatch_record=dispatch_record,
+                )
+                self.budget_guard.mark_dispatch_started(dispatch_record)
             physical_request_count += 1
             try:
                 response = request_client.responses.create(
@@ -121,6 +134,12 @@ class OpenAIProvider(ModelProvider):
                 normalized_error = self._normalize_error(exc, model=model)
                 if self.budget_guard is not None:
                     failure = normalized_error.to_dict()
+                    self.budget_guard.record_dispatch_result(
+                        dispatch_record,
+                        provider_request_id=normalized_error.request_id,
+                        http_status=normalized_error.status_code,
+                        sanitized_error=failure,
+                    )
                     try:
                         self.budget_guard.on_failure_without_usage(
                             retry_count=attempt,
@@ -141,6 +160,13 @@ class OpenAIProvider(ModelProvider):
                 continue
             budget_metadata = None
             if self.budget_guard is not None:
+                self.budget_guard.record_dispatch_result(
+                    dispatch_record,
+                    provider_request_id=getattr(response, "_request_id", None),
+                    provider_response_id=getattr(response, "id", None),
+                    response_status=getattr(response, "status", None),
+                    completed=True,
+                )
                 normalized_usage = self._normalize_usage(getattr(response, "usage", None))
                 if normalized_usage is None:
                     self.budget_guard.on_failure_without_usage(

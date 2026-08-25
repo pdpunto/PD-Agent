@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Mapping
+from uuid import uuid4
 
 from pd_agent.core.errors import ProviderError
 
@@ -19,6 +21,140 @@ RESERVED = "RESERVED"
 ACCOUNTED = "ACCOUNTED"
 RELEASED = "RELEASED"
 UNCERTAIN_CONSUMED = "UNCERTAIN_CONSUMED"
+DISPATCH_SCHEMA_VERSION = 1
+REQUEST_PREPARED = "REQUEST_PREPARED"
+RESERVATION_COMMITTED = "RESERVATION_COMMITTED"
+DISPATCH_STARTED = "DISPATCH_STARTED"
+RESPONSE_OBSERVED = "RESPONSE_OBSERVED"
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _dispatch_text(value: Any, *, field_name: str) -> str:
+    value = str(value).strip()
+    if not value:
+        raise ValueError(f"{field_name} must not be empty")
+    return value
+
+
+@dataclass(slots=True)
+class DispatchRecord:
+    """Versioned evidence for one physical provider dispatch."""
+
+    physical_request_id: str
+    logical_attempt_id: str
+    provider: str
+    model: str
+    request_fingerprint: str
+    client_correlation_id: str
+    recovery_generation: int = 0
+    recovery_of: str | None = None
+    reservation_id: str | None = None
+    reserved_cost: str | None = None
+    provider_request_id: str | None = None
+    provider_response_id: str | None = None
+    response_status: str | None = None
+    http_status: int | None = None
+    sanitized_error: dict[str, Any] | None = None
+    prepared_at: str = field(default_factory=_utc_now)
+    reservation_committed_at: str | None = None
+    dispatch_started_at: str | None = None
+    completed_at: str | None = None
+    dispatch_state: str = REQUEST_PREPARED
+    schema_version: int = DISPATCH_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "physical_request_id", "logical_attempt_id", "provider", "model",
+            "request_fingerprint", "client_correlation_id",
+        ):
+            setattr(self, field_name, _dispatch_text(getattr(self, field_name), field_name=field_name))
+        if self.schema_version != DISPATCH_SCHEMA_VERSION:
+            raise ValueError("unsupported dispatch schema version")
+        if self.recovery_generation < 0:
+            raise ValueError("recovery_generation must be non-negative")
+        if self.recovery_generation == 0 and self.recovery_of is not None:
+            raise ValueError("generation 0 cannot reference a recovery dispatch")
+        if len(self.request_fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in self.request_fingerprint.lower()
+        ):
+            raise ValueError("request_fingerprint must be a SHA-256 hex digest")
+        if self.dispatch_state not in {REQUEST_PREPARED, RESERVATION_COMMITTED, DISPATCH_STARTED, RESPONSE_OBSERVED}:
+            raise ValueError("unsupported dispatch state")
+        if self.dispatch_state in {RESERVATION_COMMITTED, DISPATCH_STARTED, RESPONSE_OBSERVED}:
+            if not self.reservation_id or self.reservation_committed_at is None:
+                raise ValueError("reserved dispatch requires reservation identity and timestamp")
+        if self.dispatch_state in {DISPATCH_STARTED, RESPONSE_OBSERVED} and self.dispatch_started_at is None:
+            raise ValueError("started dispatch requires dispatch timestamp")
+        if self.http_status is not None and self.http_status < 100:
+            raise ValueError("http_status must be a valid status code")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "dispatch_schema_version": self.schema_version,
+            "physical_request_id": self.physical_request_id,
+            "logical_attempt_id": self.logical_attempt_id,
+            "recovery_generation": self.recovery_generation,
+            "recovery_of": self.recovery_of,
+            "provider": self.provider,
+            "model": self.model,
+            "request_fingerprint": self.request_fingerprint,
+            "client_correlation_id": self.client_correlation_id,
+            "reservation_id": self.reservation_id,
+            "reserved_cost": self.reserved_cost,
+            "provider_request_id": self.provider_request_id,
+            "provider_response_id": self.provider_response_id,
+            "response_status": self.response_status,
+            "http_status": self.http_status,
+            "sanitized_error": self.sanitized_error,
+            "prepared_at": self.prepared_at,
+            "reservation_committed_at": self.reservation_committed_at,
+            "dispatch_started_at": self.dispatch_started_at,
+            "completed_at": self.completed_at,
+            "dispatch_state": self.dispatch_state,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "DispatchRecord":
+        required = {
+            "dispatch_schema_version", "physical_request_id", "logical_attempt_id", "provider",
+            "model", "request_fingerprint", "client_correlation_id", "recovery_generation",
+            "recovery_of", "reservation_id", "reserved_cost", "provider_request_id",
+            "provider_response_id", "response_status", "http_status", "sanitized_error",
+            "prepared_at", "reservation_committed_at", "dispatch_started_at", "completed_at",
+            "dispatch_state",
+        }
+        missing = sorted(key for key in required if key not in data)
+        if missing:
+            raise ValueError(f"incomplete dispatch schema: missing {', '.join(missing)}")
+        sanitized_error = data["sanitized_error"]
+        if sanitized_error is not None and not isinstance(sanitized_error, Mapping):
+            raise ValueError("sanitized_error must be an object or null")
+        return cls(
+            schema_version=int(data["dispatch_schema_version"]),
+            physical_request_id=str(data["physical_request_id"]),
+            logical_attempt_id=str(data["logical_attempt_id"]),
+            recovery_generation=int(data["recovery_generation"]),
+            recovery_of=(str(data["recovery_of"]) if data["recovery_of"] is not None else None),
+            provider=str(data["provider"]),
+            model=str(data["model"]),
+            request_fingerprint=str(data["request_fingerprint"]),
+            client_correlation_id=str(data["client_correlation_id"]),
+            reservation_id=(str(data["reservation_id"]) if data["reservation_id"] is not None else None),
+            reserved_cost=(str(data["reserved_cost"]) if data["reserved_cost"] is not None else None),
+            provider_request_id=(str(data["provider_request_id"]) if data["provider_request_id"] is not None else None),
+            provider_response_id=(str(data["provider_response_id"]) if data["provider_response_id"] is not None else None),
+            response_status=(str(data["response_status"]) if data["response_status"] is not None else None),
+            http_status=(int(data["http_status"]) if data["http_status"] is not None else None),
+            sanitized_error=dict(sanitized_error) if sanitized_error is not None else None,
+            prepared_at=str(data["prepared_at"]),
+            reservation_committed_at=(str(data["reservation_committed_at"]) if data["reservation_committed_at"] is not None else None),
+            dispatch_started_at=(str(data["dispatch_started_at"]) if data["dispatch_started_at"] is not None else None),
+            completed_at=(str(data["completed_at"]) if data["completed_at"] is not None else None),
+            dispatch_state=str(data["dispatch_state"]),
+        )
 
 
 def _decimal(value: Any, *, field_name: str) -> Decimal:
@@ -97,6 +233,7 @@ class LunaEconomicState:
     pause_reason: str | None = None
     pending_request_id: str | None = None
     ledger: dict[str, dict[str, Any]] = field(default_factory=dict)
+    dispatch_records: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not str(self.execution_id).strip():
@@ -119,6 +256,12 @@ class LunaEconomicState:
             raise ValueError("economic reservations must be non-negative")
         if self.physical_request_count < 0 or self.provider_retry_count < 0 or self.logical_provider_turn_count < 0:
             raise ValueError("economic counters must be non-negative")
+        if not isinstance(self.dispatch_records, Mapping):
+            raise ValueError("dispatch_records must be an object")
+        for physical_request_id, record in self.dispatch_records.items():
+            if str(physical_request_id) != str(record.get("physical_request_id")):
+                raise ValueError("dispatch record identity mismatch")
+            DispatchRecord.from_dict(record)
 
     @property
     def global_remaining_usd(self) -> Decimal:
@@ -177,6 +320,7 @@ class LunaEconomicState:
             "pause_reason": self.pause_reason,
             "pending_request_id": self.pending_request_id,
             "ledger": self.ledger,
+            "dispatch_records": self.dispatch_records,
         }
 
     @classmethod
@@ -216,6 +360,10 @@ class LunaEconomicState:
             pause_reason=data.get("pause_reason"),
             pending_request_id=data.get("pending_request_id"),
             ledger={str(key): dict(value) for key, value in ledger.items()},
+            dispatch_records={
+                str(key): dict(value)
+                for key, value in dict(data.get("dispatch_records", {})).items()
+            },
         )
 
 
@@ -307,11 +455,53 @@ class LunaBudgetGuard:
         self.state.logical_provider_turn_count += 1
         self._persist()
 
-    def before_request(self, payload: Mapping[str, Any], *, retry_count: int) -> dict[str, Any]:
+    def prepare_dispatch(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        provider: str,
+        model: str,
+        retry_count: int,
+    ) -> DispatchRecord:
+        """Persist REQUEST_PREPARED before reserving or crossing the provider boundary."""
+
         if self.abort_reason is not None:
             raise self._blocked(self.abort_reason)
         if self.state.active_attempt_id is None:
             self.begin_attempt("legacy-attempt")
+        self._validate_state(retry_count=retry_count)
+        physical_request_id = f"dispatch-{uuid4()}"
+        record = DispatchRecord(
+            physical_request_id=physical_request_id,
+            logical_attempt_id=self.state.active_attempt_id,
+            provider=provider,
+            model=model,
+            request_fingerprint=self._request_fingerprint(payload),
+            client_correlation_id=f"corr-{uuid4()}",
+        )
+        self.state.dispatch_records[physical_request_id] = record.to_dict()
+        self._persist()
+        return record
+
+    def before_request(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        retry_count: int,
+        dispatch_record: DispatchRecord | None = None,
+    ) -> dict[str, Any]:
+        if self.abort_reason is not None:
+            raise self._blocked(self.abort_reason)
+        if self.state.active_attempt_id is None:
+            self.begin_attempt("legacy-attempt")
+        if dispatch_record is None:
+            dispatch_record = self.prepare_dispatch(
+                payload,
+                provider="unknown",
+                model=str(payload.get("model", "unknown")),
+                retry_count=retry_count,
+            )
+        self._validate_dispatch_record(dispatch_record)
         self._validate_state(retry_count=retry_count)
         input_tokens = self._conservative_input_tokens(payload)
         if input_tokens > self.pricing.max_context_tokens:
@@ -337,9 +527,16 @@ class LunaBudgetGuard:
         self.state.global_reserved_usd += reserve
         self.state.physical_request_count += 1
         self.state.provider_retry_count = max(self.state.provider_retry_count, retry_count)
+        dispatch_record.reservation_id = request_id
+        dispatch_record.reserved_cost = str(reserve)
+        dispatch_record.reservation_committed_at = _utc_now()
+        dispatch_record.dispatch_state = RESERVATION_COMMITTED
+        self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
         self._persist()
         return {
             "request_id": request_id,
+            "physical_request_id": dispatch_record.physical_request_id,
+            "client_correlation_id": dispatch_record.client_correlation_id,
             "physical_request_count": self.state.physical_request_count,
             "provider_retry_count": self.state.provider_retry_count,
             "input_tokens_estimate": input_tokens,
@@ -351,6 +548,43 @@ class LunaBudgetGuard:
             "remaining_budget_usd": _money(self.state.global_remaining_usd),
             "decision": self.last_decision,
         }
+
+    def mark_dispatch_started(self, dispatch_record: DispatchRecord) -> None:
+        """Persist DISPATCH_STARTED immediately before crossing the SDK boundary."""
+
+        self._validate_dispatch_record(dispatch_record)
+        if dispatch_record.reservation_id is None or dispatch_record.dispatch_state != RESERVATION_COMMITTED:
+            raise self._abort("DISPATCH_RESERVATION_NOT_COMMITTED")
+        dispatch_record.dispatch_started_at = _utc_now()
+        dispatch_record.dispatch_state = DISPATCH_STARTED
+        self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
+        self._persist()
+
+    def record_dispatch_result(
+        self,
+        dispatch_record: DispatchRecord,
+        *,
+        provider_request_id: str | None = None,
+        provider_response_id: str | None = None,
+        response_status: str | None = None,
+        http_status: int | None = None,
+        sanitized_error: Mapping[str, Any] | None = None,
+        completed: bool = False,
+    ) -> None:
+        """Persist provider metadata without changing economic settlement."""
+
+        self._validate_dispatch_record(dispatch_record)
+        if dispatch_record.dispatch_state not in {DISPATCH_STARTED, RESPONSE_OBSERVED}:
+            raise self._abort("DISPATCH_NOT_STARTED")
+        dispatch_record.provider_request_id = provider_request_id
+        dispatch_record.provider_response_id = provider_response_id
+        dispatch_record.response_status = response_status
+        dispatch_record.http_status = http_status
+        dispatch_record.sanitized_error = dict(sanitized_error) if sanitized_error is not None else None
+        dispatch_record.completed_at = _utc_now() if completed else dispatch_record.completed_at
+        dispatch_record.dispatch_state = RESPONSE_OBSERVED if completed else DISPATCH_STARTED
+        self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
+        self._persist()
 
     def account_response(self, usage: Any, *, response_metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
         request_id = self.state.pending_request_id
@@ -522,6 +756,7 @@ class LunaBudgetGuard:
             "reconciliation_state": self.state.reconciliation_state,
             "economic_settlement_count": len(settlements),
             "economic_settlements": settlements,
+            "dispatch_records": [dict(record) for record in self.state.dispatch_records.values()],
         }
 
     def _persist(self) -> None:
@@ -541,6 +776,26 @@ class LunaBudgetGuard:
 
     def _request_id(self, retry_count: int) -> str:
         return f"{self.state.execution_id}:{self.state.active_attempt_id}:{self.state.logical_provider_turn_count}:{self.state.physical_request_count + 1}:{retry_count}"
+
+    def _request_fingerprint(self, payload: Mapping[str, Any]) -> str:
+        try:
+            canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise self._abort("REQUEST_FINGERPRINT_UNSERIALIZABLE") from exc
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _validate_dispatch_record(self, dispatch_record: DispatchRecord) -> None:
+        if not isinstance(dispatch_record, DispatchRecord):
+            raise self._abort("DISPATCH_RECORD_INVALID")
+        stored = self.state.dispatch_records.get(dispatch_record.physical_request_id)
+        if stored is None:
+            raise self._abort("DISPATCH_RECORD_MISSING")
+        try:
+            persisted = DispatchRecord.from_dict(stored)
+        except (TypeError, ValueError) as exc:
+            raise self._abort("DISPATCH_RECORD_INVALID") from exc
+        if persisted.to_dict() != dispatch_record.to_dict():
+            raise self._abort("DISPATCH_RECORD_IDENTITY_MISMATCH")
 
     def _conservative_input_tokens(self, payload: Mapping[str, Any]) -> int:
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
