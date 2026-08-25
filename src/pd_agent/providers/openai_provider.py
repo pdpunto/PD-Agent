@@ -118,9 +118,18 @@ class OpenAIProvider(ModelProvider):
                     **payload,
                 )
             except Exception as exc:  # pragma: no cover - normalized boundary
+                normalized_error = self._normalize_error(exc, model=model)
                 if self.budget_guard is not None:
-                    self.budget_guard.on_failure_without_usage(retry_count=attempt)
-                last_error = self._normalize_error(exc, model=model)
+                    failure = normalized_error.to_dict()
+                    try:
+                        self.budget_guard.on_failure_without_usage(
+                            retry_count=attempt,
+                            failure=failure,
+                        )
+                    except ProviderError as economic_error:
+                        economic_error.details.setdefault("original_failure", failure)
+                        raise economic_error from None
+                last_error = normalized_error
                 if not last_error.retryable or attempt >= retry_limit:
                     last_error.details.update(
                         {
@@ -133,7 +142,38 @@ class OpenAIProvider(ModelProvider):
             budget_metadata = None
             if self.budget_guard is not None:
                 normalized_usage = self._normalize_usage(getattr(response, "usage", None))
-                budget_metadata = self.budget_guard.account_response(normalized_usage)
+                if normalized_usage is None:
+                    self.budget_guard.on_failure_without_usage(
+                        retry_count=attempt,
+                        failure={
+                            "kind": "protocol",
+                            "message": "OpenAI response did not include usage",
+                            "response_id": getattr(response, "id", None),
+                            "response_status": getattr(response, "status", None),
+                        },
+                    )
+                try:
+                    budget_metadata = self.budget_guard.account_response(
+                        normalized_usage,
+                        response_metadata={
+                            "response_id": getattr(response, "id", None),
+                            "response_status": getattr(response, "status", None),
+                            "service_tier": getattr(response, "service_tier", None),
+                        },
+                    )
+                except ProviderError as exc:
+                    if exc.details.get("abort_reason") not in {"ECONOMIC_STATE_UNCERTAIN", "UNKNOWN_RESERVED_REQUEST"}:
+                        self.budget_guard.on_failure_without_usage(
+                            retry_count=attempt,
+                            failure={
+                                "kind": "protocol",
+                                "message": str(exc),
+                                "response_id": getattr(response, "id", None),
+                                "response_status": getattr(response, "status", None),
+                                "validation_abort_reason": exc.details.get("abort_reason"),
+                            },
+                        )
+                    raise
                 if isinstance(normalized_usage, dict):
                     normalized_usage.update(budget_metadata)
                     try:

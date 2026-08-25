@@ -382,10 +382,58 @@ def test_uncertain_billable_request_is_persisted_and_not_resendable(tmp_path: Pa
 
     assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
     restored = LunaEconomicStateStore.load(tmp_path / "economic-state.json").state
-    assert restored.reconciliation_state == "UNCERTAIN_BILLABLE_USAGE"
-    assert restored.pause_reason == "UNKNOWN_BILLABLE_USAGE"
-    assert all(entry["status"] == "UNCERTAIN" for entry in restored.ledger.values())
+    assert restored.reconciliation_state == "UNCERTAIN_CONSUMED"
+    assert restored.pause_reason == "ECONOMIC_BUDGET_BLOCKED"
+    assert restored.global_uncertain_consumed_usd > 0
+    assert restored.global_reserved_usd == 0
+    assert all(entry["status"] == "UNCERTAIN_CONSUMED" for entry in restored.ledger.values())
 
     with pytest.raises(ProviderError) as blocked:
         guard.before_request({"input": []}, retry_count=1)
     assert blocked.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
+
+
+def test_uncertain_consumption_is_not_reported_as_actual_billed_cost() -> None:
+    guard = _guard()
+    guard.before_request({"input": []}, retry_count=0)
+    with pytest.raises(ProviderError):
+        guard.on_failure_without_usage(retry_count=0, failure={"message": "transport"})
+
+    metadata = guard.metadata()
+    assert metadata["actual_billed_cost_usd"] == 0.0
+    assert metadata["conservative_budget_consumed_usd"] > 0
+    assert metadata["remaining_budget_usd"] < 1.0
+
+
+def test_proven_pre_dispatch_reservation_can_be_released() -> None:
+    guard = _guard()
+    decision = guard.before_request({"input": []}, retry_count=0)
+    released = guard.release_reservation(reason="client rejected before dispatch")
+
+    assert released["status"] == "RELEASED"
+    assert guard.state.global_reserved_usd == 0
+    assert guard.state.global_uncertain_consumed_usd == 0
+    assert guard.state.ledger[decision["request_id"]]["actual_billed_cost_usd"] == "0"
+
+
+def test_original_provider_failure_is_preserved_in_economic_abort() -> None:
+    client = _Client(error=RuntimeError("transport failure"))
+    guard = _guard()
+    with pytest.raises(ProviderError) as error:
+        OpenAIProvider(model="gpt-5.6-luna", client=client, budget_guard=guard).execute(_request())
+
+    assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
+    assert error.value.details["original_failure"]["message"] == "transport failure"
+    assert guard.state.ledger[next(iter(guard.state.ledger))]["status"] == "UNCERTAIN_CONSUMED"
+
+
+def test_response_without_usage_is_uncertain_and_not_retried() -> None:
+    response = SimpleNamespace(id="resp-no-usage", status="completed", usage=None, output=[])
+    client = _Client(response=response)
+    guard = _guard()
+    with pytest.raises(ProviderError) as error:
+        OpenAIProvider(model="gpt-5.6-luna", client=client, budget_guard=guard).execute(_request())
+
+    assert client.responses.calls == 1
+    assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
+    assert guard.state.reconciliation_state == "UNCERTAIN_CONSUMED"

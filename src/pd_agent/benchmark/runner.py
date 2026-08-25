@@ -238,6 +238,13 @@ class BenchmarkExecutionRunner:
             raise BenchmarkExecutionResumeError("incompatible dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA") from exc
         if store.state.execution_id != execution_id:
             raise BenchmarkExecutionResumeError("economic execution identity drift detected", code="RESUME_DRIFT")
+        if store.state.reconciliation_state != "CLEAR" or any(
+            entry.get("status") == "UNCERTAIN_CONSUMED" for entry in store.state.ledger.values()
+        ):
+            raise BenchmarkExecutionResumeError(
+                "economic state contains unreconciled post-dispatch consumption",
+                code="RESUME_ECONOMIC_UNCERTAIN",
+            )
         guard.state = store.state
         guard.state_store = store
         return guard

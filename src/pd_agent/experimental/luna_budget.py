@@ -14,7 +14,11 @@ from pd_agent.core.errors import ProviderError
 
 LUNA_EXPERIMENTAL_HARD_BUDGET_USD = Decimal("1.00")
 LUNA_PER_ATTEMPT_HARD_BUDGET_USD = Decimal("0.10")
-LUNA_ECONOMIC_SCHEMA_VERSION = 1
+LUNA_ECONOMIC_SCHEMA_VERSION = 2
+RESERVED = "RESERVED"
+ACCOUNTED = "ACCOUNTED"
+RELEASED = "RELEASED"
+UNCERTAIN_CONSUMED = "UNCERTAIN_CONSUMED"
 
 
 def _decimal(value: Any, *, field_name: str) -> Decimal:
@@ -74,9 +78,11 @@ class LunaEconomicState:
     global_ceiling_usd: Decimal = LUNA_EXPERIMENTAL_HARD_BUDGET_USD
     attempt_ceiling_usd: Decimal = LUNA_PER_ATTEMPT_HARD_BUDGET_USD
     global_accumulated_usd: Decimal = Decimal("0")
+    global_uncertain_consumed_usd: Decimal = Decimal("0")
     global_reserved_usd: Decimal = Decimal("0")
     active_attempt_id: str | None = None
     attempt_accumulated_usd: Decimal = Decimal("0")
+    attempt_uncertain_consumed_usd: Decimal = Decimal("0")
     attempt_reserved_usd: Decimal = Decimal("0")
     physical_request_count: int = 0
     provider_retry_count: int = 0
@@ -93,14 +99,16 @@ class LunaEconomicState:
         self.global_ceiling_usd = _decimal(self.global_ceiling_usd, field_name="global_ceiling_usd")
         self.attempt_ceiling_usd = _decimal(self.attempt_ceiling_usd, field_name="attempt_ceiling_usd")
         self.global_accumulated_usd = _decimal(self.global_accumulated_usd, field_name="global_accumulated_usd")
+        self.global_uncertain_consumed_usd = _decimal(self.global_uncertain_consumed_usd, field_name="global_uncertain_consumed_usd")
         self.global_reserved_usd = _decimal(self.global_reserved_usd, field_name="global_reserved_usd")
         self.attempt_accumulated_usd = _decimal(self.attempt_accumulated_usd, field_name="attempt_accumulated_usd")
+        self.attempt_uncertain_consumed_usd = _decimal(self.attempt_uncertain_consumed_usd, field_name="attempt_uncertain_consumed_usd")
         self.attempt_reserved_usd = _decimal(self.attempt_reserved_usd, field_name="attempt_reserved_usd")
         if self.global_ceiling_usd <= 0 or self.attempt_ceiling_usd <= 0:
             raise ValueError("economic ceilings must be positive")
-        if self.global_accumulated_usd + self.global_reserved_usd > self.global_ceiling_usd:
+        if self.global_accumulated_usd + self.global_uncertain_consumed_usd + self.global_reserved_usd > self.global_ceiling_usd:
             raise ValueError("global economic reservation exceeds ceiling")
-        if self.attempt_accumulated_usd + self.attempt_reserved_usd > self.attempt_ceiling_usd:
+        if self.attempt_accumulated_usd + self.attempt_uncertain_consumed_usd + self.attempt_reserved_usd > self.attempt_ceiling_usd:
             raise ValueError("attempt economic reservation exceeds ceiling")
         if self.global_reserved_usd < 0 or self.attempt_reserved_usd < 0:
             raise ValueError("economic reservations must be non-negative")
@@ -109,11 +117,11 @@ class LunaEconomicState:
 
     @property
     def global_remaining_usd(self) -> Decimal:
-        return self.global_ceiling_usd - self.global_accumulated_usd - self.global_reserved_usd
+        return self.global_ceiling_usd - self.global_accumulated_usd - self.global_uncertain_consumed_usd - self.global_reserved_usd
 
     @property
     def attempt_remaining_usd(self) -> Decimal:
-        return self.attempt_ceiling_usd - self.attempt_accumulated_usd - self.attempt_reserved_usd
+        return self.attempt_ceiling_usd - self.attempt_accumulated_usd - self.attempt_uncertain_consumed_usd - self.attempt_reserved_usd
 
     def begin_attempt(self, attempt_id: str) -> None:
         attempt_id = str(attempt_id).strip()
@@ -142,11 +150,13 @@ class LunaEconomicState:
             "execution_id": self.execution_id,
             "global_ceiling_usd": str(self.global_ceiling_usd),
             "global_accumulated_usd": str(self.global_accumulated_usd),
+            "global_uncertain_consumed_usd": str(self.global_uncertain_consumed_usd),
             "global_reserved_usd": str(self.global_reserved_usd),
             "global_remaining_usd": str(self.global_remaining_usd),
             "active_attempt_id": self.active_attempt_id,
             "attempt_ceiling_usd": str(self.attempt_ceiling_usd),
             "attempt_accumulated_usd": str(self.attempt_accumulated_usd),
+            "attempt_uncertain_consumed_usd": str(self.attempt_uncertain_consumed_usd),
             "attempt_reserved_usd": str(self.attempt_reserved_usd),
             "attempt_remaining_usd": str(self.attempt_remaining_usd),
             "physical_request_count": self.physical_request_count,
@@ -163,7 +173,8 @@ class LunaEconomicState:
     def from_dict(cls, data: Mapping[str, Any]) -> "LunaEconomicState":
         required = {
             "economic_schema_version", "execution_id", "global_ceiling_usd", "global_accumulated_usd",
-            "global_reserved_usd", "active_attempt_id", "attempt_ceiling_usd", "attempt_accumulated_usd",
+            "global_reserved_usd", "global_uncertain_consumed_usd", "active_attempt_id", "attempt_ceiling_usd", "attempt_accumulated_usd",
+            "attempt_uncertain_consumed_usd",
             "attempt_reserved_usd", "physical_request_count", "provider_retry_count",
             "logical_provider_turn_count", "ledger_version", "reconciliation_state", "ledger",
             "global_remaining_usd", "attempt_remaining_usd",
@@ -181,9 +192,11 @@ class LunaEconomicState:
             global_ceiling_usd=Decimal(str(data["global_ceiling_usd"])),
             global_accumulated_usd=Decimal(str(data["global_accumulated_usd"])),
             global_reserved_usd=Decimal(str(data["global_reserved_usd"])),
+            global_uncertain_consumed_usd=Decimal(str(data["global_uncertain_consumed_usd"])),
             active_attempt_id=data.get("active_attempt_id"),
             attempt_ceiling_usd=Decimal(str(data["attempt_ceiling_usd"])),
             attempt_accumulated_usd=Decimal(str(data["attempt_accumulated_usd"])),
+            attempt_uncertain_consumed_usd=Decimal(str(data["attempt_uncertain_consumed_usd"])),
             attempt_reserved_usd=Decimal(str(data["attempt_reserved_usd"])),
             physical_request_count=int(data["physical_request_count"]),
             provider_retry_count=int(data["provider_retry_count"]),
@@ -303,7 +316,7 @@ class LunaBudgetGuard:
             raise self._abort("BUDGET_BLOCKED")
         request_id = self._request_id(retry_count)
         self.state.ledger[request_id] = {
-            "status": "RESERVED",
+            "status": RESERVED,
             "attempt_id": self.state.active_attempt_id,
             "logical_turn": self.state.logical_provider_turn_count,
             "retry_ordinal": retry_count,
@@ -329,14 +342,14 @@ class LunaBudgetGuard:
             "decision": self.last_decision,
         }
 
-    def account_response(self, usage: Any) -> dict[str, Any]:
+    def account_response(self, usage: Any, *, response_metadata: Mapping[str, Any] | None = None) -> dict[str, Any]:
         request_id = self.state.pending_request_id
         if request_id is None or request_id not in self.state.ledger:
             raise self._abort("UNKNOWN_RESERVED_REQUEST")
         entry = self.state.ledger[request_id]
-        if entry.get("status") == "ACCOUNTED":
+        if entry.get("status") == ACCOUNTED:
             return dict(entry.get("settlement", {}))
-        if entry.get("status") != "RESERVED":
+        if entry.get("status") != RESERVED:
             raise self._abort("ECONOMIC_STATE_UNCERTAIN")
         normalized = self._usage_mapping(usage)
         input_tokens = self._required_int(normalized, "input_tokens")
@@ -402,7 +415,15 @@ class LunaBudgetGuard:
             "global_remaining_usd": str(self.state.global_remaining_usd),
             "remaining_budget_usd": float(self.state.global_remaining_usd),
         }
-        entry["status"] = "ACCOUNTED"
+        entry["status"] = ACCOUNTED
+        entry["actual_billed_cost_usd"] = str(derived)
+        entry["conservative_budget_consumed_usd"] = str(reservation)
+        if response_metadata:
+            entry["response"] = {
+                str(key): value
+                for key, value in response_metadata.items()
+                if key in {"response_id", "response_status", "service_tier"} and value is not None
+            }
         entry["settlement"] = record
         self.state.pending_request_id = None
         self.state.reconciliation_state = "CLEAR"
@@ -410,15 +431,50 @@ class LunaBudgetGuard:
         self._persist()
         return record
 
-    def on_failure_without_usage(self, *, retry_count: int) -> None:
+    def release_reservation(self, *, reason: str) -> dict[str, Any]:
+        """Release only a reservation proven not to have reached the provider."""
+        request_id = self.state.pending_request_id
+        if not request_id or request_id not in self.state.ledger:
+            raise self._abort("UNKNOWN_RESERVED_REQUEST")
+        entry = self.state.ledger[request_id]
+        if entry.get("status") != RESERVED:
+            raise self._abort("ECONOMIC_STATE_UNCERTAIN")
+        reservation = Decimal(str(entry["reservation_usd"]))
+        self.state.global_reserved_usd -= reservation
+        self.state.attempt_reserved_usd -= reservation
+        entry["status"] = RELEASED
+        entry["actual_billed_cost_usd"] = "0"
+        entry["conservative_budget_consumed_usd"] = "0"
+        entry["release_reason"] = str(reason)
+        self.state.pending_request_id = None
+        self.state.reconciliation_state = "CLEAR"
+        self._persist()
+        return {"request_id": request_id, "status": RELEASED, "released_usd": str(reservation)}
+
+    def on_failure_without_usage(self, *, retry_count: int, failure: Mapping[str, Any] | None = None) -> None:
+        """Settle a dispatched request conservatively when billable usage is unknown."""
         self.state.provider_retry_count = max(self.state.provider_retry_count, retry_count)
         if self.state.pending_request_id is not None:
             entry = self.state.ledger[self.state.pending_request_id]
-            entry["status"] = "UNCERTAIN"
-            self.state.reconciliation_state = "UNCERTAIN_BILLABLE_USAGE"
-            self.state.pause_reason = "UNKNOWN_BILLABLE_USAGE"
+            if entry.get("status") == RESERVED:
+                reservation = Decimal(str(entry["reservation_usd"]))
+                self.state.global_reserved_usd -= reservation
+                self.state.attempt_reserved_usd -= reservation
+                self.state.global_uncertain_consumed_usd += reservation
+                self.state.attempt_uncertain_consumed_usd += reservation
+                entry["status"] = UNCERTAIN_CONSUMED
+                entry["actual_billed_cost_usd"] = None
+                entry["conservative_budget_consumed_usd"] = str(reservation)
+                if failure:
+                    entry["sanitized_failure"] = dict(failure)
+            self.state.reconciliation_state = "UNCERTAIN_CONSUMED"
+            self.state.pause_reason = "ECONOMIC_BUDGET_BLOCKED"
+            self.state.pending_request_id = None
             self._persist()
-        raise self._abort("UNKNOWN_BILLABLE_USAGE")
+        error = self._abort("UNKNOWN_BILLABLE_USAGE")
+        if failure:
+            error.details["original_failure"] = dict(failure)
+        raise error
 
     def metadata(self) -> dict[str, Any]:
         pricing_payload = json.dumps(self.pricing.to_dict(), sort_keys=True, separators=(",", ":"))
@@ -441,11 +497,15 @@ class LunaBudgetGuard:
             "physical_request_count": self.state.physical_request_count,
             "provider_retry_count": self.state.provider_retry_count,
             "accumulated_cost_usd": float(self.state.global_accumulated_usd),
+            "actual_billed_cost_usd": float(self.state.global_accumulated_usd),
+            "conservative_budget_consumed_usd": float(self.state.global_accumulated_usd + self.state.global_uncertain_consumed_usd),
+            "global_uncertain_consumed_usd": float(self.state.global_uncertain_consumed_usd),
             "remaining_budget_usd": float(self.state.global_remaining_usd),
             "attempt_accumulated_usd": float(self.state.attempt_accumulated_usd),
             "attempt_remaining_usd": float(self.state.attempt_remaining_usd),
             "global_reserved_usd": float(self.state.global_reserved_usd),
             "attempt_reserved_usd": float(self.state.attempt_reserved_usd),
+            "attempt_uncertain_consumed_usd": float(self.state.attempt_uncertain_consumed_usd),
             "last_reserve_usd": float(self.last_reserve) if self.last_reserve is not None else None,
             "last_budget_decision": self.last_decision,
             "abort_reason": self.abort_reason,
