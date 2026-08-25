@@ -61,12 +61,15 @@ Reconstruct global budget, active attempt, attempt budget and ledger on resume.
 - Resume preserves global cost and active attempt cost.
 - No settlement is duplicated after resume.
 - An uncertain post-request state is not automatically resent.
+- Official resume rejects missing or incompatible economic schema fields; it
+  does not migrate them or treat them as zero.
 
 ### Boundary and rollback
 
-Commit schema and resume behavior together. Reject or explicitly migrate old
-economic schemas; never silently interpret missing fields as zero for an
-official candidate.
+Commit schema and resume behavior together. Require a new explicit economic
+schema version and reject old or incomplete manifests with an explicit resume
+compatibility error. Never migrate silently, interpret missing fields as zero,
+or reconstruct economic state heuristically.
 
 ## Lot 3 - Official Runner Lifecycle and Budget Pause
 
@@ -86,8 +89,12 @@ attempt/replacement authority.
 ### Acceptance
 
 - Every physical request and retry is checked against both budgets.
-- Preventive budget block preserves the exact pending scheduled attempt.
+- Preventive budget block persists
+  `BenchmarkBatchStatus.BUDGET_PAUSED` with
+  `pause_reason=ECONOMIC_BUDGET_BLOCKED` and preserves the exact pending
+  scheduled attempt.
 - Budget block consumes no attempt and creates no replacement.
+- Budget block creates no normal `BenchmarkRun`.
 - Normal `BLOCKED`/`INVALID` replacement behavior remains unchanged.
 - `COMPLETED + FAIL` remains valid without replacement.
 - `RATE_LIMIT_PAUSED` semantics do not regress.
@@ -117,6 +124,9 @@ requests.
 
 - Provider and model are frozen and validated before launch.
 - No physical request occurs before a successful dual reservation.
+- `RESERVED` is synchronously persisted by the runner-owned economic state
+  store before the guard returns `ALLOW`.
+- A failed `RESERVED` persistence blocks fail-closed without a provider call.
 - Retries use the same attempt identity and separate ledger entries.
 - Missing usage remains fail-closed.
 - No secret or raw encrypted reasoning is persisted.
@@ -204,12 +214,13 @@ The implementation must cover:
 23. Decimal exactness holds.
 24. Manifest freezes economic settings.
 25. Execution state reconstructs economic state.
-26. Evidence contains unique settlements and no secrets.
-27. Budget pause consumes no attempt.
-28. Budget pause creates no replacement.
-29. Normal `BLOCKED`/`INVALID` replacement semantics remain.
-30. `COMPLETED + FAIL` remains valid without replacement.
-31. `RATE_LIMIT_PAUSED` remains exact and resumable.
+26. Missing economic schema fields reject resume explicitly.
+27. Evidence contains unique settlements and no secrets.
+28. Budget pause uses exactly `BUDGET_PAUSED` and consumes no attempt.
+29. Budget pause creates no replacement or normal `BenchmarkRun`.
+30. Normal `BLOCKED`/`INVALID` replacement semantics remain.
+31. `COMPLETED + FAIL` remains valid without replacement.
+32. `RATE_LIMIT_PAUSED` remains exact and resumable.
 
 ## Prelaunch Gate
 

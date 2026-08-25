@@ -67,6 +67,23 @@ The ledger must persist `RESERVED` before the provider call and transition it
 idempotently to `ACCOUNTED` after validating usage and deriving cost. A request
 already accounted must never be settled again.
 
+The runner-owned economic state store is the sole mutable ledger authority.
+The scheduler owns attempt identity only, and the provider and aggregator do
+not keep independent mutable economic copies. The guard must complete this
+synchronous transaction before returning `ALLOW`:
+
+1. identify the request;
+2. calculate reservation;
+3. check attempt ceiling;
+4. check global ceiling;
+5. persist `RESERVED`;
+6. confirm persistence;
+7. return `ALLOW`.
+
+`OpenAIProvider` may call `responses.create` only after `ALLOW`. If the
+`RESERVED` write fails, the guard blocks fail-closed and no provider request is
+made. Settlement to `ACCOUNTED` is persisted through the same authority.
+
 If execution stops after sending a request but before settlement, the ledger
 remains reserved and enters an uncertain fail-closed state. The runner must not
 automatically resend that request. Safe reconciliation is allowed only from
@@ -103,11 +120,15 @@ evidence.
 
 If a reservation exceeds either remaining ceiling before the provider call:
 
-- persist a budget-paused/blocked execution state;
+- persist `BenchmarkBatchStatus.BUDGET_PAUSED` with
+  `pause_reason=ECONOMIC_BUDGET_BLOCKED`;
 - preserve the exact scheduled attempt as pending;
 - consume no attempt;
 - create no replacement;
 - emit no normal `BLOCKED` benchmark run.
+
+`BUDGET_BLOCKED` is not a batch status in this contract. It is only the
+economic pause reason/code.
 
 This state is distinct from `RATE_LIMIT_PAUSED`, which retains its current
 provider-quota semantics. Normal `BLOCKED` and `INVALID` runs continue to use
@@ -126,6 +147,17 @@ total tokens, logical turns, physical requests, retries, attempt cost and
 global budget metadata.
 
 Raw secrets and encrypted reasoning content are prohibited.
+
+## Economic Schema Compatibility
+
+The official candidate uses a new explicit economic schema version. Resume
+must reject an execution when the schema version or any required economic
+field is missing, including ceilings, accumulated/reserved values, active
+attempt, ledger, pricing snapshot/hash or reconciliation state. There is no
+silent migration, zero default, heuristic reconstruction or reuse of an
+incompatible historical manifest. Historical evidence remains valid evidence
+but is not resumable under this contract unless its economic schema is exactly
+compatible.
 
 ## Aggregation Contract
 

@@ -56,6 +56,11 @@ attempt numbering, replacements and canonical schedule identity.
 5. Close the attempt and persist its final economic summary.
 6. Preserve global state when moving to a repetition or replacement.
 
+The sole mutable authority is the runner-owned economic state store. The
+scheduler owns attempt lifecycle and identity but no mutable economic ledger.
+The guard calculates pricing and reservations through that authority; the
+provider and aggregator do not maintain independent mutable ledger copies.
+
 The guard and its state must not depend on `run_luna_experimental.py`. The
 experimental runner may reuse the component, but remains isolated and
 non-official. `run_v0_4.py` remains the methodological entry point for a
@@ -92,6 +97,19 @@ The reservation is persisted as `RESERVED` before the provider call. A valid
 response is settled idempotently as `ACCOUNTED`, with the reservation released
 and both accumulators updated.
 
+The request transaction is strictly ordered:
+
+1. identify the request;
+2. calculate the reservation;
+3. check attempt and global ceilings;
+4. synchronously persist `RESERVED` through the economic state store;
+5. confirm persistence;
+6. return `ALLOW` from the guard;
+7. allow `OpenAIProvider` to call `responses.create`.
+
+If persisting `RESERVED` fails, the guard fails closed and no provider request
+is allowed. Settlement to `ACCOUNTED` uses the same state authority.
+
 If the process stops after the provider call but before settlement, the
 request remains reserved and is marked uncertain/fail-closed. It must not be
 automatically resent. Reconciliation is allowed only when existing provider
@@ -100,14 +118,16 @@ delta. Otherwise the execution pauses or blocks safely.
 
 ## Budget Pause Semantics
 
-A preventive budget denial before a physical request is not a normal
-`BenchmarkRun` with status `BLOCKED`:
+A preventive budget denial before a physical request uses exactly
+`BenchmarkBatchStatus.BUDGET_PAUSED` with the contractual pause reason
+`ECONOMIC_BUDGET_BLOCKED`. It is not a normal `BenchmarkRun` with status
+`BLOCKED`:
 
 - the scheduled attempt remains pending;
 - no attempt is consumed;
 - no replacement is generated;
 - the reason is persisted in execution state;
-- the candidate execution enters an unambiguous budget-paused/blocked state.
+- no new `BUDGET_BLOCKED` batch status is introduced.
 
 This does not alter `RATE_LIMIT_PAUSED`. Real provider, infrastructure,
 harness and execution-limit blocks retain the existing `BLOCKED` and
@@ -136,3 +156,13 @@ snapshots.
 - Fabric Agent, Minecraft, runtime or Semantic Repair behavior changes.
 - F9 historical execution changes.
 - Converting the experimental Luna runner into the official scheduler.
+
+## Economic Schema Compatibility
+
+The official dual-budget candidate requires a new explicit economic schema
+version. An execution or resume missing that version, either ceiling,
+accumulator, reservation, active attempt, ledger, pricing snapshot/hash or
+reconciliation state is rejected as incompatible. Missing economic fields are
+never interpreted as zero, migrated heuristically or reconstructed from old
+evidence. Historical executions remain valid historical evidence but are not
+dual-budget resumable unless they already contain the exact compatible schema.
