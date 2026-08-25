@@ -31,6 +31,11 @@ def _decimal(value: Any, *, field_name: str) -> Decimal:
     return result
 
 
+def _money(value: Decimal) -> str:
+    """Serialize money without passing through a binary floating-point value."""
+    return format(value, "f")
+
+
 @dataclass(frozen=True, slots=True)
 class LunaPricingSnapshot:
     """Frozen pricing rules shared by experimental and official wiring."""
@@ -343,7 +348,7 @@ class LunaBudgetGuard:
             "attempt_remaining_usd": str(self.state.attempt_remaining_usd),
             "global_accumulated_usd": str(self.state.global_accumulated_usd),
             "global_remaining_usd": str(self.state.global_remaining_usd),
-            "remaining_budget_usd": float(self.state.global_remaining_usd),
+            "remaining_budget_usd": _money(self.state.global_remaining_usd),
             "decision": self.last_decision,
         }
 
@@ -413,12 +418,12 @@ class LunaBudgetGuard:
             "reasoning_tokens": reasoning_tokens,
             "total_tokens": total_tokens,
             "long_context": long_context,
-            "derived_cost_usd": float(derived),
+            "derived_cost_usd": _money(derived),
             "attempt_accumulated_usd": str(self.state.attempt_accumulated_usd),
             "attempt_remaining_usd": str(self.state.attempt_remaining_usd),
             "global_accumulated_usd": str(self.state.global_accumulated_usd),
             "global_remaining_usd": str(self.state.global_remaining_usd),
-            "remaining_budget_usd": float(self.state.global_remaining_usd),
+            "remaining_budget_usd": _money(self.state.global_remaining_usd),
         }
         entry["status"] = ACCOUNTED
         entry["actual_billed_cost_usd"] = str(derived)
@@ -491,8 +496,8 @@ class LunaBudgetGuard:
         return {
             "experimental": self.experimental,
             "non_official": self.non_official,
-            "hard_budget_usd": float(self.state.global_ceiling_usd),
-            "attempt_budget_usd": float(self.state.attempt_ceiling_usd),
+            "hard_budget_usd": _money(self.state.global_ceiling_usd),
+            "attempt_budget_usd": _money(self.state.attempt_ceiling_usd),
             "pricing_snapshot": self.pricing.to_dict(),
             "pricing_snapshot_hash": hashlib.sha256(pricing_payload.encode("utf-8")).hexdigest(),
             "economic_schema_version": LUNA_ECONOMIC_SCHEMA_VERSION,
@@ -501,17 +506,17 @@ class LunaBudgetGuard:
             "logical_provider_turn_count": self.state.logical_provider_turn_count,
             "physical_request_count": self.state.physical_request_count,
             "provider_retry_count": self.state.provider_retry_count,
-            "accumulated_cost_usd": float(self.state.global_accumulated_usd),
-            "actual_billed_cost_usd": float(self.state.global_accumulated_usd),
-            "conservative_budget_consumed_usd": float(self.state.global_accumulated_usd + self.state.global_uncertain_consumed_usd),
-            "global_uncertain_consumed_usd": float(self.state.global_uncertain_consumed_usd),
-            "remaining_budget_usd": float(self.state.global_remaining_usd),
-            "attempt_accumulated_usd": float(self.state.attempt_accumulated_usd),
-            "attempt_remaining_usd": float(self.state.attempt_remaining_usd),
-            "global_reserved_usd": float(self.state.global_reserved_usd),
-            "attempt_reserved_usd": float(self.state.attempt_reserved_usd),
-            "attempt_uncertain_consumed_usd": float(self.state.attempt_uncertain_consumed_usd),
-            "last_reserve_usd": float(self.last_reserve) if self.last_reserve is not None else None,
+            "accumulated_cost_usd": _money(self.state.global_accumulated_usd),
+            "actual_billed_cost_usd": _money(self.state.global_accumulated_usd),
+            "conservative_budget_consumed_usd": _money(self.state.global_accumulated_usd + self.state.global_uncertain_consumed_usd),
+            "global_uncertain_consumed_usd": _money(self.state.global_uncertain_consumed_usd),
+            "remaining_budget_usd": _money(self.state.global_remaining_usd),
+            "attempt_accumulated_usd": _money(self.state.attempt_accumulated_usd),
+            "attempt_remaining_usd": _money(self.state.attempt_remaining_usd),
+            "global_reserved_usd": _money(self.state.global_reserved_usd),
+            "attempt_reserved_usd": _money(self.state.attempt_reserved_usd),
+            "attempt_uncertain_consumed_usd": _money(self.state.attempt_uncertain_consumed_usd),
+            "last_reserve_usd": _money(self.last_reserve) if self.last_reserve is not None else None,
             "last_budget_decision": self.last_decision,
             "abort_reason": self.abort_reason,
             "reconciliation_state": self.state.reconciliation_state,
@@ -640,8 +645,8 @@ def build_luna_experimental_manifest(
         "reasoning_effort": "medium",
         "experimental": True,
         "non_official": True,
-        "hard_budget_usd": float(hard_budget_usd),
-        "attempt_budget_usd": float(attempt_budget_usd),
+        "hard_budget_usd": _money(_decimal(hard_budget_usd, field_name="hard_budget_usd")),
+        "attempt_budget_usd": _money(_decimal(attempt_budget_usd, field_name="attempt_budget_usd")),
         "service_tier_requested": pricing.service_tier,
         "pricing_mode": pricing.pricing_mode,
         "pricing_snapshot_date": pricing.date,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 import tempfile
 
@@ -536,9 +537,9 @@ def test_usage_aggregation_preserves_luna_cumulative_cost_snapshots(tmp_path: Pa
     collection = BenchmarkCollector().collect(storage=storage, run_id=run_id)
 
     assert collection.usage is not None
-    assert collection.usage["derived_cost_usd"] == 0.003
-    assert collection.usage["accumulated_cost_usd"] == 0.003
-    assert collection.usage["remaining_budget_usd"] == 0.997
+    assert collection.usage["derived_cost_usd"] == "0.003"
+    assert collection.usage["accumulated_cost_usd"] == "0.003"
+    assert collection.usage["remaining_budget_usd"] == "0.997"
     assert collection.usage["physical_request_count"] == 2
     assert collection.usage["provider_retry_count"] == 1
     assert collection.usage["reasoning_tokens"] == 10
@@ -595,10 +596,10 @@ def test_historical_luna_usage_cost_and_remaining_are_not_double_counted(tmp_pat
     assert collection.usage["output_tokens"] == 1243
     assert collection.usage["total_tokens"] == 38715
     assert collection.usage["reasoning_tokens"] == 364
-    assert collection.usage["derived_cost_usd"] == 0.008986
-    assert collection.usage["accumulated_cost_usd"] == 0.008986
-    assert collection.usage["remaining_budget_usd"] == 0.991014
-    assert collection.usage["remaining_budget_usd"] <= 1.0
+    assert collection.usage["derived_cost_usd"] == "0.0089860"
+    assert collection.usage["accumulated_cost_usd"] == "0.008986"
+    assert collection.usage["remaining_budget_usd"] == "0.991014"
+    assert Decimal(collection.usage["remaining_budget_usd"]) <= Decimal("1.0")
 
 
 def test_collects_legacy_model_called_without_logical_count_is_tolerated(tmp_path: Path) -> None:

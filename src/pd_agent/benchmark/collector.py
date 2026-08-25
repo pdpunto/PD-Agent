@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -98,6 +99,29 @@ def _aggregate_usage(usages: Sequence[Mapping[str, Any]]) -> dict[str, Any] | No
         "logical_provider_turn_count",
         "provider_retry_count",
     }
+    monetary_keys = {
+        "derived_cost_usd",
+        "accumulated_cost_usd",
+        "remaining_budget_usd",
+        "actual_billed_cost_usd",
+        "conservative_budget_consumed_usd",
+        "hard_budget_usd",
+        "attempt_budget_usd",
+        "attempt_accumulated_usd",
+        "attempt_remaining_usd",
+        "global_reserved_usd",
+        "attempt_reserved_usd",
+        "global_uncertain_consumed_usd",
+        "attempt_uncertain_consumed_usd",
+        "last_reserve_usd",
+    }
+
+    def money_text(value: Any) -> str | None:
+        try:
+            return format(Decimal(str(value)), "f")
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
     aggregate: dict[str, Any] = {}
     seen_usage = False
     for usage in usages:
@@ -113,7 +137,22 @@ def _aggregate_usage(usages: Sequence[Mapping[str, Any]]) -> dict[str, Any] | No
                     aggregate[key] = value
                 continue
             if key in cumulative_keys:
+                if key in monetary_keys:
+                    normalized = money_text(value)
+                    if normalized is not None:
+                        aggregate[key] = normalized
+                    continue
                 aggregate[key] = value
+                continue
+            if key in monetary_keys:
+                normalized = money_text(value)
+                if normalized is None:
+                    continue
+                previous = aggregate.get(key)
+                if previous is None:
+                    aggregate[key] = normalized
+                else:
+                    aggregate[key] = format(Decimal(previous) + Decimal(normalized), "f")
                 continue
             if isinstance(value, (int, float)):
                 if isinstance(existing, (int, float)) and not isinstance(existing, bool):

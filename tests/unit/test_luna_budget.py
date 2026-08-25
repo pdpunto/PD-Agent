@@ -73,8 +73,8 @@ def test_configured_budget_is_used_for_guard_and_accounting() -> None:
     record = guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
 
     assert guard.hard_budget_usd == Decimal("0.25")
-    assert record["remaining_budget_usd"] == pytest.approx(0.2492)
-    assert guard.metadata()["hard_budget_usd"] == 0.25
+    assert Decimal(record["remaining_budget_usd"]) == Decimal("0.2492")
+    assert guard.metadata()["hard_budget_usd"] == "0.25"
     manifest = build_luna_experimental_manifest(
         execution_id="execution",
         run_id="run",
@@ -83,7 +83,7 @@ def test_configured_budget_is_used_for_guard_and_accounting() -> None:
         task_version="5",
         hard_budget_usd=Decimal("0.25"),
     )
-    assert manifest["hard_budget_usd"] == 0.25
+    assert manifest["hard_budget_usd"] == "0.25"
 
 
 @pytest.mark.parametrize("value", [Decimal("0"), Decimal("-0.25"), Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
@@ -223,7 +223,7 @@ def test_retry_uses_same_configured_budget() -> None:
     guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
     decision = guard.before_request({"input": []}, retry_count=1)
 
-    assert decision["remaining_budget_usd"] < 0.25
+    assert Decimal(decision["remaining_budget_usd"]) < Decimal("0.25")
     assert guard.hard_budget_usd == Decimal("0.25")
 
 
@@ -287,6 +287,30 @@ def test_metadata_is_experimental_and_contains_no_secret_or_encrypted_reasoning(
     assert "encrypted_content" not in serialized
 
 
+def test_economic_evidence_uses_exact_decimal_text_and_round_trips(tmp_path: Path) -> None:
+    state = LunaEconomicState(
+        execution_id="exact-money",
+        global_ceiling_usd=Decimal("0.10"),
+        attempt_ceiling_usd=Decimal("0.10"),
+        global_accumulated_usd=Decimal("0.0000000001"),
+        attempt_accumulated_usd=Decimal("0.0000000001"),
+    )
+    store = LunaEconomicStateStore(state, path=tmp_path / "economic-state.json")
+    guard = _guard(hard_budget_usd=Decimal("0.10"), state=state, state_store=store)
+
+    metadata = guard.metadata()
+    monetary = {key: value for key, value in metadata.items() if key.endswith("_usd") and value is not None}
+    assert monetary
+    assert all(isinstance(value, str) for value in monetary.values())
+    assert metadata["hard_budget_usd"] == "0.10"
+    assert metadata["accumulated_cost_usd"] == "0.0000000001"
+    assert json.loads(json.dumps(metadata))["accumulated_cost_usd"] == "0.0000000001"
+
+    store.persist()
+    restored = LunaEconomicStateStore.load(tmp_path / "economic-state.json")
+    assert isinstance(restored.state.global_ceiling_usd, Decimal)
+
+
 def test_experimental_manifest_is_not_official_schedule_evidence() -> None:
     manifest = build_luna_experimental_manifest(
         execution_id="execution-experimental",
@@ -330,7 +354,7 @@ def test_provider_intercepts_physical_request_and_persists_budget_metadata() -> 
     assert client.responses.calls == 1
     assert result.provider_metadata["experimental"] is True
     assert result.provider_metadata["physical_request_count"] == 1
-    assert result.usage["derived_cost_usd"] > 0
+    assert Decimal(result.usage["derived_cost_usd"]) > 0
 
 
 def test_provider_budget_block_happens_before_responses_create() -> None:
@@ -400,9 +424,9 @@ def test_uncertain_consumption_is_not_reported_as_actual_billed_cost() -> None:
         guard.on_failure_without_usage(retry_count=0, failure={"message": "transport"})
 
     metadata = guard.metadata()
-    assert metadata["actual_billed_cost_usd"] == 0.0
-    assert metadata["conservative_budget_consumed_usd"] > 0
-    assert metadata["remaining_budget_usd"] < 1.0
+    assert metadata["actual_billed_cost_usd"] == "0"
+    assert Decimal(metadata["conservative_budget_consumed_usd"]) > 0
+    assert Decimal(metadata["remaining_budget_usd"]) < Decimal("1.0")
 
 
 def test_uncertain_consumed_allows_only_within_remaining_attempt_budget() -> None:
@@ -456,8 +480,8 @@ def test_uncertain_and_accounted_consumption_coexist_without_double_count() -> N
     )
     guard = _guard(state=state)
     assert guard.accumulated_cost_usd == Decimal("0.02")
-    assert guard.metadata()["actual_billed_cost_usd"] == 0.02
-    assert guard.metadata()["conservative_budget_consumed_usd"] == 0.05
+    assert guard.metadata()["actual_billed_cost_usd"] == "0.02"
+    assert guard.metadata()["conservative_budget_consumed_usd"] == "0.05"
     assert state.global_remaining_usd == Decimal("0.95")
     assert state.attempt_remaining_usd == Decimal("0.05")
 
