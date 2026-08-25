@@ -405,6 +405,85 @@ def test_uncertain_consumption_is_not_reported_as_actual_billed_cost() -> None:
     assert metadata["remaining_budget_usd"] < 1.0
 
 
+def test_uncertain_consumed_allows_only_within_remaining_attempt_budget() -> None:
+    payload = {"input": [], "max_output_tokens": 1}
+    reference = _guard()
+    reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload), payload)
+    allowed_state = LunaEconomicState(
+        execution_id="attempt-allow",
+        global_ceiling_usd=Decimal("1.00"),
+        attempt_ceiling_usd=Decimal("0.10"),
+        attempt_uncertain_consumed_usd=Decimal("0.05"),
+        active_attempt_id="active-allow",
+    )
+    allowed = _guard(state=allowed_state)
+    assert allowed.before_request(payload, retry_count=0)["decision"] == "ALLOW"
+
+    blocked_state = LunaEconomicState(
+        execution_id="attempt-block",
+        global_ceiling_usd=Decimal("1.00"),
+        attempt_ceiling_usd=Decimal("0.10"),
+        attempt_uncertain_consumed_usd=Decimal("0.10") - reserve / Decimal("2"),
+        active_attempt_id="active-block",
+    )
+    blocked = _guard(state=blocked_state)
+    with pytest.raises(ProviderError) as error:
+        blocked.before_request(payload, retry_count=0)
+    assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
+
+
+def test_uncertain_consumed_allows_only_within_remaining_global_budget() -> None:
+    payload = {"input": [], "max_output_tokens": 1}
+    state = LunaEconomicState(
+        execution_id="global-block",
+        global_ceiling_usd=Decimal("0.10"),
+        attempt_ceiling_usd=Decimal("1.00"),
+        global_uncertain_consumed_usd=Decimal("0.099999"),
+    )
+    guard = _guard(hard_budget_usd=Decimal("0.10"), state=state)
+    with pytest.raises(ProviderError) as error:
+        guard.before_request(payload, retry_count=0)
+    assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
+
+
+def test_uncertain_and_accounted_consumption_coexist_without_double_count() -> None:
+    state = LunaEconomicState(
+        execution_id="coexist",
+        global_accumulated_usd=Decimal("0.02"),
+        global_uncertain_consumed_usd=Decimal("0.03"),
+        attempt_accumulated_usd=Decimal("0.02"),
+        attempt_uncertain_consumed_usd=Decimal("0.03"),
+    )
+    guard = _guard(state=state)
+    assert guard.accumulated_cost_usd == Decimal("0.02")
+    assert guard.metadata()["actual_billed_cost_usd"] == 0.02
+    assert guard.metadata()["conservative_budget_consumed_usd"] == 0.05
+    assert state.global_remaining_usd == Decimal("0.95")
+    assert state.attempt_remaining_usd == Decimal("0.05")
+
+
+def test_new_attempt_preserves_global_uncertain_consumption() -> None:
+    state = LunaEconomicState(
+        execution_id="new-attempt",
+        global_uncertain_consumed_usd=Decimal("0.05"),
+        attempt_uncertain_consumed_usd=Decimal("0.05"),
+        active_attempt_id="old",
+    )
+    state.end_attempt()
+    state.begin_attempt("new")
+    assert state.global_uncertain_consumed_usd == Decimal("0.05")
+    assert state.attempt_uncertain_consumed_usd == Decimal("0")
+    assert state.global_remaining_usd == Decimal("0.95")
+
+
+def test_incomplete_economic_state_is_rejected_fail_closed() -> None:
+    state = LunaEconomicState(execution_id="strict")
+    payload = state.to_dict()
+    payload.pop("global_uncertain_consumed_usd")
+    with pytest.raises(ValueError, match="incomplete economic schema"):
+        LunaEconomicState.from_dict(payload)
+
+
 def test_proven_pre_dispatch_reservation_can_be_released() -> None:
     guard = _guard()
     decision = guard.before_request({"input": []}, retry_count=0)

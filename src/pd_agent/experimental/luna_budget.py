@@ -133,6 +133,7 @@ class LunaEconomicState:
             raise ValueError("cannot replace an active economic attempt")
         self.active_attempt_id = attempt_id
         self.attempt_accumulated_usd = Decimal("0")
+        self.attempt_uncertain_consumed_usd = Decimal("0")
         self.attempt_reserved_usd = Decimal("0")
         self.pending_request_id = None
         self.reconciliation_state = "CLEAR"
@@ -307,8 +308,8 @@ class LunaBudgetGuard:
         if input_tokens > self.pricing.max_context_tokens:
             raise self._abort("CONTEXT_BOUND_UNDETERMINED")
         reserve = self._worst_case_cost(input_tokens, payload)
-        attempt_remaining = self.state.attempt_ceiling_usd - self.state.attempt_accumulated_usd - self.state.attempt_reserved_usd
-        global_remaining = self.state.global_ceiling_usd - self.state.global_accumulated_usd - self.state.global_reserved_usd
+        attempt_remaining = self.state.attempt_remaining_usd
+        global_remaining = self.state.global_remaining_usd
         self.last_reserve = reserve
         allowed = reserve <= attempt_remaining and reserve <= global_remaining
         self.last_decision = "ALLOW" if allowed else "BLOCK"
