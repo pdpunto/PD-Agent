@@ -32,6 +32,7 @@ from pd_agent.core import ToolResult, ToolResultStatus
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.experimental import DispatchRecord
 from pd_agent.reporting.redaction import Redactor, json_ready
+from pd_agent.providers.recovery import ProviderRecoveryAdapter, ProviderRecoveryCapabilities
 
 _ALLOWED_REQUEST_CONFIG_KEYS = {
     "background",
@@ -58,7 +59,7 @@ _ALLOWED_REQUEST_CONFIG_KEYS = {
 _VALID_MESSAGE_ROLES = {"system", "developer", "user", "assistant"}
 
 
-class OpenAIProvider(ModelProvider):
+class OpenAIProvider(ProviderRecoveryAdapter, ModelProvider):
     """Translate PD Agent requests into OpenAI Responses API calls."""
 
     def __init__(
@@ -96,6 +97,14 @@ class OpenAIProvider(ModelProvider):
             f"provider_retry_limit={self.provider_retry_limit!r}, "
             f"client={type(self._client).__name__}"
             ")"
+        )
+
+    def recovery_capabilities(self) -> ProviderRecoveryCapabilities:
+        return ProviderRecoveryCapabilities(
+            provider="openai",
+            client_correlation=True,
+            response_id_capture=True,
+            hidden_retry_control=True,
         )
 
     def execute(self, request: AgentRequest) -> AgentResponse:

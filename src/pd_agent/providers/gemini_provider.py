@@ -11,12 +11,13 @@ from typing import Any, Mapping
 from pd_agent.core import AgentMessage, AgentRequest, AgentResponse, ModelProvider, ProviderContinuation, ToolCall, ToolResult
 from pd_agent.core.errors import ConfigurationError, ProviderError
 from pd_agent.reporting.redaction import Redactor, json_ready
+from pd_agent.providers.recovery import ProviderRecoveryAdapter, ProviderRecoveryCapabilities
 
 
 _LOCAL_CALL_PREFIX = "gemini-local:"
 
 
-class GeminiProvider(ModelProvider):
+class GeminiProvider(ProviderRecoveryAdapter, ModelProvider):
     """Translate PD Agent requests into Gemini SDK calls."""
 
     def __init__(
@@ -49,6 +50,9 @@ class GeminiProvider(ModelProvider):
             f"client={type(self._client).__name__}"
             ")"
         )
+
+    def recovery_capabilities(self) -> ProviderRecoveryCapabilities:
+        return ProviderRecoveryCapabilities.none("gemini")
 
     def execute(self, request: AgentRequest) -> AgentResponse:
         model = self._effective_model(request)
