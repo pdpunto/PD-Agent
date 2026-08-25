@@ -183,6 +183,22 @@ reasoning, and unredacted sensitive headers.
 
 ## 11. RFC acceptance
 
-Implementation may begin only after offline tests cover the IMP matrix, exact
-SDK behavior is verified, and a new recovery schema/freeze is approved. The
-historical execution must not be changed.
+Implementation R1-R10 may begin only after the DESIGN, RFC, and IMP are
+approved, the contract has been audited against the real repository, and
+ChatGPT/01 Architecture has granted explicit implementation authorization.
+The offline IMP matrix is an implementation validation gate, not a prerequisite
+for starting R1-R7; its R8/R9 tests depend on those components existing.
+
+Implementation cannot be declared complete or used to enable a new candidate
+until all of the following are true:
+
+- the offline IMP matrix is PASS;
+- relevant SDK/provider behavior is verified without assuming undeclared
+  capabilities;
+- persistence and recovery schema behavior is validated;
+- the full regression suite and recovery regressions are PASS; and
+- a separate authorization exists for any live run or candidate.
+
+The historical execution
+`84df7f4b-c82d-4f95-b951-d5eafab79530` remains non-recoverable retroactively
+and must not be modified.
