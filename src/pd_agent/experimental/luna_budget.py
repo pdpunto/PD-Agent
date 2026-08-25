@@ -97,6 +97,8 @@ class DispatchRecord:
             character not in "0123456789abcdef" for character in self.request_fingerprint.lower()
         ):
             raise ValueError("request_fingerprint must be a SHA-256 hex digest")
+        if not self.client_correlation_id.isascii() or len(self.client_correlation_id) > 512:
+            raise ValueError("client_correlation_id must be ASCII and at most 512 characters")
         if self.dispatch_state not in {REQUEST_PREPARED, RESERVATION_COMMITTED, DISPATCH_STARTED, RESPONSE_OBSERVED}:
             raise ValueError("unsupported dispatch state")
         if self.functional_state not in _FUNCTIONAL_STATES:
@@ -620,6 +622,17 @@ class LunaBudgetGuard:
         dispatch_record.response_status = response_status
         dispatch_record.http_status = http_status
         dispatch_record.sanitized_error = dict(sanitized_error) if sanitized_error is not None else None
+        if dispatch_record.provider_request_id is not None:
+            dispatch_record.provider_request_id = str(dispatch_record.provider_request_id).strip() or None
+        if dispatch_record.provider_response_id is not None:
+            dispatch_record.provider_response_id = str(dispatch_record.provider_response_id).strip() or None
+            if any(
+                other_id == dispatch_record.provider_response_id
+                for physical_id, record in self.state.dispatch_records.items()
+                if physical_id != dispatch_record.physical_request_id
+                for other_id in (record.get("provider_response_id"),)
+            ):
+                raise self._abort("PROVIDER_RESPONSE_ID_REUSED")
         dispatch_record.completed_at = _utc_now() if completed else dispatch_record.completed_at
         dispatch_record.dispatch_state = RESPONSE_OBSERVED if completed else DISPATCH_STARTED
         self._transition_functional(dispatch_record, RESPONSE_AVAILABLE if completed else RESPONSE_MISSING)

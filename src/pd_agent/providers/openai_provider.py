@@ -145,6 +145,11 @@ class OpenAIProvider(ProviderRecoveryAdapter, ModelProvider):
             try:
                 response = request_client.responses.create(
                     timeout=timeout_seconds,
+                    **(
+                        {"extra_headers": {"X-Client-Request-Id": dispatch_record.client_correlation_id}}
+                        if dispatch_record is not None
+                        else {}
+                    ),
                     **payload,
                 )
             except Exception as exc:  # pragma: no cover - normalized boundary

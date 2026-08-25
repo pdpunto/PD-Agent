@@ -49,9 +49,11 @@ class _Responses:
         self.outcome = outcome
         self.on_create = on_create
         self.calls = 0
+        self.kwargs: list[dict[str, object]] = []
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
         self.calls += 1
+        self.kwargs.append(kwargs)
         if self.on_create is not None:
             self.on_create()
         if isinstance(self.outcome, Exception):
@@ -144,6 +146,21 @@ def test_write_ahead_order_is_persisted_before_provider_call() -> None:
     assert snapshots.index(RESERVATION_COMMITTED) < snapshots.index(DISPATCH_STARTED)
     assert snapshots.index(DISPATCH_STARTED) < snapshots.index("PROVIDER_CALL")
     assert snapshots[-1] == RESPONSE_OBSERVED
+
+
+def test_openai_sends_durable_correlation_header_after_dispatch_started() -> None:
+    state = LunaEconomicState(execution_id="header")
+    guard = _guard(state=state)
+    response = SimpleNamespace(id="resp-header", _request_id="req-header", status="completed", usage=_usage(), output=[])
+    client = _Client(response)
+
+    OpenAIProvider(model="gpt-test", client=client, budget_guard=guard).execute(_request())
+
+    record = next(iter(state.dispatch_records.values()))
+    assert client.responses.kwargs[0]["extra_headers"] == {
+        "X-Client-Request-Id": record["client_correlation_id"],
+    }
+    assert record["dispatch_state"] == RESPONSE_OBSERVED
 
 
 def test_success_separates_accounting_from_functional_availability() -> None:
@@ -243,6 +260,23 @@ def test_success_captures_provider_metadata_and_persists_evidence(tmp_path) -> N
     assert record["provider_response_id"] == "resp-1"
     assert record["response_status"] == "completed"
     assert record["dispatch_state"] == RESPONSE_OBSERVED
+
+
+def test_provider_response_id_cannot_be_reused_by_another_dispatch() -> None:
+    state = LunaEconomicState(execution_id="response-id")
+    guard = _guard(state=state)
+    first = guard.prepare_dispatch({"input": "one"}, provider="openai", model="m", retry_count=0)
+    guard.before_request({"input": "one"}, retry_count=0, dispatch_record=first)
+    guard.mark_dispatch_started(first)
+    guard.record_dispatch_result(first, provider_response_id="resp-1", completed=True)
+
+    second = guard.prepare_dispatch({"input": "two"}, provider="openai", model="m", retry_count=0)
+    guard.before_request({"input": "two"}, retry_count=0, dispatch_record=second)
+    guard.mark_dispatch_started(second)
+    with pytest.raises(ProviderError) as error:
+        guard.record_dispatch_result(second, provider_response_id="resp-1", completed=True)
+
+    assert error.value.details["abort_reason"] == "PROVIDER_RESPONSE_ID_REUSED"
 
 
 def test_ambiguous_failure_keeps_started_evidence_and_redacts_secret() -> None:
