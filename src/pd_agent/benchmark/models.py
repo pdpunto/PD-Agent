@@ -182,6 +182,7 @@ class BenchmarkExecutionState:
     session_id: str | None = None
     session_index: int = 1
     resume_count: int = 0
+    economic_state: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "execution_id", _non_empty_text(self.execution_id, field_name="execution_id"))
@@ -196,6 +197,8 @@ class BenchmarkExecutionState:
             object.__setattr__(self, "next_pending_schedule_item", dict(self.next_pending_schedule_item))
         if self.session_id is not None:
             object.__setattr__(self, "session_id", _non_empty_text(self.session_id, field_name="session_id"))
+        if self.economic_state is not None:
+            object.__setattr__(self, "economic_state", dict(self.economic_state))
         object.__setattr__(self, "session_index", int(self.session_index))
         object.__setattr__(self, "resume_count", int(self.resume_count))
         if self.logical_budget_cap <= 0:
@@ -226,6 +229,7 @@ class BenchmarkExecutionState:
             "session_id": self.session_id,
             "session_index": self.session_index,
             "resume_count": self.resume_count,
+            "economic_state": _json_ready(dict(self.economic_state)) if self.economic_state is not None else None,
         }
 
     @classmethod
@@ -245,6 +249,7 @@ class BenchmarkExecutionState:
             session_id=data.get("session_id"),
             session_index=int(data.get("session_index", 1)),
             resume_count=int(data.get("resume_count", 0)),
+            economic_state=dict(data["economic_state"]) if data.get("economic_state") is not None else None,
         )
 
 

@@ -11,6 +11,8 @@ from pd_agent.core.errors import ProviderError
 from pd_agent.core import AgentMessage, AgentRequest
 from pd_agent.experimental import (
     LunaBudgetGuard,
+    LunaEconomicState,
+    LunaEconomicStateStore,
     LunaPricingSnapshot,
     build_luna_experimental_manifest,
 )
@@ -49,8 +51,13 @@ def _usage(input_tokens: int = 100, output_tokens: int = 50, cached_tokens: int 
     }
 
 
+def _guard(**kwargs) -> LunaBudgetGuard:
+    kwargs.setdefault("pricing", LunaPricingSnapshot(max_output_tokens=4_096))
+    return LunaBudgetGuard(**kwargs)
+
+
 def test_request_is_allowed_and_usage_is_accounted() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     decision = guard.before_request({"input": [{"role": "user", "content": "hello"}]}, retry_count=0)
     record = guard.account_response(_usage())
 
@@ -61,7 +68,7 @@ def test_request_is_allowed_and_usage_is_accounted() -> None:
 
 
 def test_configured_budget_is_used_for_guard_and_accounting() -> None:
-    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    guard = _guard(hard_budget_usd=Decimal("0.25"))
     guard.before_request({"input": []}, retry_count=0)
     record = guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
 
@@ -96,7 +103,7 @@ def test_next_request_is_blocked_before_send() -> None:
 
 
 def test_cached_input_pricing_is_lower_and_reasoning_is_not_double_charged() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.before_request({"input": []}, retry_count=0)
     record = guard.account_response(_usage(input_tokens=1_000, output_tokens=500, cached_tokens=800, reasoning_tokens=500))
 
@@ -105,7 +112,7 @@ def test_cached_input_pricing_is_lower_and_reasoning_is_not_double_charged() -> 
 
 
 def test_cache_write_is_accounted_at_official_multiplier() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.before_request({"input": []}, retry_count=0)
     usage = _usage(input_tokens=1_000, output_tokens=500)
     usage["input_tokens_details"]["cache_write_tokens"] = 200
@@ -121,8 +128,9 @@ def test_cache_write_is_accounted_at_official_multiplier() -> None:
 
 
 def test_long_context_pricing_applies_to_input_and_output() -> None:
-    guard = LunaBudgetGuard()
-    guard.before_request({"input": []}, retry_count=0)
+    guard = _guard()
+    guard.state.attempt_ceiling_usd = Decimal("0.25")
+    guard.before_request({"input": "x" * 300_000}, retry_count=0)
     record = guard.account_response(_usage(input_tokens=300_000, output_tokens=1_000))
 
     assert record["long_context"] is True
@@ -130,14 +138,14 @@ def test_long_context_pricing_applies_to_input_and_output() -> None:
 
 
 def test_reservation_uses_cache_write_worst_case() -> None:
-    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    guard = _guard(hard_budget_usd=Decimal("0.25"))
     payload = {"input": []}
     decision = guard.before_request(payload, retry_count=0)
 
     input_tokens = guard._conservative_input_tokens(payload)
     expected = (
         Decimal(input_tokens) / Decimal("1_000_000") * Decimal("0.20") * Decimal("1.25")
-        + Decimal("128000") / Decimal("1_000_000") * Decimal("1.20")
+        + Decimal("4096") / Decimal("1_000_000") * Decimal("1.20")
     )
     assert Decimal(str(decision["projected_worst_case_cost_usd"])) == expected
     assert decision["decision"] == "ALLOW"
@@ -145,16 +153,48 @@ def test_reservation_uses_cache_write_worst_case() -> None:
 
 def test_reservation_equal_remaining_allows_and_greater_blocks() -> None:
     payload = {"input": []}
-    reference = LunaBudgetGuard()
+    reference = _guard()
     reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload))
 
-    equal = LunaBudgetGuard(hard_budget_usd=reserve)
+    equal = _guard(hard_budget_usd=reserve)
     assert equal.before_request(payload, retry_count=0)["decision"] == "ALLOW"
 
-    greater = LunaBudgetGuard(hard_budget_usd=reserve - Decimal("0.0000001"))
+    greater = _guard(hard_budget_usd=reserve - Decimal("0.0000001"))
     with pytest.raises(ProviderError) as error:
         greater.before_request(payload, retry_count=0)
     assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
+
+
+def test_dual_ceiling_boundaries_are_checked_independently() -> None:
+    payload = {"input": []}
+    reference = _guard()
+    reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload), payload)
+
+    both_allow_state = LunaEconomicState(
+        execution_id="both-allow",
+        global_ceiling_usd=reserve,
+        attempt_ceiling_usd=reserve,
+    )
+    both_allow = _guard(hard_budget_usd=reserve, state=both_allow_state)
+    assert both_allow.before_request(payload, retry_count=0)["decision"] == "ALLOW"
+
+    attempt_block_state = LunaEconomicState(
+        execution_id="attempt-block",
+        global_ceiling_usd=reserve * 2,
+        attempt_ceiling_usd=reserve - Decimal("0.0000001"),
+    )
+    attempt_block = _guard(hard_budget_usd=reserve * 2, state=attempt_block_state)
+    with pytest.raises(ProviderError):
+        attempt_block.before_request(payload, retry_count=0)
+
+    global_block_state = LunaEconomicState(
+        execution_id="global-block",
+        global_ceiling_usd=reserve - Decimal("0.0000001"),
+        attempt_ceiling_usd=reserve * 2,
+    )
+    global_block = _guard(hard_budget_usd=reserve - Decimal("0.0000001"), state=global_block_state)
+    with pytest.raises(ProviderError):
+        global_block.before_request(payload, retry_count=0)
 
 
 def test_retry_is_checked_by_guard() -> None:
@@ -165,7 +205,7 @@ def test_retry_is_checked_by_guard() -> None:
 
 
 def test_retry_uses_same_configured_budget() -> None:
-    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.25"))
+    guard = _guard(hard_budget_usd=Decimal("0.25"))
     guard.before_request({"input": []}, retry_count=0)
     guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
     decision = guard.before_request({"input": []}, retry_count=1)
@@ -175,7 +215,7 @@ def test_retry_uses_same_configured_budget() -> None:
 
 
 def test_missing_usage_fails_closed() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.before_request({"input": []}, retry_count=0)
     with pytest.raises(ProviderError) as error:
         guard.account_response(None)
@@ -191,7 +231,7 @@ def test_missing_usage_fails_closed() -> None:
     ],
 )
 def test_incoherent_usage_fails_closed(usage: dict, reason: str) -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.before_request({"input": []}, retry_count=0)
     with pytest.raises(ProviderError) as error:
         guard.account_response(usage)
@@ -199,14 +239,14 @@ def test_incoherent_usage_fails_closed(usage: dict, reason: str) -> None:
 
 
 def test_physical_counter_incoherence_fails_closed() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     with pytest.raises(ProviderError) as error:
         guard.before_request({"input": []}, retry_count=1)
     assert error.value.details["abort_reason"] == "PHYSICAL_COUNTER_INCOHERENT"
 
 
 def test_failed_request_without_usage_blocks_retries() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.before_request({"input": []}, retry_count=0)
     with pytest.raises(ProviderError) as error:
         guard.on_failure_without_usage(retry_count=0)
@@ -215,7 +255,7 @@ def test_failed_request_without_usage_blocks_retries() -> None:
 
 
 def test_context_bound_fails_closed_when_conservative_bytes_exceed_model_limit() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     oversized = {"input": [{"role": "user", "content": "x" * 1_100_000}]}
     with pytest.raises(ProviderError) as error:
         guard.before_request(oversized, retry_count=0)
@@ -223,7 +263,7 @@ def test_context_bound_fails_closed_when_conservative_bytes_exceed_model_limit()
 
 
 def test_metadata_is_experimental_and_contains_no_secret_or_encrypted_reasoning() -> None:
-    guard = LunaBudgetGuard()
+    guard = _guard()
     guard.begin_logical_turn()
     metadata = guard.metadata()
     serialized = json.dumps(metadata)
@@ -271,7 +311,7 @@ def test_provider_intercepts_physical_request_and_persists_budget_metadata() -> 
         output=[],
     )
     client = _Client(response=response)
-    guard = LunaBudgetGuard()
+    guard = _guard()
     result = OpenAIProvider(model="gpt-5.6-luna", client=client, budget_guard=guard).execute(_request())
 
     assert client.responses.calls == 1
@@ -293,10 +333,46 @@ def test_provider_budget_block_happens_before_responses_create() -> None:
 
 def test_provider_failure_without_usage_does_not_retry_with_budget_guard() -> None:
     client = _Client(error=RuntimeError("transport failure"))
-    guard = LunaBudgetGuard()
+    guard = _guard()
 
     with pytest.raises(ProviderError) as error:
         OpenAIProvider(model="gpt-5.6-luna", client=client, budget_guard=guard).execute(_request())
 
     assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
     assert client.responses.calls == 1
+
+
+def test_economic_state_round_trip_persists_ledger(tmp_path: Path) -> None:
+    state = LunaEconomicState(execution_id="execution-1")
+    store = LunaEconomicStateStore(state, path=tmp_path / "economic-state.json")
+    guard = _guard(state=state, state_store=store)
+
+    guard.begin_attempt("scheduled-1")
+    guard.before_request({"input": []}, retry_count=0)
+    guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
+
+    restored = LunaEconomicStateStore.load(tmp_path / "economic-state.json").state
+    assert restored.execution_id == "execution-1"
+    assert restored.physical_request_count == 1
+    assert restored.ledger
+    assert all(entry["status"] == "ACCOUNTED" for entry in restored.ledger.values())
+
+
+def test_uncertain_billable_request_is_persisted_and_not_resendable(tmp_path: Path) -> None:
+    state = LunaEconomicState(execution_id="execution-2")
+    store = LunaEconomicStateStore(state, path=tmp_path / "economic-state.json")
+    guard = _guard(state=state, state_store=store)
+    guard.before_request({"input": []}, retry_count=0)
+
+    with pytest.raises(ProviderError) as error:
+        guard.on_failure_without_usage(retry_count=0)
+
+    assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
+    restored = LunaEconomicStateStore.load(tmp_path / "economic-state.json").state
+    assert restored.reconciliation_state == "UNCERTAIN_BILLABLE_USAGE"
+    assert restored.pause_reason == "UNKNOWN_BILLABLE_USAGE"
+    assert all(entry["status"] == "UNCERTAIN" for entry in restored.ledger.values())
+
+    with pytest.raises(ProviderError) as blocked:
+        guard.before_request({"input": []}, retry_count=1)
+    assert blocked.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"

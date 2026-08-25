@@ -554,6 +554,8 @@ class OpenAIProvider(ModelProvider):
         output_details = self._coerce_mapping(usage.get("output_tokens_details")) or {}
         if "cached_input_tokens" not in usage and isinstance(input_details.get("cached_tokens"), int):
             usage["cached_input_tokens"] = input_details["cached_tokens"]
+        if "cache_write_tokens" not in usage and isinstance(input_details.get("cache_write_tokens"), int):
+            usage["cache_write_tokens"] = input_details["cache_write_tokens"]
         if "reasoning_tokens" not in usage and isinstance(output_details.get("reasoning_tokens"), int):
             usage["reasoning_tokens"] = output_details["reasoning_tokens"]
         return usage

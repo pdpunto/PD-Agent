@@ -19,6 +19,7 @@ from pd_agent.benchmark import (
 )
 from pd_agent.minecraft import MinecraftTestRunner
 from pd_agent.providers import GeminiProvider, OpenAIProvider
+from pd_agent.experimental import LunaBudgetGuard
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 
 
@@ -105,6 +106,7 @@ def _build_provider(config: BenchmarkConfig) -> Any:
             api_key=api_key,
             timeout_seconds=timeout_seconds,
             provider_retry_limit=retry_limit,
+            budget_guard=LunaBudgetGuard(experimental=False, non_official=False),
         )
     raise ValueError(f"unsupported provider: {provider_name}")
 

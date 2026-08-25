@@ -24,6 +24,14 @@ from .models import (
 )
 from .scheduler import BenchmarkSchedule, BenchmarkScheduledAttempt, BenchmarkScheduler
 from .catalog import BenchmarkCatalog
+from pd_agent.experimental import (
+    LUNA_ECONOMIC_SCHEMA_VERSION,
+    LUNA_EXPERIMENTAL_HARD_BUDGET_USD,
+    LUNA_PER_ATTEMPT_HARD_BUDGET_USD,
+    LunaBudgetGuard,
+    LunaEconomicState,
+    LunaEconomicStateStore,
+)
 
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> Path:
@@ -121,6 +129,9 @@ class BenchmarkExecutionManifest:
     scheduling_seed: int | None
     pd_agent_commit: str | None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    economic_schema_version: int | None = None
+    global_economic_ceiling_usd: str | None = None
+    attempt_economic_ceiling_usd: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -135,6 +146,9 @@ class BenchmarkExecutionManifest:
             "scheduling_seed": self.scheduling_seed,
             "pd_agent_commit": self.pd_agent_commit,
             "created_at": self.created_at.isoformat(),
+            "economic_schema_version": self.economic_schema_version,
+            "global_economic_ceiling_usd": self.global_economic_ceiling_usd,
+            "attempt_economic_ceiling_usd": self.attempt_economic_ceiling_usd,
         }
 
     @classmethod
@@ -152,6 +166,9 @@ class BenchmarkExecutionManifest:
             scheduling_seed=data.get("scheduling_seed"),
             pd_agent_commit=data.get("pd_agent_commit"),
             created_at=datetime.fromisoformat(str(data.get("created_at", datetime.now(timezone.utc).isoformat()))),
+            economic_schema_version=(int(data["economic_schema_version"]) if data.get("economic_schema_version") is not None else None),
+            global_economic_ceiling_usd=data.get("global_economic_ceiling_usd"),
+            attempt_economic_ceiling_usd=data.get("attempt_economic_ceiling_usd"),
         )
 
 
@@ -190,6 +207,64 @@ class BenchmarkExecutionRunner:
         if self.logical_session_cap <= 0:
             raise ValueError("logical_session_cap must be positive")
 
+    def _budget_guard(self) -> LunaBudgetGuard | None:
+        provider = getattr(self.executor, "provider", None)
+        if provider is None:
+            return None
+        while hasattr(provider, "provider"):
+            provider = provider.provider
+        guard = getattr(provider, "budget_guard", None)
+        return guard if isinstance(guard, LunaBudgetGuard) else None
+
+    def _configure_new_economic_state(self, *, execution_id: str, execution_dir: Path) -> LunaBudgetGuard | None:
+        guard = self._budget_guard()
+        if guard is None:
+            return None
+        guard.state.execution_id = execution_id
+        guard.state_store = LunaEconomicStateStore(guard.state, path=execution_dir / "economic-state.json")
+        guard.state_store.persist()
+        return guard
+
+    def _restore_economic_state(self, *, execution_dir: Path, execution_id: str) -> LunaBudgetGuard | None:
+        guard = self._budget_guard()
+        if guard is None:
+            return None
+        economic_path = execution_dir / "economic-state.json"
+        if not economic_path.exists():
+            raise BenchmarkExecutionResumeError("missing dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA")
+        try:
+            store = LunaEconomicStateStore.load(economic_path)
+        except (OSError, ValueError, TypeError) as exc:
+            raise BenchmarkExecutionResumeError("incompatible dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA") from exc
+        if store.state.execution_id != execution_id:
+            raise BenchmarkExecutionResumeError("economic execution identity drift detected", code="RESUME_DRIFT")
+        guard.state = store.state
+        guard.state_store = store
+        return guard
+
+    def _economic_state_payload(self) -> Mapping[str, Any] | None:
+        guard = self._budget_guard()
+        return guard.state.to_dict() if guard is not None else None
+
+    def _write_execution_state(self, path: Path, state: BenchmarkExecutionState) -> Path:
+        payload = state.to_dict()
+        economic = self._economic_state_payload()
+        if economic is not None:
+            payload["economic_state"] = dict(economic)
+        return _write_json(path, payload)
+
+    def _economic_pause_reason(self, result: BenchmarkExecutionResult) -> str | None:
+        collection_metadata = getattr(result.collection, "provider_metadata", None) or {}
+        provider_error = collection_metadata.get("provider_error") if isinstance(collection_metadata, Mapping) else None
+        details = provider_error.get("details", {}) if isinstance(provider_error, Mapping) else {}
+        reason = details.get("abort_reason") if isinstance(details, Mapping) else None
+        if reason in {"BUDGET_BLOCKED", "ECONOMIC_STATE_PERSISTENCE_FAILED", "ECONOMIC_STATE_UNCERTAIN", "UNKNOWN_BILLABLE_USAGE"}:
+            return "ECONOMIC_BUDGET_BLOCKED" if reason == "BUDGET_BLOCKED" else f"ECONOMIC_{reason}"
+        guard = self._budget_guard()
+        if guard is not None and guard.state.reconciliation_state != "CLEAR":
+            return "ECONOMIC_STATE_UNCERTAIN"
+        return None
+
     def run(
         self,
         catalog: BenchmarkCatalog,
@@ -207,6 +282,7 @@ class BenchmarkExecutionRunner:
         execution_id = generate_run_id()
         execution_dir = execution_root / execution_id
         execution_dir.mkdir(parents=True, exist_ok=False)
+        economic_guard = self._configure_new_economic_state(execution_id=execution_id, execution_dir=execution_dir)
 
         dataset = catalog.dataset_for(dataset_id, dataset_version)
         tasks = tuple(catalog.task_for(ref.task_id, ref.task_version) for ref in dataset.tasks)
@@ -220,6 +296,9 @@ class BenchmarkExecutionRunner:
             max_attempts_per_cell=self.max_attempts_per_cell,
             scheduling_seed=self.scheduling_seed,
             pd_agent_commit=pd_agent_commit,
+            economic_schema_version=LUNA_ECONOMIC_SCHEMA_VERSION if economic_guard is not None else None,
+            global_economic_ceiling_usd=str(LUNA_EXPERIMENTAL_HARD_BUDGET_USD) if economic_guard is not None else None,
+            attempt_economic_ceiling_usd=str(LUNA_PER_ATTEMPT_HARD_BUDGET_USD) if economic_guard is not None else None,
         )
         manifest_path = _write_json(execution_dir / "manifest.json", manifest.to_dict())
 
@@ -241,7 +320,7 @@ class BenchmarkExecutionRunner:
             logical_budget_used=0,
             attempt_reservation=self._attempt_reservation_for(configs[0]),
         )
-        execution_state_path = _write_json(execution_dir / "execution_state.json", execution_state.to_dict())
+        execution_state_path = self._write_execution_state(execution_dir / "execution_state.json", execution_state)
 
         return self._drive_batch(
             catalog,
@@ -288,6 +367,13 @@ class BenchmarkExecutionRunner:
                 "resume execution directory does not match persisted execution identity",
                 code="RESUME_INVALID_STATE",
             )
+        manifest_has_openai = any(config.provider.casefold() == "openai" for config in manifest.configs)
+        if manifest_has_openai and manifest.economic_schema_version is None:
+            raise BenchmarkExecutionResumeError("dual-budget economic schema is required", code="RESUME_ECONOMIC_SCHEMA")
+        if manifest.economic_schema_version is not None:
+            if manifest.economic_schema_version != LUNA_ECONOMIC_SCHEMA_VERSION:
+                raise BenchmarkExecutionResumeError("unsupported economic schema version", code="RESUME_ECONOMIC_SCHEMA")
+            self._restore_economic_state(execution_dir=execution_dir, execution_id=manifest.execution_id)
 
         try:
             dataset = catalog.dataset_for(manifest.dataset_id, manifest.dataset_version)
@@ -362,7 +448,7 @@ class BenchmarkExecutionRunner:
                 session_index=current_session_index,
                 resume_count=current_resume_count,
             )
-            execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+            execution_state_path = self._write_execution_state(execution_state_path, current_state)
 
         if not self._has_pending_attempt(schedule, completed_keys):
             if current_state.batch_status != BenchmarkBatchStatus.COMPLETED:
@@ -380,7 +466,7 @@ class BenchmarkExecutionRunner:
                     session_index=current_state.session_index,
                     resume_count=current_state.resume_count,
                 )
-                execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+                execution_state_path = self._write_execution_state(execution_state_path, current_state)
             comparison = self._aggregate_comparison(
                 _completed_runs(schedule),
                 dataset=dataset,
@@ -437,7 +523,7 @@ class BenchmarkExecutionRunner:
                         session_index=current_state.session_index,
                         resume_count=current_state.resume_count,
                     )
-                    execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+                    execution_state_path = self._write_execution_state(execution_state_path, current_state)
                     comparison = self._aggregate_comparison(
                         _completed_runs(schedule),
                         dataset=dataset,
@@ -464,6 +550,9 @@ class BenchmarkExecutionRunner:
                     )
 
                 fixture_root = catalog.fixture_paths[(attempt.task_id, attempt.task_version)]
+                economic_guard = self._budget_guard()
+                if economic_guard is not None:
+                    economic_guard.begin_attempt(attempt.scheduled_attempt_id)
                 result = self.executor.execute(
                     task,
                     config,
@@ -478,6 +567,45 @@ class BenchmarkExecutionRunner:
                     self._logical_request_count_from_result(result),
                     0,
                 )
+                economic_pause_reason = self._economic_pause_reason(result)
+                if economic_pause_reason is not None:
+                    current_state = BenchmarkExecutionState(
+                        execution_id=manifest.execution_id,
+                        batch_status=BenchmarkBatchStatus.BUDGET_PAUSED,
+                        logical_budget_cap=self.logical_session_cap,
+                        logical_budget_used=logical_requests_used,
+                        logical_budget_remaining=max(self.logical_session_cap - logical_requests_used, 0),
+                        attempt_reservation=reservation,
+                        pause_reason=economic_pause_reason,
+                        paused_at=datetime.now(timezone.utc),
+                        next_pending_schedule_item=attempt.to_dict(),
+                        session_id=current_state.session_id,
+                        session_index=current_state.session_index,
+                        resume_count=current_state.resume_count,
+                    )
+                    schedule_path = _write_json(execution_dir / "schedule.json", schedule.to_dict())
+                    execution_state_path = self._write_execution_state(execution_state_path, current_state)
+                    comparison = self._aggregate_comparison(
+                        _completed_runs(schedule), dataset=dataset, configs=configs, tasks=tasks,
+                    )
+                    comparison_json_path = _write_json(execution_dir / "comparison.json", comparison.to_dict())
+                    comparison_md_path = execution_dir / "comparison.md"
+                    comparison_md_path.write_text(render_comparison_markdown(comparison), encoding="utf-8")
+                    return BenchmarkExecutionBatch(
+                        execution_id=manifest.execution_id,
+                        execution_root=execution_dir,
+                        batch_status=BenchmarkBatchStatus.BUDGET_PAUSED,
+                        manifest=manifest,
+                        schedule=schedule,
+                        execution_state=current_state,
+                        comparison=comparison,
+                        runs=_completed_runs(schedule),
+                        manifest_path=manifest_path,
+                        schedule_path=schedule_path,
+                        execution_state_path=execution_state_path,
+                        comparison_json_path=comparison_json_path,
+                        comparison_md_path=comparison_md_path,
+                    )
                 if self._is_rate_limit_result(result):
                     current_state = BenchmarkExecutionState(
                         execution_id=manifest.execution_id,
@@ -494,7 +622,7 @@ class BenchmarkExecutionRunner:
                         resume_count=current_state.resume_count,
                     )
                     schedule_path = _write_json(execution_dir / "schedule.json", schedule.to_dict())
-                    execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+                    execution_state_path = self._write_execution_state(execution_state_path, current_state)
                     comparison = self._aggregate_comparison(
                         _completed_runs(schedule),
                         dataset=dataset,
@@ -519,6 +647,8 @@ class BenchmarkExecutionRunner:
                         comparison_json_path=comparison_json_path,
                         comparison_md_path=comparison_md_path,
                     )
+                if economic_guard is not None:
+                    economic_guard.end_attempt()
                 schedule.record_completed_run(result.benchmark_run)
                 completed_keys.add(attempt_key)
                 if result.benchmark_run.execution_status in {BenchmarkExecutionStatus.BLOCKED, BenchmarkExecutionStatus.INVALID}:
@@ -550,7 +680,7 @@ class BenchmarkExecutionRunner:
                     session_index=current_state.session_index,
                     resume_count=current_state.resume_count,
                 )
-                execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+                execution_state_path = self._write_execution_state(execution_state_path, current_state)
                 index += 1
         except Exception:
             current_state = BenchmarkExecutionState(
@@ -573,7 +703,7 @@ class BenchmarkExecutionRunner:
                 resume_count=current_state.resume_count,
             )
             _write_json(schedule_path, schedule.to_dict())
-            _write_json(execution_state_path, current_state.to_dict())
+            self._write_execution_state(execution_state_path, current_state)
             raise
 
         current_state = BenchmarkExecutionState(
@@ -590,7 +720,7 @@ class BenchmarkExecutionRunner:
             session_index=current_state.session_index,
             resume_count=current_state.resume_count,
         )
-        execution_state_path = _write_json(execution_state_path, current_state.to_dict())
+        execution_state_path = self._write_execution_state(execution_state_path, current_state)
         comparison = self._aggregate_comparison(
             _completed_runs(schedule),
             dataset=dataset,
