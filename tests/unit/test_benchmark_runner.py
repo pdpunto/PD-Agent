@@ -145,6 +145,7 @@ class _FakeExecutor:
         later_task_outcome: BenchmarkTaskOutcome = BenchmarkTaskOutcome.PASS,
         first_failure_code: BenchmarkFailureCode = BenchmarkFailureCode.UNKNOWN,
         rate_limit_first_call: bool = False,
+        economic_budget_blocked: bool = False,
     ) -> None:
         self.task = task
         self.config = config
@@ -155,6 +156,7 @@ class _FakeExecutor:
         self.later_task_outcome = later_task_outcome
         self.first_failure_code = first_failure_code
         self.rate_limit_first_call = rate_limit_first_call
+        self.economic_budget_blocked = economic_budget_blocked
         self.calls: list[int] = []
 
     def execute(self, task, config, attempt, **kwargs):
@@ -181,12 +183,98 @@ class _FakeExecutor:
         )
         return SimpleNamespace(
             benchmark_run=run,
-            collection=SimpleNamespace(logical_provider_request_count=self.logical_request_count),
+            collection=SimpleNamespace(
+                logical_provider_request_count=self.logical_request_count,
+                provider_metadata=(
+                    {"provider_error": {"kind": "budget_blocked", "message": "Luna budget guard blocked: BUDGET_BLOCKED"}}
+                    if self.economic_budget_blocked
+                    else None
+                ),
+            ),
             classification=SimpleNamespace(
                 failure_code=self.first_failure_code if rate_limited else BenchmarkFailureCode.UNKNOWN,
                 reason="provider rate limit" if rate_limited else "",
             ),
         )
+
+
+def test_runner_pauses_economic_budget_block_before_recording_attempt(tmp_path: Path) -> None:
+    task = _task()
+    config = _config()
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    runner = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(task, config, economic_budget_blocked=True),
+        scheduler=BenchmarkScheduler(),
+        target_valid_repetitions=1,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    )
+
+    batch = runner.run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+    )
+
+    assert batch.batch_status == BenchmarkBatchStatus.BUDGET_PAUSED
+    assert batch.execution_state.pause_reason == "ECONOMIC_BUDGET_BLOCKED"
+    assert batch.execution_state.next_pending_schedule_item["attempt_index"] == 1
+    assert batch.schedule.cells[0].attempted == 1
+    assert batch.schedule.cells[0].completed_runs == []
+    assert batch.schedule.cells[0].valid == 0
+    assert len(batch.schedule.cells[0].planned_attempts) == 1
+    assert batch.runs == ()
+
+
+def test_runner_resume_reuses_pending_attempt_after_economic_pause(tmp_path: Path) -> None:
+    task = _task()
+    config = _config()
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(BenchmarkTaskReference(task_id=task.task_id, task_version=task.task_version),),
+    )
+    catalog = _Catalog(dataset=dataset, task=task, fixture_root=Path("tests/fixtures/l11_fabric_fixture").resolve())
+    execution_root = tmp_path / "executions"
+    paused = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(task, config, economic_budget_blocked=True),
+        scheduler=BenchmarkScheduler(),
+        target_valid_repetitions=1,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    ).run(
+        catalog,
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=execution_root,
+    )
+
+    resume_executor = _FakeExecutor(
+        task,
+        config,
+        first_execution_status=BenchmarkExecutionStatus.COMPLETED,
+        first_task_outcome=BenchmarkTaskOutcome.PASS,
+    )
+    resumed = BenchmarkExecutionRunner(
+        executor=resume_executor,
+        scheduler=BenchmarkScheduler(),
+        target_valid_repetitions=1,
+        max_attempts_per_cell=2,
+        scheduling_seed=1,
+    ).resume(catalog, execution_dir=paused.execution_root)
+
+    assert resume_executor.calls == [1]
+    assert resumed.batch_status == BenchmarkBatchStatus.COMPLETED
+    assert resumed.schedule.cells[0].attempted == 1
+    assert resumed.schedule.cells[0].completed_runs[0].attempt_index == 1
 
 
 def test_runner_appends_replacement_attempts(tmp_path: Path) -> None:

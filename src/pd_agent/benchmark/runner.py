@@ -256,6 +256,10 @@ class BenchmarkExecutionRunner:
     def _economic_pause_reason(self, result: BenchmarkExecutionResult) -> str | None:
         collection_metadata = getattr(result.collection, "provider_metadata", None) or {}
         provider_error = collection_metadata.get("provider_error") if isinstance(collection_metadata, Mapping) else None
+        if isinstance(provider_error, Mapping) and provider_error.get("kind") == "budget_blocked":
+            # Collection evidence intentionally keeps the stable error kind even
+            # when provider-specific details are redacted or unavailable.
+            return "ECONOMIC_BUDGET_BLOCKED"
         details = provider_error.get("details", {}) if isinstance(provider_error, Mapping) else {}
         reason = details.get("abort_reason") if isinstance(details, Mapping) else None
         if reason in {"BUDGET_BLOCKED", "ECONOMIC_STATE_PERSISTENCE_FAILED", "ECONOMIC_STATE_UNCERTAIN", "UNKNOWN_BILLABLE_USAGE"}:
