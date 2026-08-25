@@ -3,6 +3,25 @@
 Status: RFC DELTA. This contract is for a future offline-validated official
 candidate. No API or live matrix execution is authorized.
 
+## Frozen Model-Turn Output Limit
+
+The official candidate configuration sets
+`model_config.max_output_tokens = 16384`. The setting is provider-neutral and
+belongs in `BenchmarkConfig.model_config`; it is not an `ExecutionLimits`
+field. The request path must propagate it without hardcoding the value in a
+provider adapter.
+
+This initial value is backed by 1,492 historical turns: p99 594, maximum
+5,699, maximum PASS 1,759 and maximum Luna 612, with no observed legitimate
+turn above 8K or truncation. It is not a universal guarantee for future tasks.
+For OpenAI Responses API the setting covers visible output and reasoning
+tokens, so it must be evaluated together with reasoning effort.
+
+The frozen value participates in the semantic configuration hash. Any future
+change requires a new config identity and freeze. Before every request the
+dual-budget guard continues to fail closed if input plus the worst-case output
+reservation exceeds the per-attempt or global ceiling.
+
 ## Contract
 
 One candidate execution has a global hard ceiling of `Decimal("1.00")`.

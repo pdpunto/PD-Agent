@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "config_id": "openai-official-gpt-5.6-luna-brain-on",
+  "provider": "openai",
+  "model": "gpt-5.6-luna",
+  "brain_enabled": true,
+  "model_config": {
+    "max_output_tokens": 16384,
+    "reasoning": {
+      "effort": "medium"
+    },
+    "service_tier": "default",
+    "store": false
+  },
+  "provider_config": {
+    "provider_retry_limit": 2,
+    "timeout_seconds": 60
+  },
+  "execution_limits": {
+    "max_agent_steps": 25,
+    "max_tool_calls": 50,
+    "max_build_attempts": 5,
+    "max_context_bytes": 2000000,
+    "max_tool_output_bytes": 1000000,
+    "process_timeout_seconds": 600,
+    "provider_retry_limit": 2
+  },
+  "knowledge_config": {
+    "offline": false
+  },
+  "target_repetition_count": 3,
+  "notes": [
+    "Official OpenAI v0.5 candidate; Brain ON only.",
+    "max_output_tokens is an explicit frozen provider-neutral model-turn limit."
+  ]
+}

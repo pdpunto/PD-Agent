@@ -204,6 +204,19 @@ def test_retry_is_checked_by_guard() -> None:
     assert guard.physical_request_count == 0
 
 
+def test_official_output_limit_fits_attempt_budget_for_observed_context() -> None:
+    pricing = LunaPricingSnapshot(max_output_tokens=16_384)
+    guard = LunaBudgetGuard(
+        hard_budget_usd=Decimal("0.10"),
+        pricing=pricing,
+    )
+
+    decision = guard.before_request({"input": "x" * 70_000, "max_output_tokens": 16_384}, retry_count=0)
+
+    assert decision["decision"] == "ALLOW"
+    assert Decimal(str(decision["projected_worst_case_cost_usd"])) < Decimal("0.10")
+
+
 def test_retry_uses_same_configured_budget() -> None:
     guard = _guard(hard_budget_usd=Decimal("0.25"))
     guard.before_request({"input": []}, retry_count=0)

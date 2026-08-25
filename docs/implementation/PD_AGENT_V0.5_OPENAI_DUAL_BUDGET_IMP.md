@@ -2,6 +2,26 @@
 
 Status: IMPLEMENTATION PLAN. Do not implement or execute live in this batch.
 
+## Frozen Output-Limit Delta
+
+The official candidate uses the existing `BenchmarkConfig.model_config` path
+with `max_output_tokens: 16384`. No provider-specific field or provider
+hardcode is introduced. `OpenAIProvider._build_request_payload` propagates
+the configured value to the Responses request, while `LunaBudgetGuard` uses
+the same value for preventive reservation calculations.
+
+The value is an initial, evidence-based policy rather than a universal task
+limit. Historical telemetry covered 1,492 turns, with p99 594, maximum 5,699,
+maximum PASS 1,759 and maximum Luna 612; no legitimate turn exceeded 8K or
+was truncated. OpenAI Responses reasoning is included in the output budget,
+so reasoning-medium requests remain subject to the same cap.
+
+The configuration value is frozen into the semantic hash. A future change
+requires a new config identity and freeze. If the combined input and output
+reservation cannot fit either dual-budget ceiling, the guard blocks before
+the provider call and the runner persists the existing `BUDGET_PAUSED` /
+`ECONOMIC_BUDGET_BLOCKED` contract.
+
 ## Implementation Principles
 
 Extend the existing Luna pricing/accounting guard and official benchmark

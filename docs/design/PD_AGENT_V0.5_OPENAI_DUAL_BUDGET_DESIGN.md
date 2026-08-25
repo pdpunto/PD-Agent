@@ -2,6 +2,27 @@
 
 Status: DESIGN DELTA. No implementation or live execution is authorized by this document.
 
+## Model-Turn Output Limit
+
+The official OpenAI v0.5 candidate freezes `model_config.max_output_tokens` at
+`16384`. This value is a configurable, provider-neutral model-turn setting,
+not an OpenAI-specific core field and not an `ExecutionLimits` field.
+
+The limit is supported by the observed PD Agent telemetry: 1,492 turns with
+usage had p99 output of 594 tokens, a global maximum of 5,699, a maximum PASS
+turn of 1,759 and a maximum Luna turn of 612. No legitimate turn reached 8K
+or showed output truncation. The value is an initial evidence-based policy,
+not a universal claim about future tasks.
+
+For OpenAI Responses API, `max_output_tokens` covers the relevant output
+budget including reasoning tokens. It must therefore leave enough room for
+`reasoning=medium` while remaining compatible with the dual-budget guard.
+The guard remains fail-closed when input plus the requested output reserve
+does not fit either economic ceiling.
+
+Changing this value requires a new configuration identity, semantic hash and
+freeze; it must not mutate an existing execution or historical evidence.
+
 ## Purpose
 
 Define the smallest architecture that allows a future official OpenAI v0.5
