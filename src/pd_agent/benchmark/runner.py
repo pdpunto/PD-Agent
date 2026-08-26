@@ -31,6 +31,23 @@ from pd_agent.experimental import (
     LunaBudgetGuard,
     LunaEconomicState,
     LunaEconomicStateStore,
+    DispatchRecord,
+    DISPATCH_STARTED,
+    RESPONSE_MISSING,
+    UNCERTAIN_CONSUMED,
+)
+from pd_agent.core import AgentMessage, AgentRequest
+from pd_agent.providers import (
+    RecoveryCoordinator,
+    RECOVERY_BUDGET_BLOCKED,
+    RECOVERY_DISPATCH_UNCERTAIN,
+    RECOVERY_EXISTING_RESPONSE,
+    RECOVERY_IDENTITY_INVALID,
+    RECOVERY_LIMIT_EXHAUSTED,
+    RECOVERY_PRE_DISPATCH_FAILED,
+    RECOVERY_PROVIDER_FAILURE,
+    RECOVERY_RECONCILIATION_UNSUPPORTED,
+    RECOVERY_REISSUE_SUCCEEDED,
 )
 
 
@@ -202,6 +219,7 @@ class BenchmarkExecutionRunner:
     target_valid_repetitions: int = 3
     max_attempts_per_cell: int = 5
     scheduling_seed: int | None = None
+    recovery_coordinator: RecoveryCoordinator | None = None
 
     def __post_init__(self) -> None:
         if self.logical_session_cap <= 0:
@@ -238,9 +256,7 @@ class BenchmarkExecutionRunner:
             raise BenchmarkExecutionResumeError("incompatible dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA") from exc
         if store.state.execution_id != execution_id:
             raise BenchmarkExecutionResumeError("economic execution identity drift detected", code="RESUME_DRIFT")
-        if store.state.reconciliation_state != "CLEAR" or any(
-            entry.get("status") == "UNCERTAIN_CONSUMED" for entry in store.state.ledger.values()
-        ):
+        if store.state.reconciliation_state != "CLEAR" and not self._has_modern_recovery_evidence(store.state):
             raise BenchmarkExecutionResumeError(
                 "economic state contains unreconciled post-dispatch consumption",
                 code="RESUME_ECONOMIC_UNCERTAIN",
@@ -249,15 +265,198 @@ class BenchmarkExecutionRunner:
         guard.state_store = store
         return guard
 
+    @staticmethod
+    def _has_modern_recovery_evidence(state: LunaEconomicState) -> bool:
+        """Return true only for a complete R1-R5 response-missing record."""
+
+        for raw in state.dispatch_records.values():
+            try:
+                record = DispatchRecord.from_dict(raw)
+            except (TypeError, ValueError):
+                continue
+            ledger = state.ledger.get(record.reservation_id or "")
+            if (
+                record.dispatch_state == DISPATCH_STARTED
+                and record.functional_state == RESPONSE_MISSING
+                and isinstance(ledger, Mapping)
+                and ledger.get("status") == UNCERTAIN_CONSUMED
+            ):
+                return True
+        return False
+
     def _economic_state_payload(self) -> Mapping[str, Any] | None:
         guard = self._budget_guard()
         return guard.state.to_dict() if guard is not None else None
+
+    def _pending_recovery_record(
+        self,
+        *,
+        attempt: BenchmarkScheduledAttempt,
+    ) -> DispatchRecord | None:
+        guard = self._budget_guard()
+        if guard is None:
+            return None
+        matches: list[DispatchRecord] = []
+        for raw in guard.state.dispatch_records.values():
+            try:
+                record = DispatchRecord.from_dict(raw)
+            except (TypeError, ValueError):
+                continue
+            ledger = guard.state.ledger.get(record.reservation_id or "")
+            if (
+                record.logical_attempt_id == attempt.scheduled_attempt_id
+                and record.dispatch_state == DISPATCH_STARTED
+                and record.functional_state == RESPONSE_MISSING
+                and isinstance(ledger, Mapping)
+                and ledger.get("status") == UNCERTAIN_CONSUMED
+            ):
+                matches.append(record)
+        if len(matches) > 1:
+            raise BenchmarkExecutionResumeError(
+                "multiple uncertain dispatches match one logical attempt",
+                code="RESUME_RECOVERY_IDENTITY",
+            )
+        return matches[0] if matches else None
+
+    def _recovery_request(
+        self,
+        *,
+        task: Any,
+        config: BenchmarkConfig,
+    ) -> AgentRequest:
+        """Build the bounded recovery request without changing scheduler identity."""
+
+        return AgentRequest(
+            messages=(AgentMessage(role="user", content=task.prompt),),
+            model_config=dict(config.model_config),
+        )
+
+    def _recover_pending(
+        self,
+        *,
+        record: DispatchRecord,
+        task: Any,
+        config: BenchmarkConfig,
+        attempt: BenchmarkScheduledAttempt,
+        execution_dir: Path,
+        pd_agent_commit: str | None,
+        fixture_root: Path,
+        knowledge_needs: Sequence[Any] | None,
+        preserve_workspaces: bool,
+    ) -> tuple[BenchmarkExecutionResult | None, Mapping[str, Any]]:
+        provider = getattr(self.executor, "provider", None)
+        coordinator = self.recovery_coordinator
+        if coordinator is None and provider is not None:
+            coordinator = RecoveryCoordinator(
+                provider,
+                budget_guard=self._budget_guard(),
+            )
+        if coordinator is None:
+            return None, {
+                "status": RECOVERY_RECONCILIATION_UNSUPPORTED,
+                "reason": "recovery coordinator is unavailable",
+                "original_physical_request_id": record.physical_request_id,
+                "logical_attempt_id": record.logical_attempt_id,
+            }
+        outcome = coordinator.recover(record, self._recovery_request(task=task, config=config))
+        evidence = outcome.to_dict()
+        if outcome.status not in {RECOVERY_EXISTING_RESPONSE, RECOVERY_REISSUE_SUCCEEDED}:
+            return None, evidence
+
+        continuation = getattr(self.executor, "continue_recovered_response", None)
+        if not callable(continuation):
+            evidence = {
+                **evidence,
+                "continuation": "unavailable",
+                "reason": "executor cannot continue a recovered AgentResponse",
+            }
+            return None, evidence
+        result = continuation(
+            outcome.response,
+            task,
+            config,
+            attempt,
+            fixture_root=fixture_root,
+            execution_root=execution_dir,
+            pd_agent_commit=pd_agent_commit,
+            knowledge_needs=knowledge_needs,
+            preserve_workspace=preserve_workspaces,
+            recovery=evidence,
+        )
+        if not isinstance(result, BenchmarkExecutionResult):
+            evidence = {
+                **evidence,
+                "continuation": "invalid",
+                "reason": "executor returned no benchmark result for recovered response",
+            }
+            return None, evidence
+        return result, evidence
+
+    def _paused_batch(
+        self,
+        *,
+        batch_status: BenchmarkBatchStatus,
+        reason: str,
+        logical_requests_used: int,
+        reservation: int,
+        attempt: BenchmarkScheduledAttempt,
+        current_state: BenchmarkExecutionState,
+        schedule: BenchmarkSchedule,
+        dataset: Any,
+        configs: Sequence[BenchmarkConfig],
+        tasks: Sequence[Any],
+        manifest: BenchmarkExecutionManifest,
+        execution_dir: Path,
+        manifest_path: Path,
+        schedule_path: Path,
+        execution_state_path: Path,
+    ) -> BenchmarkExecutionBatch:
+        state = BenchmarkExecutionState(
+            execution_id=manifest.execution_id,
+            batch_status=batch_status,
+            logical_budget_cap=self.logical_session_cap,
+            logical_budget_used=logical_requests_used,
+            logical_budget_remaining=max(self.logical_session_cap - logical_requests_used, 0),
+            attempt_reservation=reservation,
+            pause_reason=reason,
+            paused_at=datetime.now(timezone.utc),
+            next_pending_schedule_item=attempt.to_dict(),
+            session_id=current_state.session_id,
+            session_index=current_state.session_index,
+            resume_count=current_state.resume_count,
+            recovery_state=current_state.recovery_state,
+        )
+        _write_json(schedule_path, schedule.to_dict())
+        execution_state_path = self._write_execution_state(execution_state_path, state)
+        comparison = self._aggregate_comparison(
+            _completed_runs(schedule), dataset=dataset, configs=configs, tasks=tasks,
+        )
+        comparison_json_path = _write_json(execution_dir / "comparison.json", comparison.to_dict())
+        comparison_md_path = execution_dir / "comparison.md"
+        comparison_md_path.write_text(render_comparison_markdown(comparison), encoding="utf-8")
+        return BenchmarkExecutionBatch(
+            execution_id=manifest.execution_id,
+            execution_root=execution_dir,
+            batch_status=batch_status,
+            manifest=manifest,
+            schedule=schedule,
+            execution_state=state,
+            comparison=comparison,
+            runs=_completed_runs(schedule),
+            manifest_path=manifest_path,
+            schedule_path=schedule_path,
+            execution_state_path=execution_state_path,
+            comparison_json_path=comparison_json_path,
+            comparison_md_path=comparison_md_path,
+        )
 
     def _write_execution_state(self, path: Path, state: BenchmarkExecutionState) -> Path:
         payload = state.to_dict()
         economic = self._economic_state_payload()
         if economic is not None:
             payload["economic_state"] = dict(economic)
+        if state.recovery_state is not None:
+            payload["recovery_state"] = dict(state.recovery_state)
         return _write_json(path, payload)
 
     def _economic_pause_reason(self, result: BenchmarkExecutionResult) -> str | None:
@@ -458,6 +657,7 @@ class BenchmarkExecutionRunner:
                 session_id=generate_run_id(),
                 session_index=current_session_index,
                 resume_count=current_resume_count,
+                recovery_state=execution_state.recovery_state,
             )
             execution_state_path = self._write_execution_state(execution_state_path, current_state)
 
@@ -476,6 +676,7 @@ class BenchmarkExecutionRunner:
                     session_id=current_state.session_id,
                     session_index=current_state.session_index,
                     resume_count=current_state.resume_count,
+                    recovery_state=current_state.recovery_state,
                 )
                 execution_state_path = self._write_execution_state(execution_state_path, current_state)
             comparison = self._aggregate_comparison(
@@ -504,6 +705,7 @@ class BenchmarkExecutionRunner:
             )
 
         index = 0
+        recovery_checked = False
         try:
             while index < len(schedule.attempts):
                 attempt = schedule.attempts[index]
@@ -533,6 +735,7 @@ class BenchmarkExecutionRunner:
                         session_id=current_state.session_id,
                         session_index=current_state.session_index,
                         resume_count=current_state.resume_count,
+                        recovery_state=current_state.recovery_state,
                     )
                     execution_state_path = self._write_execution_state(execution_state_path, current_state)
                     comparison = self._aggregate_comparison(
@@ -564,16 +767,98 @@ class BenchmarkExecutionRunner:
                 economic_guard = self._budget_guard()
                 if economic_guard is not None:
                     economic_guard.begin_attempt(attempt.scheduled_attempt_id)
-                result = self.executor.execute(
-                    task,
-                    config,
-                    attempt,
-                    fixture_root=fixture_root,
-                    execution_root=execution_dir,
-                    pd_agent_commit=pd_agent_commit,
-                    knowledge_needs=knowledge_needs_by_task.get((task.task_id, task.task_version), ()) if knowledge_needs_by_task else None,
-                    preserve_workspace=preserve_workspaces,
+                requested_needs = (
+                    knowledge_needs_by_task.get((task.task_id, task.task_version), ())
+                    if knowledge_needs_by_task else None
                 )
+                recovery_record = (
+                    self._pending_recovery_record(attempt=attempt)
+                    if resume_mode and not recovery_checked
+                    else None
+                )
+                if resume_mode and not recovery_checked:
+                    recovery_checked = True
+                    if self._budget_guard() is not None and self._budget_guard().state.reconciliation_state != "CLEAR" and recovery_record is None:
+                        return self._paused_batch(
+                            batch_status=BenchmarkBatchStatus.BUDGET_PAUSED,
+                            reason="recovery evidence does not match the pending logical attempt",
+                            logical_requests_used=logical_requests_used,
+                            reservation=reservation,
+                            attempt=attempt,
+                            current_state=current_state,
+                            schedule=schedule,
+                            dataset=dataset,
+                            configs=configs,
+                            tasks=tasks,
+                            manifest=manifest,
+                            execution_dir=execution_dir,
+                            manifest_path=manifest_path,
+                            schedule_path=schedule_path,
+                            execution_state_path=execution_state_path,
+                        )
+                recovery_state = current_state.recovery_state
+                if recovery_record is not None:
+                    result, recovery_state = self._recover_pending(
+                        record=recovery_record,
+                        task=task,
+                        config=config,
+                        attempt=attempt,
+                        execution_dir=execution_dir,
+                        pd_agent_commit=pd_agent_commit,
+                        fixture_root=fixture_root,
+                        knowledge_needs=requested_needs,
+                        preserve_workspaces=preserve_workspaces,
+                    )
+                    current_state = BenchmarkExecutionState(
+                        execution_id=current_state.execution_id,
+                        batch_status=BenchmarkBatchStatus.RUNNING,
+                        logical_budget_cap=self.logical_session_cap,
+                        logical_budget_used=logical_requests_used,
+                        logical_budget_remaining=max(self.logical_session_cap - logical_requests_used, 0),
+                        attempt_reservation=reservation,
+                        pause_reason=None,
+                        paused_at=None,
+                        next_pending_schedule_item=attempt.to_dict(),
+                        session_id=current_state.session_id,
+                        session_index=current_state.session_index,
+                        resume_count=current_state.resume_count,
+                        recovery_state=recovery_state,
+                    )
+                    execution_state_path = self._write_execution_state(execution_state_path, current_state)
+                    if result is None:
+                        status = (
+                            BenchmarkBatchStatus.BUDGET_PAUSED
+                            if recovery_state.get("status") in {RECOVERY_BUDGET_BLOCKED, RECOVERY_DISPATCH_UNCERTAIN}
+                            else BenchmarkBatchStatus.BUDGET_PAUSED
+                        )
+                        return self._paused_batch(
+                            batch_status=status,
+                            reason=str(recovery_state.get("reason") or recovery_state.get("status") or "recovery blocked"),
+                            logical_requests_used=logical_requests_used,
+                            reservation=reservation,
+                            attempt=attempt,
+                            current_state=current_state,
+                            schedule=schedule,
+                            dataset=dataset,
+                            configs=configs,
+                            tasks=tasks,
+                            manifest=manifest,
+                            execution_dir=execution_dir,
+                            manifest_path=manifest_path,
+                            schedule_path=schedule_path,
+                            execution_state_path=execution_state_path,
+                        )
+                else:
+                    result = self.executor.execute(
+                        task,
+                        config,
+                        attempt,
+                        fixture_root=fixture_root,
+                        execution_root=execution_dir,
+                        pd_agent_commit=pd_agent_commit,
+                        knowledge_needs=requested_needs,
+                        preserve_workspace=preserve_workspaces,
+                    )
                 logical_requests_used += max(
                     self._logical_request_count_from_result(result),
                     0,
@@ -593,6 +878,7 @@ class BenchmarkExecutionRunner:
                         session_id=current_state.session_id,
                         session_index=current_state.session_index,
                         resume_count=current_state.resume_count,
+                        recovery_state=current_state.recovery_state,
                     )
                     schedule_path = _write_json(execution_dir / "schedule.json", schedule.to_dict())
                     execution_state_path = self._write_execution_state(execution_state_path, current_state)
@@ -690,6 +976,7 @@ class BenchmarkExecutionRunner:
                     session_id=current_state.session_id,
                     session_index=current_state.session_index,
                     resume_count=current_state.resume_count,
+                    recovery_state=current_state.recovery_state,
                 )
                 execution_state_path = self._write_execution_state(execution_state_path, current_state)
                 index += 1
@@ -712,6 +999,7 @@ class BenchmarkExecutionRunner:
                 session_id=current_state.session_id,
                 session_index=current_state.session_index,
                 resume_count=current_state.resume_count,
+                recovery_state=current_state.recovery_state,
             )
             _write_json(schedule_path, schedule.to_dict())
             self._write_execution_state(execution_state_path, current_state)
@@ -730,6 +1018,7 @@ class BenchmarkExecutionRunner:
             session_id=current_state.session_id,
             session_index=current_state.session_index,
             resume_count=current_state.resume_count,
+            recovery_state=current_state.recovery_state,
         )
         execution_state_path = self._write_execution_state(execution_state_path, current_state)
         comparison = self._aggregate_comparison(
