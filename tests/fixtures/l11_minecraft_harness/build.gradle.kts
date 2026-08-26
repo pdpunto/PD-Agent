@@ -71,6 +71,11 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
             "{\"replace\":false,\"values\":[\"minecraft:diamond\",\"minecraft:gold_ingot\"]}",
             Charsets.UTF_8,
         )
+        datapackRoot.resolve("data/pdagentl11_harness/recipe").mkdirs()
+        datapackRoot.resolve("data/pdagentl11_harness/recipe/i5_marble_lantern.json").writeText(
+            "{\"type\":\"minecraft:crafting_shaped\",\"pattern\":[\"A\"],\"key\":{\"A\":\"minecraft:diamond\"},\"result\":{\"id\":\"minecraft:gold_ingot\",\"count\":1}}",
+            Charsets.UTF_8,
+        )
     }
     programArgs.add("--nogui")
     jvmArgs.add("-Dpd.agent.targetModId=${providers.gradleProperty("pd.agent.targetModId").get()}")
@@ -106,6 +111,11 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
         jvmArgs.add("-Dpd.agent.observationMemberId=$it")
     }
     jvmArgs.add("-Dpd.agent.observationExpectedMembership=${providers.gradleProperty("pd.agent.observationExpectedMembership").orElse("true").get()}")
+    providers.gradleProperty("pd.agent.observationRecipeId").orNull?.let { jvmArgs.add("-Dpd.agent.observationRecipeId=$it") }
+    providers.gradleProperty("pd.agent.observationInputItemId").orNull?.let { jvmArgs.add("-Dpd.agent.observationInputItemId=$it") }
+    jvmArgs.add("-Dpd.agent.observationInputCount=${providers.gradleProperty("pd.agent.observationInputCount").orElse("1").get()}")
+    providers.gradleProperty("pd.agent.observationExpectedOutputItemId").orNull?.let { jvmArgs.add("-Dpd.agent.observationExpectedOutputItemId=$it") }
+    jvmArgs.add("-Dpd.agent.observationExpectedOutputCount=${providers.gradleProperty("pd.agent.observationExpectedOutputCount").orElse("1").get()}")
     jvmArgs.add("-Dpd.agent.observationSlot=${providers.gradleProperty("pd.agent.observationSlot").orElse("0").get()}")
     jvmArgs.add("-Dpd.agent.observationCount=${providers.gradleProperty("pd.agent.observationCount").orElse("5").get()}")
     jvmArgs.add("-Dpd.agent.observationMutation=${providers.gradleProperty("pd.agent.observationMutation").orElse("true").get()}")

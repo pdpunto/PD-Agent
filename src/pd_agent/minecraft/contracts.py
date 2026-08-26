@@ -31,6 +31,31 @@ _ITEM_COMPONENT_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
 _CONTROLLED_HOPPER_POS = (8, 64, 8)
 _I4_TAG_ID = "pdagentl11_harness:i4_controlled_members"
 _I4_TAG_MEMBERS = {"minecraft:diamond", "minecraft:gold_ingot", "minecraft:stone"}
+_I5_RECIPE_ID = "pdagentl11_harness:i5_marble_lantern"
+_I5_INPUT_ITEM = "minecraft:diamond"
+_I5_OUTPUT_ITEM = "minecraft:gold_ingot"
+
+
+def validate_recipe_match_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the single bounded crafting recipe profile used by I5."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "recipe_id"}:
+        raise ValueError("RECIPE_MATCH selector must declare kind and recipe_id")
+    if selector.get("kind") != "crafting_recipe" or selector.get("recipe_id") != _I5_RECIPE_ID:
+        raise ValueError("RECIPE_MATCH only supports the controlled I5 recipe")
+    if not isinstance(parameters, Mapping) or set(parameters) != {"input_item_id", "input_count", "expected_output_item_id", "expected_output_count"}:
+        raise ValueError("RECIPE_MATCH parameters contain unsupported fields")
+    if parameters["input_item_id"] != _I5_INPUT_ITEM:
+        raise ValueError("RECIPE_MATCH only supports the controlled I5 input")
+    if isinstance(parameters["input_count"], bool) or parameters["input_count"] != 1:
+        raise ValueError("RECIPE_MATCH input_count must be one")
+    if parameters["expected_output_item_id"] != _I5_OUTPUT_ITEM:
+        raise ValueError("RECIPE_MATCH only supports the controlled I5 output")
+    if isinstance(parameters["expected_output_count"], bool) or parameters["expected_output_count"] != 1:
+        raise ValueError("RECIPE_MATCH expected_output_count must be one")
 
 
 def validate_tag_membership_profile(

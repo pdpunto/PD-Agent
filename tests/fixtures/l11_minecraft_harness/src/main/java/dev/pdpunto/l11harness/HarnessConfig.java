@@ -24,6 +24,11 @@ record HarnessConfig(
     String observationTagId,
     String observationMemberId,
     boolean observationExpectedMembership,
+    String observationRecipeId,
+    String observationInputItemId,
+    int observationInputCount,
+    String observationExpectedOutputItemId,
+    int observationExpectedOutputCount,
     Path resultPath,
     boolean expectNeighborUpdate
 ) {
@@ -44,6 +49,11 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_TAG_ID = "pd.agent.observationTagId";
     static final String PROP_OBSERVATION_MEMBER_ID = "pd.agent.observationMemberId";
     static final String PROP_OBSERVATION_EXPECTED_MEMBERSHIP = "pd.agent.observationExpectedMembership";
+    static final String PROP_OBSERVATION_RECIPE_ID = "pd.agent.observationRecipeId";
+    static final String PROP_OBSERVATION_INPUT_ITEM_ID = "pd.agent.observationInputItemId";
+    static final String PROP_OBSERVATION_INPUT_COUNT = "pd.agent.observationInputCount";
+    static final String PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID = "pd.agent.observationExpectedOutputItemId";
+    static final String PROP_OBSERVATION_EXPECTED_OUTPUT_COUNT = "pd.agent.observationExpectedOutputCount";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
@@ -52,6 +62,7 @@ record HarnessConfig(
     static final String OBSERVATION_BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE";
     static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
     static final String OBSERVATION_TAG_MEMBERSHIP = "TAG_MEMBERSHIP";
+    static final String OBSERVATION_RECIPE_MATCH = "RECIPE_MATCH";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -72,6 +83,11 @@ record HarnessConfig(
         observationCount = normalizeCount(observationType, observationCount);
         observationTagId = normalizeTagId(observationType, observationTagId);
         observationMemberId = normalizeTagMemberId(observationType, observationMemberId);
+        observationRecipeId = normalizeRecipeField(observationType, observationRecipeId, "pdagentl11_harness:i5_marble_lantern");
+        observationInputItemId = normalizeRecipeField(observationType, observationInputItemId, "minecraft:diamond");
+        observationInputCount = normalizeRecipeCount(observationType, observationInputCount, "input");
+        observationExpectedOutputItemId = normalizeRecipeField(observationType, observationExpectedOutputItemId, "minecraft:gold_ingot");
+        observationExpectedOutputCount = normalizeRecipeCount(observationType, observationExpectedOutputCount, "output");
         resultPath = normalizeResultPath(resultPath);
     }
 
@@ -95,6 +111,11 @@ record HarnessConfig(
             requireObservationText(PROP_OBSERVATION_TAG_ID, observationType),
             requireObservationText(PROP_OBSERVATION_MEMBER_ID, observationType),
             requireBoolean(PROP_OBSERVATION_EXPECTED_MEMBERSHIP, true),
+            requireObservationText(PROP_OBSERVATION_RECIPE_ID, observationType),
+            requireObservationText(PROP_OBSERVATION_INPUT_ITEM_ID, observationType),
+            requireInteger(PROP_OBSERVATION_INPUT_COUNT, 1),
+            requireObservationText(PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID, observationType),
+            requireInteger(PROP_OBSERVATION_EXPECTED_OUTPUT_COUNT, 1),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
         );
@@ -143,7 +164,8 @@ record HarnessConfig(
             && !OBSERVATION_ITEM_COMPONENT_STATE.equals(normalized)
             && !OBSERVATION_BLOCK_ENTITY_STATE.equals(normalized)
             && !OBSERVATION_INVENTORY_STATE.equals(normalized)
-            && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)) {
+            && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)
+            && !OBSERVATION_RECIPE_MATCH.equals(normalized)) {
             throw new IllegalArgumentException("unsupported observation type: " + value);
         }
         return normalized;
@@ -247,6 +269,26 @@ record HarnessConfig(
         return value;
     }
 
+    private static String normalizeRecipeField(String observationType, String value, String expected) {
+        if (!OBSERVATION_RECIPE_MATCH.equals(observationType)) {
+            return null;
+        }
+        if (!expected.equals(value)) {
+            throw new IllegalArgumentException("RECIPE_MATCH only supports " + expected);
+        }
+        return value;
+    }
+
+    private static int normalizeRecipeCount(String observationType, int value, String label) {
+        if (!OBSERVATION_RECIPE_MATCH.equals(observationType)) {
+            return 1;
+        }
+        if (value != 1) {
+            throw new IllegalArgumentException("RECIPE_MATCH " + label + " count must be one");
+        }
+        return value;
+    }
+
     private static String requireTextValue(String label, String value) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(label + " cannot be empty");
@@ -267,6 +309,12 @@ record HarnessConfig(
             || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))
             || (PROP_OBSERVATION_ITEM_ID.equals(key) && OBSERVATION_INVENTORY_STATE.equals(observationType))
             || (blockEntityField && OBSERVATION_BLOCK_ENTITY_STATE.equals(observationType))) {
+            return requireTextValue(key, value);
+        }
+        if (OBSERVATION_RECIPE_MATCH.equals(observationType)
+            && (PROP_OBSERVATION_RECIPE_ID.equals(key)
+                || PROP_OBSERVATION_INPUT_ITEM_ID.equals(key)
+                || PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID.equals(key))) {
             return requireTextValue(key, value);
         }
         if (tagField && OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {

@@ -21,6 +21,10 @@ import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.entry.RegistryEntryList;
 import net.minecraft.registry.tag.TagKey;
+import net.minecraft.recipe.CraftingRecipe;
+import net.minecraft.recipe.RecipeEntry;
+import net.minecraft.recipe.input.CraftingRecipeInput;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
@@ -66,8 +70,50 @@ final class HarnessRunner {
         if (HarnessConfig.OBSERVATION_TAG_MEMBERSHIP.equals(config.observationType())) {
             return runTagMembershipObservation(server, config, identity);
         }
+        if (HarnessConfig.OBSERVATION_RECIPE_MATCH.equals(config.observationType())) {
+            return runRecipeMatchObservation(server, config, identity, world);
+        }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runRecipeMatchObservation(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world
+    ) {
+        Identifier recipeId = parseIdentifier(config.observationRecipeId());
+        RegistryKey<net.minecraft.recipe.Recipe<?>> key = RegistryKey.of(RegistryKeys.RECIPE, recipeId);
+        java.util.Optional<RecipeEntry<?>> entry = server.getRecipeManager().get(key);
+        JsonObject expected = new JsonObject();
+        expected.addProperty("recipe_id", recipeId.toString());
+        expected.addProperty("input_item_id", config.observationInputItemId());
+        expected.addProperty("input_count", config.observationInputCount());
+        expected.addProperty("output_item_id", config.observationExpectedOutputItemId());
+        expected.addProperty("output_count", config.observationExpectedOutputCount());
+        JsonObject actual = new JsonObject();
+        actual.addProperty("recipe_id", recipeId.toString());
+        actual.addProperty("recipe_resolved", entry.isPresent());
+        if (entry.isEmpty() || !(entry.get().value() instanceof CraftingRecipe recipe)) {
+            return HarnessResult.recipeMatch(config, identity, expected, actual, "INVALID", "controlled crafting recipe was not resolved");
+        }
+        Item item = Registries.ITEM.get(parseIdentifier(config.observationInputItemId()));
+        if (item == null) {
+            return HarnessResult.recipeMatch(config, identity, expected, actual, "INVALID", "controlled input item was not resolved");
+        }
+        CraftingRecipeInput input = CraftingRecipeInput.create(1, 1,
+            java.util.List.of(new ItemStack(item, config.observationInputCount())));
+        boolean matched = recipe.matches(input, world);
+        ItemStack output = matched ? recipe.craft(input, server.getRegistryManager()) : ItemStack.EMPTY;
+        String outputId = output.isEmpty() ? "minecraft:air" : String.valueOf(Registries.ITEM.getId(output.getItem()));
+        actual.addProperty("matched", matched);
+        actual.addProperty("output_item_id", outputId);
+        actual.addProperty("output_count", output.isEmpty() ? 0 : output.getCount());
+        boolean pass = matched && config.observationExpectedOutputItemId().equals(outputId)
+            && config.observationExpectedOutputCount() == output.getCount();
+        return HarnessResult.recipeMatch(config, identity, expected, actual, pass ? "PASS" : "FAIL",
+            pass ? "real RecipeManager recipe match observed" : "recipe match or output mismatch");
     }
 
     private static HarnessResult runTagMembershipObservation(

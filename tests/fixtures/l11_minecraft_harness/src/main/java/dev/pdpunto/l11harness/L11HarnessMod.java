@@ -88,6 +88,11 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
             null,
             null,
             true,
+            null,
+            null,
+            1,
+            null,
+            1,
             java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "harness-result.json").toAbsolutePath(),
             false
         );

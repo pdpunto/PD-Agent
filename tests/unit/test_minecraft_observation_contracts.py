@@ -16,6 +16,7 @@ from pd_agent.minecraft import (
     validate_block_entity_profile,
     validate_inventory_profile,
     validate_tag_membership_profile,
+    validate_recipe_match_profile,
 )
 
 
@@ -221,6 +222,53 @@ def test_observation_request_rejects_invalid_identity_profile_and_selector() -> 
             selector={"kind": "recipe"},
             expected=True,
         )
+
+
+def test_recipe_match_profile_accepts_only_controlled_inputs() -> None:
+    validate_recipe_match_profile(
+        {"kind": "crafting_recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"},
+        {
+            "input_item_id": "minecraft:diamond",
+            "input_count": 1,
+            "expected_output_item_id": "minecraft:gold_ingot",
+            "expected_output_count": 1,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "selector, parameters",
+    [
+        ({"kind": "crafting_recipe", "recipe_id": "minecraft:missing"}, {}),
+        ({"kind": "recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"}, {}),
+        ({"kind": "crafting_recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"}, {"path": "x"}),
+        ({"kind": "crafting_recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"}, {"input_item_id": "minecraft:stone", "input_count": 1, "expected_output_item_id": "minecraft:gold_ingot", "expected_output_count": 1}),
+        ({"kind": "crafting_recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"}, {"input_item_id": "minecraft:diamond", "input_count": 2, "expected_output_item_id": "minecraft:gold_ingot", "expected_output_count": 1}),
+    ],
+)
+def test_recipe_match_profile_rejects_uncontrolled_or_malformed_inputs(selector, parameters) -> None:
+    with pytest.raises(ValueError):
+        validate_recipe_match_profile(selector, parameters)
+
+
+def test_recipe_match_request_and_result_round_trip() -> None:
+    request = ObservationRequest(
+        observation_id="recipe-001",
+        observation_type=MinecraftObservationType.RECIPE_MATCH,
+        profile="crafting",
+        selector={"kind": "crafting_recipe", "recipe_id": "pdagentl11_harness:i5_marble_lantern"},
+        parameters={"input_item_id": "minecraft:diamond", "input_count": 1, "expected_output_item_id": "minecraft:gold_ingot", "expected_output_count": 1},
+        expected={"matched": True, "output_item_id": "minecraft:gold_ingot", "output_count": 1},
+    )
+    assert ObservationRequest.from_dict(json.loads(request.to_json())) == request
+    result = ObservationResult(
+        observation_id="recipe-001",
+        observation_type=MinecraftObservationType.RECIPE_MATCH,
+        status=MinecraftObservationStatus.PASS,
+        expected={"path": "semantic data", "output_count": 1},
+        actual={"path": "semantic data", "output_count": 1},
+    )
+    assert ObservationResult.from_dict(json.loads(result.to_json())) == result
     with pytest.raises(ValueError):
         ObservationRequest(
             observation_id="obs-003",
