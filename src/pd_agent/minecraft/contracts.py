@@ -27,6 +27,35 @@ _UNSAFE_PARAMETER_KEYS = {
     "script",
     "world_root",
 }
+_ITEM_COMPONENT_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
+
+
+def validate_item_component_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the closed controlled-stack profile used by I2."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "item_id"}:
+        raise ValueError("ITEM_COMPONENT_STATE selector must declare kind and item_id")
+    if selector.get("kind") != "harness_stack":
+        raise ValueError("ITEM_COMPONENT_STATE selector kind must be harness_stack")
+    item_id = selector.get("item_id")
+    if not isinstance(item_id, str) or not _ITEM_COMPONENT_ID_RE.fullmatch(item_id):
+        raise ValueError("ITEM_COMPONENT_STATE item_id must be a namespaced identifier")
+
+    if not isinstance(parameters, Mapping):
+        raise ValueError("ITEM_COMPONENT_STATE parameters must be an object")
+    allowed = {"component_id", "round_trip"}
+    unknown = set(parameters) - allowed
+    if unknown:
+        raise ValueError(f"ITEM_COMPONENT_STATE parameters contain unknown fields: {sorted(unknown)!r}")
+    component_id = parameters.get("component_id")
+    if not isinstance(component_id, str) or not _ITEM_COMPONENT_ID_RE.fullmatch(component_id):
+        raise ValueError("ITEM_COMPONENT_STATE component_id must be a namespaced identifier")
+    round_trip = parameters.get("round_trip", False)
+    if not isinstance(round_trip, bool):
+        raise ValueError("ITEM_COMPONENT_STATE round_trip must be boolean")
 
 
 def _json_ready(value: Any) -> Any:

@@ -11,6 +11,8 @@ from pd_agent.minecraft import (
     MinecraftObservationType,
     ObservationRequest,
     ObservationResult,
+    MinecraftTestSpec,
+    validate_item_component_profile,
 )
 
 
@@ -115,6 +117,44 @@ def test_structured_semantic_data_rejects_non_json_objects() -> None:
             selector={"kind": "harness_stack"},
             expected={"value": object()},
         )
+
+
+def test_item_component_profile_is_closed_and_supports_round_trip() -> None:
+    validate_item_component_profile(
+        {"kind": "harness_stack", "item_id": "minecraft:diamond"},
+        {"component_id": "minecraft:damage", "round_trip": True},
+    )
+
+    spec = MinecraftTestSpec(
+        target_jar="build/libs/target.jar",
+        target_mod_id="examplemod",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="i2-item-component",
+        timeout_seconds=60,
+        observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+        observation_params={
+            "component_id": "minecraft:damage",
+            "item_id": "minecraft:diamond",
+            "round_trip": True,
+        },
+    )
+    assert spec.from_dict(spec.to_dict()) == spec
+
+
+@pytest.mark.parametrize(
+    "selector, parameters",
+    [
+        ({"kind": "harness_stack"}, {"component_id": "minecraft:damage"}),
+        ({"kind": "other", "item_id": "minecraft:diamond"}, {"component_id": "minecraft:damage"}),
+        ({"kind": "harness_stack", "item_id": "minecraft:diamond"}, {"component_id": "damage"}),
+        ({"kind": "harness_stack", "item_id": "minecraft:diamond"}, {"component_id": "minecraft:damage", "path": "x"}),
+        ({"kind": "harness_stack", "item_id": "minecraft:diamond"}, {"component_id": "minecraft:damage", "round_trip": "true"}),
+    ],
+)
+def test_item_component_profile_rejects_malformed_control_input(selector, parameters) -> None:
+    with pytest.raises(ValueError):
+        validate_item_component_profile(selector, parameters)
 
 
 def test_observation_request_rejects_invalid_identity_profile_and_selector() -> None:

@@ -18,14 +18,19 @@ from pd_agent.tools import SecurePathResolver
 
 from .contracts import (
     MinecraftEvidencePaths,
+    MinecraftEvidenceKind,
+    MinecraftEvidenceReference,
     MinecraftLaunchPlan,
     MinecraftProcessEvidence,
     MinecraftObservationType,
+    MinecraftObservationStatus,
     MinecraftRuntimeEvidence,
     MinecraftTargetMetadata,
     MinecraftTestResult,
     MinecraftTestSpec,
     MinecraftTestStatus,
+    ObservationResult,
+    validate_item_component_profile,
 )
 from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 
@@ -111,6 +116,22 @@ def _registry_kind_from_params(params: Mapping[str, Any]) -> str | None:
     return text
 
 
+def _item_component_params(params: Mapping[str, Any]) -> tuple[str, str, bool]:
+    component_id = str(params.get("component_id", "")).strip()
+    item_id = str(params.get("item_id", "minecraft:diamond")).strip()
+    round_trip = params.get("round_trip", False)
+    validate_item_component_profile({"kind": "harness_stack", "item_id": item_id}, {
+        "component_id": component_id,
+        "round_trip": round_trip,
+    })
+    return component_id, item_id, round_trip
+
+
+def _item_component_properties(params: Mapping[str, Any]) -> tuple[str, str, str]:
+    component_id, item_id, round_trip = _item_component_params(params)
+    return component_id, item_id, str(round_trip).lower()
+
+
 def _non_empty_set(values: Sequence[str] | None) -> frozenset[str]:
     if values is None:
         return frozenset()
@@ -190,6 +211,8 @@ class MinecraftTestRunner:
             raise UnsupportedMinecraftEnvironmentError(f"unsupported loader_version: {spec.loader_version}")
         if java_version is not None and java_version not in self.supported_java_versions:
             raise UnsupportedMinecraftEnvironmentError(f"unsupported java_version: {java_version}")
+        if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE:
+            _item_component_params(spec.observation_params)
 
     def validate_target(
         self,
@@ -261,6 +284,14 @@ class MinecraftTestRunner:
             *(
                 (("pd.agent.observationIdentifier", observation_identifier),)
                 if (observation_identifier := _registry_identifier_from_params(spec.observation_params)) is not None
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationComponentId", "pd.agent.observationItemId", "pd.agent.observationRoundTrip"),
+                    _item_component_properties(spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
                 else ()
             ),
         )
@@ -503,6 +534,17 @@ class MinecraftTestRunner:
                 if (observation_identifier := _registry_identifier_from_params(result.spec.observation_params)) is not None
                 else ()
             ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationComponentId", "pd.agent.observationItemId", "pd.agent.observationRoundTrip"),
+                        _item_component_properties(result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
+                else ()
+            ),
         )
 
     def _build_command(self, launch_properties: tuple[str, ...]) -> tuple[str, ...]:
@@ -718,6 +760,47 @@ class MinecraftTestRunner:
                 "shutdown_requested": shutdown_requested,
             }
         )
+        if result_type := harness_result.get("observation_type"):
+            if str(result_type).upper() == MinecraftObservationType.ITEM_COMPONENT_STATE.value:
+                observation = ObservationResult(
+                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected={
+                        "component_id": harness_result.get("component_id"),
+                        "item_id": harness_result.get("item_id"),
+                        "present": True,
+                        "value": harness_result.get("component_json_after"),
+                    },
+                    actual={
+                        "component_id": harness_result.get("component_id"),
+                        "item_id": harness_result.get("item_id"),
+                        "present_before": not bool(harness_result.get("component_absent_before")),
+                        "present_after": harness_result.get("component_json_after") is not None,
+                        "value_after_mutation": harness_result.get("component_json_after_mutation"),
+                        "value_after": harness_result.get("component_json_after"),
+                        "value_restored": harness_result.get("component_json_restored"),
+                        "round_trip": harness_result.get("component_round_trip"),
+                    },
+                    phase="RUNTIME",
+                    evidence_refs=(
+                        MinecraftEvidenceReference(
+                            kind=MinecraftEvidenceKind.OBSERVATION,
+                            ref="harness-result.json",
+                            phase="RUNTIME",
+                        ),
+                    ),
+                    error=(
+                        None
+                        if functional_test_result == "PASS"
+                        else {"code": "ITEM_COMPONENT_STATE_MISMATCH", "message": reason}
+                    ),
+                )
+                metadata["observation_result"] = observation.to_dict()
 
         if not target_loaded or not target_origin_resolved or not target_sha_match:
             metadata["classification"] = "INFRA_ERROR"
@@ -734,6 +817,10 @@ class MinecraftTestRunner:
         if functional_test_result == "FAIL":
             metadata["classification"] = "FAIL"
             return MinecraftTestStatus.FAIL, reason, metadata
+
+        if functional_test_result in {"BLOCKED", "INVALID"}:
+            metadata["classification"] = functional_test_result
+            return MinecraftTestStatus.INFRA_ERROR, reason, metadata
 
         if functional_test_result != "PASS":
             metadata["classification"] = "INFRA_ERROR"

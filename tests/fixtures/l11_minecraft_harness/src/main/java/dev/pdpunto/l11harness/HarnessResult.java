@@ -1,5 +1,7 @@
 package dev.pdpunto.l11harness;
 
+import com.google.gson.JsonElement;
+
 final class HarnessResult {
     private final int schemaVersion;
     private final String testId;
@@ -18,6 +20,14 @@ final class HarnessResult {
     private final boolean neighborUpdateTriggered;
     private final String reason;
     private final boolean shutdownRequested;
+    private final String componentId;
+    private final String itemId;
+    private final Boolean componentAbsentBefore;
+    private final JsonElement componentJsonAfterMutation;
+    private final JsonElement componentJsonAfter;
+    private final JsonElement componentJsonRestored;
+    private final Boolean componentRoundTrip;
+    private final Boolean componentMutationPass;
 
     HarnessResult(
         int schemaVersion,
@@ -36,7 +46,15 @@ final class HarnessResult {
         String functionalTestResult,
         boolean neighborUpdateTriggered,
         String reason,
-        boolean shutdownRequested
+        boolean shutdownRequested,
+        String componentId,
+        String itemId,
+        Boolean componentAbsentBefore,
+        JsonElement componentJsonAfterMutation,
+        JsonElement componentJsonAfter,
+        JsonElement componentJsonRestored,
+        Boolean componentRoundTrip,
+        Boolean componentMutationPass
     ) {
         this.schemaVersion = schemaVersion;
         this.testId = testId;
@@ -55,6 +73,14 @@ final class HarnessResult {
         this.neighborUpdateTriggered = neighborUpdateTriggered;
         this.reason = reason;
         this.shutdownRequested = shutdownRequested;
+        this.componentId = componentId;
+        this.itemId = itemId;
+        this.componentAbsentBefore = componentAbsentBefore;
+        this.componentJsonAfterMutation = componentJsonAfterMutation;
+        this.componentJsonAfter = componentJsonAfter;
+        this.componentJsonRestored = componentJsonRestored;
+        this.componentRoundTrip = componentRoundTrip;
+        this.componentMutationPass = componentMutationPass;
     }
 
     static HarnessResult passLegacy(HarnessConfig config, HarnessIdentity identity, boolean neighborUpdateTriggered) {
@@ -68,6 +94,7 @@ final class HarnessResult {
             "PASS",
             neighborUpdateTriggered,
             identity.reason()
+            , null, null, null, null, null, null, null, null
         );
     }
 
@@ -82,6 +109,7 @@ final class HarnessResult {
             "FAIL",
             neighborUpdateTriggered,
             reason
+            , null, null, null, null, null, null, null, null
         );
     }
 
@@ -101,6 +129,7 @@ final class HarnessResult {
             "PASS",
             false,
             identity.reason()
+            , null, null, null, null, null, null, null, null
         );
     }
 
@@ -121,6 +150,7 @@ final class HarnessResult {
             "FAIL",
             false,
             reason
+            , null, null, null, null, null, null, null, null
         );
     }
 
@@ -135,6 +165,42 @@ final class HarnessResult {
             "INFRA_ERROR",
             false,
             reason
+            , null, null, null, null, null, null, null, null
+        );
+    }
+
+    static HarnessResult failItemComponent(HarnessConfig config, HarnessIdentity identity, String reason) {
+        return itemComponentError(config, identity, "INVALID", reason);
+    }
+
+    static HarnessResult blockedItemComponent(HarnessConfig config, HarnessIdentity identity, String reason) {
+        return itemComponentError(config, identity, "BLOCKED", reason);
+    }
+
+    private static HarnessResult itemComponentError(HarnessConfig config, HarnessIdentity identity, String outcome, String reason) {
+        return create(
+            config, identity, config.observationType(), false, null, null, outcome, false, reason,
+            config.observationComponentId(), config.observationItemId(), null, null, null, null,
+            config.observationRoundTrip(), false
+        );
+    }
+
+    static HarnessResult itemComponent(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        String componentId,
+        String itemId,
+        boolean absentBefore,
+        JsonElement afterMutation,
+        JsonElement after,
+        JsonElement restored,
+        boolean roundTrip,
+        boolean pass,
+        String reason
+    ) {
+        return create(
+            config, identity, config.observationType(), pass, null, null, pass ? "PASS" : "FAIL", false, reason,
+            componentId, itemId, absentBefore, afterMutation, after, restored, roundTrip, pass
         );
     }
 
@@ -147,7 +213,15 @@ final class HarnessResult {
         String observedIdentifier,
         String functionalTestResult,
         boolean neighborUpdateTriggered,
-        String reason
+        String reason,
+        String componentId,
+        String itemId,
+        Boolean componentAbsentBefore,
+        JsonElement componentJsonAfterMutation,
+        JsonElement componentJsonAfter,
+        JsonElement componentJsonRestored,
+        Boolean componentRoundTrip,
+        Boolean componentMutationPass
     ) {
         return new HarnessResult(
             1,
@@ -166,7 +240,15 @@ final class HarnessResult {
             functionalTestResult,
             neighborUpdateTriggered,
             reason,
-            true
+            true,
+            componentId,
+            itemId,
+            componentAbsentBefore,
+            componentJsonAfterMutation,
+            componentJsonAfter,
+            componentJsonRestored,
+            componentRoundTrip,
+            componentMutationPass
         );
     }
 
@@ -189,7 +271,15 @@ final class HarnessResult {
         appendField(builder, "functional_test_result", functionalTestResult).append(",\n");
         appendField(builder, "neighbor_update_triggered", neighborUpdateTriggered).append(",\n");
         appendField(builder, "reason", reason).append(",\n");
-        appendField(builder, "shutdown_requested", shutdownRequested).append("\n");
+        appendField(builder, "shutdown_requested", shutdownRequested).append(",\n");
+        appendField(builder, "component_id", componentId).append(",\n");
+        appendField(builder, "item_id", itemId).append(",\n");
+        appendField(builder, "component_absent_before", componentAbsentBefore).append(",\n");
+        appendJsonField(builder, "component_json_after_mutation", componentJsonAfterMutation).append(",\n");
+        appendJsonField(builder, "component_json_after", componentJsonAfter).append(",\n");
+        appendJsonField(builder, "component_json_restored", componentJsonRestored).append(",\n");
+        appendField(builder, "component_round_trip", componentRoundTrip).append(",\n");
+        appendField(builder, "component_mutation_pass", componentMutationPass).append("\n");
         builder.append("}");
         return builder.toString();
     }
@@ -203,6 +293,12 @@ final class HarnessResult {
         } else {
             builder.append("\"").append(escapeJson(value.toString())).append("\"");
         }
+        return builder;
+    }
+
+    private static StringBuilder appendJsonField(StringBuilder builder, String name, JsonElement value) {
+        builder.append("  \"").append(name).append("\": ");
+        builder.append(value == null ? "null" : value.toString());
         return builder;
     }
 

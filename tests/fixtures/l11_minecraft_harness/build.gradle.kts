@@ -79,6 +79,13 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     providers.gradleProperty("pd.agent.observationIdentifier").orNull?.let {
         jvmArgs.add("-Dpd.agent.observationIdentifier=$it")
     }
+    providers.gradleProperty("pd.agent.observationComponentId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationComponentId=$it")
+    }
+    providers.gradleProperty("pd.agent.observationItemId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationItemId=$it")
+    }
+    jvmArgs.add("-Dpd.agent.observationRoundTrip=${providers.gradleProperty("pd.agent.observationRoundTrip").orElse("false").get()}")
     javaLauncher = javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     }

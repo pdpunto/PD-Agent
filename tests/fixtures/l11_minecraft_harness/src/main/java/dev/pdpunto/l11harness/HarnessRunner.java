@@ -1,8 +1,14 @@
 package dev.pdpunto.l11harness;
 
+import com.google.gson.JsonElement;
+import com.mojang.serialization.JsonOps;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.component.ComponentType;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
@@ -35,6 +41,9 @@ final class HarnessRunner {
 
         if (HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(config.observationType())) {
             return runRegistryObservation(config, identity);
+        }
+        if (HarnessConfig.OBSERVATION_ITEM_COMPONENT_STATE.equals(config.observationType())) {
+            return runItemComponentObservation(config, identity);
         }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
@@ -92,6 +101,75 @@ final class HarnessRunner {
             );
         }
         return HarnessResult.passRegistry(config, identity, config.observationRegistryKind(), observedIdentifier);
+    }
+
+    private static HarnessResult runItemComponentObservation(HarnessConfig config, HarnessIdentity identity) {
+        Identifier itemId = parseIdentifier(config.observationItemId());
+        Item item = Registries.ITEM.get(itemId);
+        if (item == null) {
+            return HarnessResult.failItemComponent(config, identity, "unknown item: " + itemId);
+        }
+        Identifier componentId = parseIdentifier(config.observationComponentId());
+        ComponentType<?> component = Registries.DATA_COMPONENT_TYPE.get(componentId);
+        if (component == null) {
+            return HarnessResult.failItemComponent(config, identity, "unknown component: " + componentId);
+        }
+        if (component != DataComponentTypes.DAMAGE) {
+            return HarnessResult.failItemComponent(config, identity, "controlled fixture supports minecraft:damage only");
+        }
+        return observeDamageComponent(config, identity, item, componentId);
+    }
+
+    private static HarnessResult observeDamageComponent(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        Item item,
+        Identifier componentId
+    ) {
+        ItemStack stack = new ItemStack(item);
+        boolean absentBefore = !stack.contains(DataComponentTypes.DAMAGE);
+        JsonElement afterMutationJson;
+        JsonElement afterJson;
+        JsonElement restoredJson = null;
+        boolean roundTripPass = true;
+        try {
+            stack.set(DataComponentTypes.DAMAGE, 7);
+            afterMutationJson = encodeDamage(stack.get(DataComponentTypes.DAMAGE));
+            stack.set(DataComponentTypes.DAMAGE, 11);
+            afterJson = encodeDamage(stack.get(DataComponentTypes.DAMAGE));
+            if (config.observationRoundTrip()) {
+                stack.set(DataComponentTypes.DAMAGE, decodeDamage(afterMutationJson));
+                restoredJson = encodeDamage(stack.get(DataComponentTypes.DAMAGE));
+                roundTripPass = afterMutationJson.equals(restoredJson);
+            }
+        } catch (RuntimeException ex) {
+            return HarnessResult.blockedItemComponent(config, identity, "component codec failure: " + ex.getMessage());
+        }
+        boolean pass = absentBefore && stack.contains(DataComponentTypes.DAMAGE)
+            && "11".equals(afterJson.toString()) && roundTripPass;
+        return HarnessResult.itemComponent(
+            config,
+            identity,
+            componentId.toString(),
+            config.observationItemId(),
+            absentBefore,
+            afterMutationJson,
+            afterJson,
+            restoredJson,
+            config.observationRoundTrip(),
+            pass,
+            pass ? "controlled item component mutation and codec round-trip observed" : "controlled item component observation mismatch"
+        );
+    }
+
+    private static JsonElement encodeDamage(Integer value) {
+        return DataComponentTypes.DAMAGE.getCodec().encodeStart(JsonOps.INSTANCE, value)
+            .getOrThrow();
+    }
+
+    private static Integer decodeDamage(JsonElement json) {
+        return DataComponentTypes.DAMAGE.getCodec().parse(JsonOps.INSTANCE, json)
+            .getOrThrow();
     }
 
     private static boolean isRegistryEntryPresent(String registryKind, Identifier identifier) {

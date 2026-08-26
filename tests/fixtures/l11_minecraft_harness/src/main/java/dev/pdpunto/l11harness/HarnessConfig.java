@@ -14,6 +14,9 @@ record HarnessConfig(
     String observationType,
     String observationRegistryKind,
     String observationIdentifier,
+    String observationComponentId,
+    String observationItemId,
+    boolean observationRoundTrip,
     Path resultPath,
     boolean expectNeighborUpdate
 ) {
@@ -24,10 +27,14 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_TYPE = "pd.agent.observationType";
     static final String PROP_OBSERVATION_REGISTRY_KIND = "pd.agent.observationRegistryKind";
     static final String PROP_OBSERVATION_IDENTIFIER = "pd.agent.observationIdentifier";
+    static final String PROP_OBSERVATION_COMPONENT_ID = "pd.agent.observationComponentId";
+    static final String PROP_OBSERVATION_ITEM_ID = "pd.agent.observationItemId";
+    static final String PROP_OBSERVATION_ROUND_TRIP = "pd.agent.observationRoundTrip";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
     static final String OBSERVATION_REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT";
+    static final String OBSERVATION_ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -41,6 +48,8 @@ record HarnessConfig(
         observationType = normalizeObservationType(observationType);
         observationRegistryKind = normalizeObservationRegistryKind(observationType, observationRegistryKind);
         observationIdentifier = normalizeObservationIdentifier(observationType, observationIdentifier);
+        observationComponentId = normalizeObservationComponentId(observationType, observationComponentId);
+        observationItemId = normalizeObservationItemId(observationType, observationItemId);
         resultPath = normalizeResultPath(resultPath);
     }
 
@@ -54,6 +63,9 @@ record HarnessConfig(
             observationType,
             requireObservationText(PROP_OBSERVATION_REGISTRY_KIND, observationType),
             requireObservationText(PROP_OBSERVATION_IDENTIFIER, observationType),
+            requireObservationText(PROP_OBSERVATION_COMPONENT_ID, observationType),
+            requireObservationText(PROP_OBSERVATION_ITEM_ID, observationType),
+            requireBoolean(PROP_OBSERVATION_ROUND_TRIP, false),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
         );
@@ -97,7 +109,9 @@ record HarnessConfig(
 
     private static String normalizeObservationType(String value) {
         String normalized = requireTextValue("observation type", value).toUpperCase(Locale.ROOT);
-        if (!OBSERVATION_LEGACY_BLOCK_STATE.equals(normalized) && !OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(normalized)) {
+        if (!OBSERVATION_LEGACY_BLOCK_STATE.equals(normalized)
+            && !OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(normalized)
+            && !OBSERVATION_ITEM_COMPONENT_STATE.equals(normalized)) {
             throw new IllegalArgumentException("unsupported observation type: " + value);
         }
         return normalized;
@@ -123,6 +137,20 @@ record HarnessConfig(
         return parsed.toString();
     }
 
+    private static String normalizeObservationComponentId(String observationType, String value) {
+        if (!OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType)) {
+            return null;
+        }
+        return parseIdentifier(requireTextValue("observation component id", value)).toString();
+    }
+
+    private static String normalizeObservationItemId(String observationType, String value) {
+        if (!OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType)) {
+            return null;
+        }
+        return parseIdentifier(requireTextValue("observation item id", value)).toString();
+    }
+
     private static String requireTextValue(String label, String value) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(label + " cannot be empty");
@@ -132,7 +160,12 @@ record HarnessConfig(
 
     private static String requireObservationText(String key, String observationType) {
         String value = System.getProperty(key);
-        if (OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType)) {
+        boolean registryField = PROP_OBSERVATION_REGISTRY_KIND.equals(key)
+            || PROP_OBSERVATION_IDENTIFIER.equals(key);
+        boolean componentField = PROP_OBSERVATION_COMPONENT_ID.equals(key)
+            || PROP_OBSERVATION_ITEM_ID.equals(key);
+        if ((registryField && OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType))
+            || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))) {
             return requireTextValue(key, value);
         }
         return value == null ? null : value.trim();
