@@ -197,6 +197,25 @@ licencia y compatibilidad se verifican independientemente. No se implementa
 un crawler general. La ausencia de una fuente no se rellena con memoria del
 modelo ni con una fuente de version desconocida.
 
+### 7.1.1 Source set minimo fijado
+
+El pack minimo v0.7 debe materializar estas tres familias; el IMP no elegira
+otras familias para satisfacer la acceptance:
+
+| Familia | Upstream y artefacto | Pin y autoridad | Records y politica |
+|---|---|---|---|
+| Vanilla/mappings | Fabric Maven, artefacto Yarn Tiny v2 para Minecraft `1.21.11` | version Yarn build + SHA-256; `AUTHORITATIVE_ARTIFACT` | `SYMBOL`; materializacion local y cacheable solo con licencia verificada |
+| Fabric API | Fabric Maven, artefacto Fabric API compatible con Minecraft `1.21.11` | version exacta del dependency lock + SHA-256; `AUTHORITATIVE_ARTIFACT` | `API`, `SYMBOL`, `CAPABILITY`; no se distribuyen JARs si la licencia/politica no lo permite |
+| Concept/pattern | Fabric documentation family versionada para la linea `1.21.11`, mediante commit/tag inmutable | commit/tag y checksum del extracto; `OFFICIAL_DOCUMENTATION` | `CONCEPT`, `PATTERN`, `EXAMPLE`, `DIAGNOSTIC`; records curados y redistribuibles sin copiar texto no permitido |
+
+La identidad exacta de version, revision y checksum se escribe en el manifest
+del pack y es obligatoria para publicar `FROZEN`; una referencia floating o un
+checksum ausente invalida la materializacion. Para Fabric Docs la politica
+conservadora de v0.7 es no incluir corpus textual bruto en un pack distribuible:
+se materializan solo records estructurados curados permitidos, con locator y
+licencia; el texto de referencia puede permanecer local/cache-only. Ninguna de
+estas fuentes llama al provider.
+
 ### 7.2 Ingest y materializacion
 
 Se rechaza o marca como no usable cualquier input con checksum incorrecto,
@@ -209,17 +228,45 @@ evidencia suficiente para reproducirlo.
 ## 8. Storage and rebuild
 
 La decision inicial es filesystem estructurado: manifest del pack y records
-JSON canonicos en rutas derivadas de pack/record. Es portable, auditable y no
-requiere un servicio. Se permite un indice local SQLite FTS o equivalente como
-artefacto derivado si mejora retrieval lexical; no es obligatorio para
-consultas exactas ni puede ser la fuente autoritativa.
+JSON canonicos en rutas derivadas de pack/record. Es portable y auditable. El
+indice derivado elegido para v0.7 es **SQLite FTS5 local**. No es fuente
+autoritativa y se reconstruye desde los JSON canonicos.
+
+SQLite FTS5 se elige porque el pack v0.7 esperado es acotado, ofrece busqueda
+textual sin servicio externo, funciona en Windows mediante la libreria
+estandar del entorno y es facilmente testeable en una base temporal. La
+escritura determinista fija schema, orden de insercion, tokenizer y parametros.
+SQLite no sustituye consultas exactas ni estructuradas, y sus bytes no forman
+parte de la identidad canonica.
 
 No se permite vector database, almacenamiento cloud, servicio distribuido ni
 Knowledge Graph en v0.7. El rebuild verifica primero el manifest y los
-checksums, elimina/recrea solo derivados y produce el mismo indice para los
-mismos bytes y herramienta.
+checksums, elimina/recrea solo el SQLite derivado y produce el mismo indice
+logico para los mismos bytes, tokenizer y herramienta.
 
-## 9. Retrieval
+## 9. Multi-source aggregation
+
+El Knowledge Foundation posee una coleccion ordenada de adapters; AgentRuntime
+y el provider no la poseen. El agregador recibe la coleccion al construirse,
+la valida y la ordena por `source_id` estable. Para un need, evalua
+`supports(need)` en ese orden y consulta solo sources elegibles cuya
+compatibilidad no sea `INCOMPATIBLE`. La compatibilidad se comprueba antes de
+que un item sea candidato a selection.
+
+Cada llamada produce un `KnowledgeSourceResult`, incluso si es miss, error,
+unavailable o incompatible. El agregador conserva todos los source attempts,
+no aborta el conjunto por un fallo parcial y devuelve `SUCCESS` si hay items
+compatibles; `UNSUPPORTED_NEED` si ninguna source soporta el need;
+`NO_COMPATIBLE_KNOWLEDGE` si no hay items elegibles; y el error de fuente o
+provenance correspondiente si las fuentes fallan.
+
+Los records se deduplican cross-source por identidad canonica; para el mismo
+hecho se conserva el grupo de provenance. La seleccion posterior ordena por
+compatibilidad, autoridad, especificidad y record id, y registra descartes y
+conflictos. El agregador es provider-agnostic: solo intercambia modelos del
+dominio y nunca conoce prompts, SDKs o llamadas de modelo.
+
+## 10. Retrieval
 
 `KnowledgeNeed` es una consulta pequena y especifica con id, tipo, query,
 entorno y hints limitados. No contiene documentacion completa ni instrucciones
@@ -245,7 +292,7 @@ autoritaria compatible puede ganar solo cuando las reglas de version y
 autoridad lo justifican; de otro modo el need queda degradado o bloqueado y
 no se inyecta como verdad.
 
-## 10. Selection
+## 11. Selection
 
 Retrieved no significa selected. El selector:
 
@@ -260,7 +307,7 @@ Ningun ranking puede elevar conocimiento incompatible. Seleccion vacia es un
 resultado explicito y permite continuar sin Brain cuando el flujo seguro lo
 permita.
 
-## 11. Injection
+## 12. Injection
 
 Selected no significa injected. El `ContextSource` convierte solo seleccion
 valida en contexto etiquetado, limitado y ordenado. Cada item inyectado lleva
@@ -271,7 +318,7 @@ las fuentes del runtime. Si falla serializacion, licencia, limite o integridad,
 el item no se inyecta y queda una razon observable. El provider solo ve el
 contexto preparado; nunca los objetos internos de Knowledge Foundation.
 
-## 12. Pre-code knowledge
+## 13. Pre-code knowledge
 
 Antes de la primera mutacion, el flujo puede derivar needs a partir de la task,
 fixture y entorno resuelto:
@@ -286,7 +333,16 @@ todo el pack. Cada need debe tener razon y phase `PRE_CODE`. Si no hay
 conocimiento, el agente puede continuar por tools/build/runtime cuando sea
 seguro; no se bloquea una task ordinaria por un miss advisory.
 
-## 13. Semantic Repair integration
+La responsabilidad conceptual pertenece a un **PreCodeKnowledgeNeedDeriver**
+del flujo existente de AgentRuntime/benchmark executor, no a un agente nuevo.
+Recibe task congelada, environment detectado y capability signals declarados
+por task/fixture. En fase `PRE_CODE` produce como maximo 8 needs de tipos
+`SYMBOL`, `API`, `CONCEPT`, `PATTERN`, `EXAMPLE`, `CAPABILITY` o
+`VERSION_CHANGE`; deduplica por tipo, query normalizada y environment. Cada
+need incluye razon/signal en su trace. Cero signals produce cero needs y no es
+error ni bloquea el trabajo.
+
+## 14. Semantic Repair integration
 
 Semantic Repair conserva sus contratos actuales y puede solicitar knowledge
 despues de evidencia de build, artifact, runtime o validation:
@@ -298,14 +354,31 @@ failure evidence -> need -> compatibility gate -> selection -> injection
 
 Debe soportar al menos necesidades `API`, `SYMBOL`, `VERSION_CHANGE`,
 `DIAGNOSTIC`, `PATTERN` y `CAPABILITY` cuando la evidencia las justifique.
+El **SemanticRepairKnowledgeNeedDeriver** reutiliza la violacion y evidence
+existentes, en la fase de repair, y produce como maximo 4 needs por turno,
+deduplicados por codigo/query/environment:
+
+| Evidencia | Need minimo |
+|---|---|
+| `cannot find symbol` | `SYMBOL` + `API` |
+| metodo/firma incorrecta | `API` + `SYMBOL` |
+| API Fabric desconocida | `API` + `CAPABILITY` |
+| mapping mismatch | `SYMBOL` + `VERSION_CHANGE` |
+| API changed/removed | `VERSION_CHANGE` + `API` |
+| diagnostico runtime | `DIAGNOSTIC` + `PATTERN` |
+| persistence/runtime mismatch | `DIAGNOSTIC` + `CAPABILITY` |
+
 El feedback incluye expected/actual, phase, violation code y evidence refs,
 pero no answer keys ni internals del Harness. Knowledge no reemplaza la
 evidencia determinista ni convierte una reparacion en PASS sin build/runtime
 valido.
 
-## 14. Trace and evidence
+## 15. Trace and evidence
 
-La traza por need/run conserva pack id, environment identity, query hash,
+La traza por need/run se persiste en el reporting existente: eventos
+`events.jsonl` append-only bajo `RunStorage`, con payload grande en `evidence/`
+mediante `payload_ref`. No se crea una base paralela. La traza conserva pack
+id, environment identity, query hash,
 source attempts, record ids, authority, revision, checksum, decision y fase.
 Estados obligatorios:
 
@@ -315,11 +388,17 @@ Estados obligatorios:
 - `REFERENCED`: una salida/feedback cita el record o need;
 - `EVIDENCED`: una validacion autoritativa observa un resultado asociado.
 
+Cada transicion incluye `run_id`, `turn_id` o etapa, `need_id`, record ids,
+source attempts, timestamp, decision y evidence refs. El evento se redacta
+con el mismo `Redactor` del reporting. `REFERENCED` requiere una referencia
+explicita en output o feedback; `EVIDENCED` requiere evento correlacionable de
+build, artifact, runtime o validation.
+
 Los estados no prueban causalidad interna del LLM. `REFERENCED` no implica que
 el modelo uso realmente el conocimiento, y `EVIDENCED` no elimina la necesidad
 de la ruta normal de validacion.
 
-## 15. Brain OFF and ON
+## 16. Brain OFF and ON
 
 Con Brain OFF:
 
@@ -332,7 +411,7 @@ Con Brain OFF:
 Con Brain ON, solo se permite el flujo bounded de este RFC. Cambiar el flag no
 puede cambiar task, prompt, acceptance, provider, seguridad ni answer keys.
 
-## 16. Failure and degraded modes
+## 17. Failure and degraded modes
 
 | Condicion | Resultado |
 |---|---|
@@ -350,7 +429,7 @@ Estos estados son del Knowledge Foundation. No deben reinterpretarse como
 `FAIL` funcional, `BLOCKED` de infraestructura o `INVALID` metodologico del
 benchmark sin pasar por sus contratos propios.
 
-## 17. Security and licensing
+## 18. Security and licensing
 
 No se distribuyen Minecraft JARs, source decompilado, credenciales, dumps,
 answer keys, soluciones ocultas ni internals del Harness como knowledge.
@@ -360,14 +439,15 @@ cache, trace e injection, no solo al final.
 
 El output del LLM nunca es autoridad canonica. Knowledge no otorga path
 capability, command capability, reflection, arbitrary NBT access ni bypass de
-SecurityPolicy/ToolExecutor. Los textos se tratan como datos y se mantienen
+`SecurePathResolver` + `ToolExecutor`, ni de otras restricciones reales de
+herramientas. Los textos se tratan como datos y se mantienen
 separados de instrucciones operativas.
 
-## 18. Audited repository baseline and discrepancies
+## 19. Audited repository baseline and discrepancies
 
 La auditoria de este RFC inspecciono `brain/models.py`, `brain/retrieval.py`,
 `brain/resolver.py`, `context/knowledge.py`, `benchmark/executor.py`, exports,
-tests L1-L3, AgentRuntime, Semantic Repair, SecurityPolicy, ToolExecutor y
+tests L1-L3, AgentRuntime, Semantic Repair, SecurePathResolver, ToolExecutor y
 evidencia/Harness existente.
 
 Coincidencias confirmadas:
@@ -406,7 +486,7 @@ Discrepancias e impacto:
 Estas son decisiones conscientes de frontera, no bugs ocultos ni autorizacion
 de implementacion. Si Arquitectura rechaza alguna, el RFC vuelve a revision.
 
-## 19. Update, freeze and reproducibility
+## 20. Update, freeze and reproducibility
 
 La identidad de una ejecucion registra pack id, manifest checksum, schema,
 environment identity, source revisions e indice version. Rebuild con los mismos
@@ -418,7 +498,7 @@ Un pack stale no sustituye el frozen esperado. Un checksum o manifest drift
 bloquea uso autoritativo y queda en evidencia. La limpieza de indices derivados
 no altera el pack ni su identidad.
 
-## 20. Acceptance and test architecture
+## 21. Acceptance and test architecture
 
 La futura implementacion debera demostrar offline, sin provider:
 
@@ -439,22 +519,49 @@ determinismo, redaccion y security. Las capacidades del SDK/provider se
 verifican con comportamiento observable y fixtures controladas, nunca por
 suposicion de nombres o capabilities.
 
-## 21. Deferred work
+## 22. Taxonomy migration
+
+Los packs nuevos v0.7 usan exclusivamente la taxonomia de la seccion 3. Para
+compatibilidad de lectura, un record historico se traduce sin mutar sus bytes:
+
+- `MAPPING` pasa a `SYMBOL` si describe identificadores o a `VERSION_CHANGE`
+  si describe cambios de nombres/version;
+- `BUILD` pasa a `API`, `PATTERN` o `DIAGNOSTIC` segun el contenido,
+  conservando el source kind historico en metadata;
+- `MIGRATION` pasa a `VERSION_CHANGE`.
+
+Una entrada ambigua no se publica como pack v0.7: queda degraded y no se
+inyecta como conocimiento normativo. Traces y caches historicos pueden leerse
+en compatibilidad, pero ids y checksum no se reescriben. Los records nuevos
+validan exactamente los ocho tipos objetivo; no se crea una novena categoria.
+
+## 23. Deferred work
 
 Queda fuera de v0.7: embeddings/vector retrieval, Knowledge Graph, cloud o
 servicio distribuido, crawler amplio, corpus automatico de migracion,
 Paper/NeoForge/Velocity, rendering/GUI/networking/entities/worldgen y nuevas
 capabilities no incluidas en el Design. v0.8 no se inicia con este RFC.
 
-## 22. Open implementation questions
+## 24. Open implementation questions
 
-Antes del IMP deben cerrarse con evidencia: schema final de manifest/record,
-adapter concreto y licencia de cada fuente, agregador multi-source, indice
-derivado exacto, resolucion de contradicciones, persistencia de trace y
-derivacion de needs task/failure. Resolverlas no puede relajar el hard gate,
-seguridad, reproducibilidad ni la separacion provider/knowledge.
+El RFC ya cierra las decisiones arquitectonicas de agregacion, indice,
+fuentes, trace, derivacion de needs, contradicciones y taxonomia. Solo quedan
+decisiones propias del IMP: rutas exactas, nombres de modulos, orden de lotes,
+fixture concreta dentro del contrato, comandos y detalles de migracion
+operativa. Resolverlas no puede relajar el hard gate, seguridad,
+reproducibilidad ni la separacion provider/knowledge.
 
-## 23. RFC acceptance
+## 25. Contradictions
+
+La politica se aplica en este orden: compatibility gate; misma version y
+artifact/source exacto para simbolo o firma; autoridad y especificidad; y
+finalmente conflicto. La documentacion oficial/concept no sobrescribe
+silenciosamente un hecho de artifact exacto. Una contradiccion material
+compatible no resoluble no se fusiona ni se inyecta como verdad: devuelve
+`SOURCE_ERROR` con `KNOWLEDGE_CONFLICT` y estado degraded/blocked, conservando
+ambos records y provenance en evidence.
+
+## 26. RFC acceptance
 
 Este RFC queda **propuesto**, no CLOSED. La aprobacion debe confirmar que sus
 decisiones implementan el Design aceptado, que el grafo de futuras tareas sera
