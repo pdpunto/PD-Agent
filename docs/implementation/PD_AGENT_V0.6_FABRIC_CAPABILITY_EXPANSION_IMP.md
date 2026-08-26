@@ -1,6 +1,6 @@
 # PD Agent v0.6 - Fabric Capability Expansion - IMP
 
-Status: IMP DRAFT / READY FOR ARCHITECTURE REVIEW
+Status: IMP CLOSED / PASS
 Design: `docs/design/PD_AGENT_V0.6_FABRIC_CAPABILITY_EXPANSION_DESIGN.md`
 RFC: `docs/rfc/PD_AGENT_V0.6_FABRIC_CAPABILITY_EXPANSION_RFC.md`
 Compatibility: Minecraft/Fabric `1.21.11` only
@@ -96,14 +96,15 @@ manager or task-specific source generator is introduced.
 | I7 | Typed command action/result | I1 | SMALL/MEDIUM |
 | I8 | LOAD event callback/effect | I1, I7 action/effect evidence | SMALL |
 | I9 | PersistenceScenario foundation | I1, I3 | LARGE |
-| I10 | Persistence/Reopen lifecycle and repair | I9, I3, I11 contracts | LARGE |
-| I11 | Cross-vertical functional validation/Semantic Repair | I2-I8, I9 schemas | MEDIUM/LARGE |
+| I10 | Cross-vertical functional validation/Semantic Repair | I2-I8, I9 schemas | MEDIUM/LARGE |
+| I11 | Persistence/Reopen lifecycle and persistence repair | I9, I10, B primitives | LARGE |
 | I12 | Offline regression and readiness audit | I2-I11 | LARGE |
 
 The order keeps persistence separate from the primitive implementation lots.
-I11 defines the consumer behavior after primitive result shapes are stable;
-I10 may integrate its persistence violation only after I11's validation
-contract is available. This avoids a circular implementation dependency.
+I10 defines the consumer behavior after primitive result shapes and the I9
+evidence schema are stable. I11 then consumes the I10 validation contract for
+the real persistence lifecycle. This makes the numeric order and dependency
+graph agree without a circular implementation dependency.
 
 ## 5. I0 - Contract and repository freeze
 
@@ -350,7 +351,46 @@ an unbounded user save or a phase-2 mutation-before-observation.
 Recommended commit: `feat: add persistence scenario contracts`. STOP if the
 schema starts implementing world lifecycle or cleanup.
 
-## 15. I10 - Persistence/Reopen integration
+## 15. I10 - Functional validation and Semantic Repair
+
+### Objective
+
+Stabilize cross-vertical validation before any real Persistence/Reopen
+lifecycle is implemented. This lot consumes synthetic `ObservationResult` and
+I9 persistence evidence, so it does not require a second Minecraft process.
+
+### Contract
+
+Define the mapping for expected/actual values, phase and `evidence_refs`, and
+the closed violation codes:
+
+`ITEM_COMPONENT_VALUE_MISMATCH`, `BLOCK_ENTITY_MISSING`,
+`BLOCK_ENTITY_STATE_MISMATCH`, `INVENTORY_SIZE_MISMATCH`,
+`INVENTORY_SLOT_MISMATCH`, `COMMAND_EXECUTION_FAILED`,
+`COMMAND_SIDE_EFFECT_MISMATCH`, `EVENT_SIDE_EFFECT_MISSING`,
+`TAG_MEMBERSHIP_MISMATCH`, `RECIPE_MATCH_MISMATCH`, `LOOT_RESULT_MISMATCH`,
+`PERSISTED_STATE_MISMATCH`.
+
+The classification boundary is explicit: runtime behavior mismatches are
+`FAIL`/`REPAIRABLE_FAIL`, infrastructure is `BLOCKED`, and malformed,
+unsupported, contaminated or contradictory evidence is `INVALID`. Feedback
+contains requirement, expected, actual, phase and evidence references without
+reference implementation or API leakage.
+
+### Tests and acceptance
+
+Use synthetic observation and persistence evidence plus the completed I2-I9
+primitive contracts. Test every mapping, positive validation,
+`PERSISTED_STATE_MISMATCH`, feedback redaction, malformed evidence,
+infrastructure blocking, invalid evidence, no-op repair guard and existing
+Semantic Repair/classifier regressions. No real Persistence/Reopen execution
+is required in I10.
+
+Recommended commit: `feat: extend v0.6 semantic validation repair`. STOP if
+I10 requires lifecycle behavior, changes v0.5 statuses or leaks a reference
+implementation.
+
+## 16. I11 - Persistence/Reopen integration and repair
 
 ### Phase 1 implementation
 
@@ -375,44 +415,9 @@ contamination, crash/timeout and cleanup confinement. If state is wrong, emit
 Phase 1 from zero. Never reuse a contaminated world.
 
 Recommended commit: `feat: integrate Fabric persistence reopen validation`.
-Rollback is the full I10 commit only; no evidence mutation or historical
+Rollback is the full I11 commit only; no evidence mutation or historical
 execution rewrite. STOP on uncertain save completion, world substitution or
 cleanup escape.
-
-## 16. I11 - Functional validation and Semantic Repair
-
-### Objective
-
-Map primitive/runtime results to the existing validation and classifier
-contracts after I2-I10 have stable result shapes.
-
-### Violation mapping
-
-Implement the closed codes:
-
-`ITEM_COMPONENT_VALUE_MISMATCH`, `BLOCK_ENTITY_MISSING`,
-`BLOCK_ENTITY_STATE_MISMATCH`, `INVENTORY_SIZE_MISMATCH`,
-`INVENTORY_SLOT_MISMATCH`, `COMMAND_EXECUTION_FAILED`,
-`COMMAND_SIDE_EFFECT_MISMATCH`, `EVENT_SIDE_EFFECT_MISSING`,
-`TAG_MEMBERSHIP_MISMATCH`, `RECIPE_MATCH_MISMATCH`, `LOOT_RESULT_MISMATCH`,
-`PERSISTED_STATE_MISMATCH`.
-
-Each feedback record contains requirement, expected, actual, phase when
-applicable and evidence references. It contains no reference implementation,
-secret, arbitrary class/API leakage or hidden solution.
-
-### Tests and acceptance
-
-Positive validation, each mismatch, missing/unsupported profile, malformed or
-contradictory evidence, infrastructure blocking, target crash repairability,
-repair -> rebuild -> runtime revalidation, no-op repair guard and existing
-agent terminal failure regressions. Infrastructure remains `BLOCKED`, semantic
-behavior remains `FAIL`/`REPAIRABLE_FAIL`, and invalid evidence remains
-`INVALID`.
-
-Recommended commit: `feat: extend v0.6 semantic validation repair`. STOP if
-the classifier needs to reinterpret v0.5 statuses or if feedback leaks a
-reference implementation.
 
 ## 17. I12 - Final offline validation
 
@@ -478,9 +483,9 @@ No compatibility matrix or multi-version abstraction is part of this IMP.
 I2-I7 may be developed as separate reviewed lots after I1. I8 depends on
 generic effect evidence and the typed action boundary. I9 depends on I1 and
 I3 schemas but does not depend on the completed behavior of every vertical.
-I10 depends on I9 and the validator contract from I11; I11 can define
-validation mappings before I10 lifecycle integration is complete, but must
-not consume unstable persistence result shapes. I12 is last.
+I10 depends on I2-I8 result shapes and I9 evidence schemas, and tests
+`PERSISTED_STATE_MISMATCH` synthetically. I11 depends on I9, I10 and the
+concrete B primitives required by the scenario. I12 is last.
 
 No lot may be implemented automatically after another lot is pushed.
 
@@ -511,7 +516,7 @@ The plan preserves the closed DESIGN/RFC decisions:
 The plan does not define benchmark repetitions, thresholds, provider choices,
 dataset changes or live authorization. No circular dependency requires a
 later lot before its contract can be reviewed; I10/I11 are explicitly split
-so persistence schemas and validator mappings stabilize before integration.
+so validator mappings stabilize before real persistence integration.
 
 Design/RFC compatibility: PASS
 Design delta: NO
@@ -535,8 +540,8 @@ approval, fresh repository audit when material changes occur, focused tests,
 diff review, commit/push and STOP. No implementation or live candidate may
 begin merely because this document is persisted.
 
-Implementation readiness: `IMP_READY_FOR_ARCHITECTURE_REVIEW`
+Implementation readiness: `IMP_CLOSED_PASS`
 
 ## 25. IMP Verdict
 
-`V0_6_IMP_PERSISTED_READY_FOR_ARCHITECTURE_REVIEW`
+`V0_6_IMP_ARCHITECTURE_PASS`
