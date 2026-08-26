@@ -10,6 +10,28 @@ Status: Updated after v0.5 final closure.
 4. `v0.3` - Minecraft Brain Foundation - completed
 5. `v0.4` - Benchmark Foundation - completed
 6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
+7. `v0.6` - Fabric Capability Expansion - closed / pass
+
+## v0.6 Closure
+
+`v0.6` is formally closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `1d9d3e86b315ee023e41ea2c548f2399680bdc4d`;
+- implementation status: `IMPLEMENTED + RUNTIME VALIDATED`;
+- representative runtime gates: PASS;
+- multi-process Persistence/Reopen: PASS.
+
+The delivered capability scope includes Data Components, Block Entities,
+Inventory, Persistence/Reopen, typed server Commands, ServerWorldEvents LOAD,
+Tags, Recipes and deterministic Loot. The complete validation record is
+`docs/validation/PD_AGENT_V0.6_FINAL_CLOSURE.md`.
+
+The v0.6 closure records implementation and capability completeness only. It
+does not require an official benchmark matrix and does not make model/provider
+performance claims. v0.7+ capabilities remain deferred and are not started.
+
+Alpha is not declared reached.
 
 ## v0.5 Closure
 

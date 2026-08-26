@@ -34,7 +34,25 @@ The project remains:
 4. `v0.3` - Minecraft Brain Foundation - completed
 5. `v0.4` - Benchmark Foundation - completed
 6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
-7. Later expansions remain subject to separate evidence and authorization.
+7. `v0.6` - Fabric Capability Expansion - closed / pass
+8. Later expansions remain subject to separate evidence and authorization.
+
+## v0.6 Closure
+
+`PD Agent v0.6 - Fabric Capability Expansion` is closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `1d9d3e86b315ee023e41ea2c548f2399680bdc4d`;
+- implementation status: `IMPLEMENTED + RUNTIME VALIDATED`;
+- representative runtime gates: PASS;
+- multi-process Persistence/Reopen: PASS.
+
+The v0.6 scope is documented in
+`docs/validation/PD_AGENT_V0.6_FINAL_CLOSURE.md`. This is implementation and
+capability completeness, separate from model/provider performance. No
+official v0.6 benchmark is required for this closure. Capabilities beyond the
+closed scope are deferred to a separately authorized future milestone; v0.7
+has not started and Alpha is not declared.
 
 ## v0.5 Closure
 
