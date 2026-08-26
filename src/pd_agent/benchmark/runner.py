@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from .models import (
     BenchmarkExecutionStatus,
     BenchmarkFailureCode,
     BenchmarkExecutionState,
+    BenchmarkRecoveryState,
 )
 from .scheduler import BenchmarkSchedule, BenchmarkScheduledAttempt, BenchmarkScheduler
 from .catalog import BenchmarkCatalog
@@ -53,7 +55,12 @@ from pd_agent.providers import (
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
     return path
 
 
@@ -208,6 +215,16 @@ class BenchmarkExecutionBatch:
     comparison_md_path: Path
 
 
+@dataclass(frozen=True, slots=True)
+class BenchmarkRecoveryReconstruction:
+    """Validated restart snapshot; reconstruction never calls a provider."""
+
+    execution_state: BenchmarkExecutionState
+    economic_state: LunaEconomicState | None
+    pending_physical_request_ids: tuple[str, ...] = ()
+    legacy: bool = False
+
+
 @dataclass(slots=True)
 class BenchmarkExecutionRunner:
     """Drive a whole benchmark dataset through schedule, executor and aggregator."""
@@ -224,6 +241,84 @@ class BenchmarkExecutionRunner:
     def __post_init__(self) -> None:
         if self.logical_session_cap <= 0:
             raise ValueError("logical_session_cap must be positive")
+
+    def reconstruct_execution(self, execution_dir: Path) -> BenchmarkRecoveryReconstruction:
+        """Load and validate durable state without dispatching or rewriting it."""
+
+        execution_dir = Path(execution_dir).resolve(strict=True)
+        state_path = execution_dir / "execution_state.json"
+        manifest_path = execution_dir / "manifest.json"
+        economic_path = execution_dir / "economic-state.json"
+        try:
+            manifest = BenchmarkExecutionManifest.from_dict(_load_json(manifest_path))
+            execution_state = BenchmarkExecutionState.from_dict(_load_json(state_path))
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            raise BenchmarkExecutionResumeError("malformed durable execution state", code="RECONSTRUCTION_INVALID_STATE") from exc
+        if execution_state.execution_id != manifest.execution_id or execution_dir.name != manifest.execution_id:
+            raise BenchmarkExecutionResumeError("execution identity mismatch during reconstruction", code="RECONSTRUCTION_DRIFT")
+        if manifest.economic_schema_version is None:
+            return BenchmarkRecoveryReconstruction(execution_state=execution_state, economic_state=None, legacy=True)
+        try:
+            economic_store = LunaEconomicStateStore.load(economic_path)
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            raise BenchmarkExecutionResumeError("malformed durable economic state", code="RECONSTRUCTION_ECONOMIC_STATE") from exc
+        economic = economic_store.state
+        if economic.execution_id != manifest.execution_id:
+            raise BenchmarkExecutionResumeError("economic execution identity mismatch", code="RECONSTRUCTION_DRIFT")
+        records = {}
+        for physical_id, raw in economic.dispatch_records.items():
+            try:
+                record = DispatchRecord.from_dict(raw)
+            except (TypeError, ValueError) as exc:
+                raise BenchmarkExecutionResumeError("malformed dispatch record", code="RECONSTRUCTION_DISPATCH_STATE") from exc
+            if str(physical_id) != record.physical_request_id:
+                raise BenchmarkExecutionResumeError("duplicate or mismatched physical dispatch identity", code="RECONSTRUCTION_DISPATCH_STATE")
+            if record.reservation_id is not None:
+                ledger = economic.ledger.get(record.reservation_id)
+                if not isinstance(ledger, Mapping):
+                    raise BenchmarkExecutionResumeError("dispatch reservation is missing", code="RECONSTRUCTION_LEDGER_STATE")
+                if ledger.get("attempt_id") != record.logical_attempt_id:
+                    raise BenchmarkExecutionResumeError("dispatch logical attempt mismatch", code="RECONSTRUCTION_LEDGER_STATE")
+                if record.dispatch_state == DISPATCH_STARTED and ledger.get("status") != UNCERTAIN_CONSUMED and record.functional_state == RESPONSE_MISSING:
+                    raise BenchmarkExecutionResumeError("response-missing dispatch is not economically uncertain", code="RECONSTRUCTION_LEDGER_STATE")
+            records[record.physical_request_id] = record
+        children: dict[str, list[DispatchRecord]] = {}
+        for record in records.values():
+            if record.recovery_of is None:
+                continue
+            parent = records.get(record.recovery_of)
+            if parent is None or record.recovery_generation != parent.recovery_generation + 1:
+                raise BenchmarkExecutionResumeError("invalid recovery parent or generation", code="RECONSTRUCTION_RECOVERY_STATE")
+            if record.logical_attempt_id != parent.logical_attempt_id:
+                raise BenchmarkExecutionResumeError("recovery logical attempt mismatch", code="RECONSTRUCTION_RECOVERY_STATE")
+            children.setdefault(parent.physical_request_id, []).append(record)
+        if any(len(items) > 1 for items in children.values()):
+            raise BenchmarkExecutionResumeError("duplicate recovery generation", code="RECONSTRUCTION_RECOVERY_STATE")
+        if execution_state.recovery_state is not None:
+            try:
+                recovery_state = BenchmarkRecoveryState.from_dict(dict(execution_state.recovery_state))
+            except (TypeError, ValueError, KeyError) as exc:
+                raise BenchmarkExecutionResumeError("malformed recovery state", code="RECONSTRUCTION_RECOVERY_STATE") from exc
+            original = records.get(recovery_state.original_physical_request_id)
+            if original is None or original.logical_attempt_id != recovery_state.logical_attempt_id:
+                raise BenchmarkExecutionResumeError("recovery state references unknown dispatch", code="RECONSTRUCTION_RECOVERY_STATE")
+            if recovery_state.recovery_physical_request_id is not None:
+                recovery = records.get(recovery_state.recovery_physical_request_id)
+                if recovery is None or recovery.recovery_of != original.physical_request_id:
+                    raise BenchmarkExecutionResumeError("recovery state physical identity mismatch", code="RECONSTRUCTION_RECOVERY_STATE")
+        pending = tuple(
+            record.physical_request_id
+            for record in records.values()
+            if record.dispatch_state == DISPATCH_STARTED
+            and record.functional_state == RESPONSE_MISSING
+            and economic.ledger.get(record.reservation_id or "", {}).get("status") == UNCERTAIN_CONSUMED
+        )
+        return BenchmarkRecoveryReconstruction(
+            execution_state=execution_state,
+            economic_state=economic,
+            pending_physical_request_ids=pending,
+            legacy=False,
+        )
 
     def _budget_guard(self) -> LunaBudgetGuard | None:
         provider = getattr(self.executor, "provider", None)
@@ -360,6 +455,15 @@ class BenchmarkExecutionRunner:
             }
         outcome = coordinator.recover(record, self._recovery_request(task=task, config=config))
         evidence = outcome.to_dict()
+        evidence.pop("response", None)
+        evidence.update(
+            {
+                "recovery_state_schema_version": 1,
+                "terminal_state": "PAUSED",
+                "continuation_status": "NOT_ATTEMPTED",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         if outcome.status not in {RECOVERY_EXISTING_RESPONSE, RECOVERY_REISSUE_SUCCEEDED}:
             return None, evidence
 
@@ -370,6 +474,7 @@ class BenchmarkExecutionRunner:
                 "continuation": "unavailable",
                 "reason": "executor cannot continue a recovered AgentResponse",
             }
+            evidence["reason"] = evidence["reason"]
             return None, evidence
         result = continuation(
             outcome.response,
@@ -390,6 +495,8 @@ class BenchmarkExecutionRunner:
                 "reason": "executor returned no benchmark result for recovered response",
             }
             return None, evidence
+        evidence["terminal_state"] = "RECOVERED"
+        evidence["continuation_status"] = "COMPLETED"
         return result, evidence
 
     def _paused_batch(
@@ -560,6 +667,9 @@ class BenchmarkExecutionRunner:
         preserve_workspaces: bool = False,
     ) -> BenchmarkExecutionBatch:
         execution_dir = Path(execution_dir).resolve(strict=True)
+        # Reconstruction is a read-only gate. It must succeed before resume
+        # can reach scheduler/provider code.
+        self.reconstruct_execution(execution_dir)
         manifest_path = execution_dir / "manifest.json"
         schedule_path = execution_dir / "schedule.json"
         execution_state_path = execution_dir / "execution_state.json"

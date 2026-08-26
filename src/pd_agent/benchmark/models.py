@@ -14,6 +14,7 @@ from pd_agent.core import ExecutionLimits
 
 
 SCHEMA_VERSION = 1
+RECOVERY_STATE_SCHEMA_VERSION = 1
 
 
 class BenchmarkSchemaError(ValueError):
@@ -26,6 +27,75 @@ class BenchmarkExecutionStatus(StrEnum):
     COMPLETED = "COMPLETED"
     BLOCKED = "BLOCKED"
     INVALID = "INVALID"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BenchmarkRecoveryState:
+    """Durable, redacted recovery decision metadata."""
+
+    schema_version: int = RECOVERY_STATE_SCHEMA_VERSION
+    status: str
+    original_physical_request_id: str
+    logical_attempt_id: str
+    strategy: str
+    recovery_generation: int
+    terminal_state: str
+    continuation_status: str
+    observed_at: datetime
+    recovery_physical_request_id: str | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.schema_version != RECOVERY_STATE_SCHEMA_VERSION:
+            raise ValueError("unsupported recovery state schema version")
+        for name in ("status", "original_physical_request_id", "logical_attempt_id", "strategy", "terminal_state", "continuation_status"):
+            object.__setattr__(self, name, _non_empty_text(getattr(self, name), field_name=name))
+        object.__setattr__(self, "recovery_generation", int(self.recovery_generation))
+        if self.recovery_generation < 0:
+            raise ValueError("recovery_generation must be non-negative")
+        if self.recovery_physical_request_id is not None:
+            object.__setattr__(self, "recovery_physical_request_id", _non_empty_text(self.recovery_physical_request_id, field_name="recovery_physical_request_id"))
+        if self.reason is not None:
+            object.__setattr__(self, "reason", _non_empty_text(self.reason, field_name="reason"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "recovery_state_schema_version": self.schema_version,
+            "status": self.status,
+            "original_physical_request_id": self.original_physical_request_id,
+            "logical_attempt_id": self.logical_attempt_id,
+            "strategy": self.strategy,
+            "recovery_generation": self.recovery_generation,
+            "terminal_state": self.terminal_state,
+            "continuation_status": self.continuation_status,
+            "observed_at": self.observed_at.isoformat(),
+            "recovery_physical_request_id": self.recovery_physical_request_id,
+            "reason": self.reason,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BenchmarkRecoveryState":
+        required = {
+            "recovery_state_schema_version", "status", "original_physical_request_id",
+            "logical_attempt_id", "strategy", "recovery_generation", "terminal_state",
+            "continuation_status", "observed_at", "recovery_physical_request_id", "reason",
+        }
+        missing = sorted(key for key in required if key not in data)
+        if missing:
+            raise ValueError(f"incomplete recovery state schema: missing {', '.join(missing)}")
+        return cls(
+            schema_version=int(data["recovery_state_schema_version"]),
+            status=str(data["status"]),
+            original_physical_request_id=str(data["original_physical_request_id"]),
+            logical_attempt_id=str(data["logical_attempt_id"]),
+            strategy=str(data["strategy"]),
+            recovery_generation=int(data["recovery_generation"]),
+            terminal_state=str(data["terminal_state"]),
+            continuation_status=str(data["continuation_status"]),
+            observed_at=datetime.fromisoformat(str(data["observed_at"])),
+            recovery_physical_request_id=(str(data["recovery_physical_request_id"]) if data["recovery_physical_request_id"] is not None else None),
+            reason=(str(data["reason"]) if data["reason"] is not None else None),
+        )
 
 
 class BenchmarkTaskOutcome(StrEnum):
@@ -201,7 +271,8 @@ class BenchmarkExecutionState:
         if self.economic_state is not None:
             object.__setattr__(self, "economic_state", dict(self.economic_state))
         if self.recovery_state is not None:
-            object.__setattr__(self, "recovery_state", dict(self.recovery_state))
+            normalized_recovery = BenchmarkRecoveryState.from_dict(dict(self.recovery_state))
+            object.__setattr__(self, "recovery_state", normalized_recovery.to_dict())
         object.__setattr__(self, "session_index", int(self.session_index))
         object.__setattr__(self, "resume_count", int(self.resume_count))
         if self.logical_budget_cap <= 0:
@@ -1078,6 +1149,7 @@ __all__ = [
     "BenchmarkDataset",
     "BenchmarkEnvironmentRequirements",
     "BenchmarkExecutionStatus",
+    "BenchmarkRecoveryState",
     "BenchmarkFailureCode",
     "BenchmarkFailureOrigin",
     "BenchmarkFixtureReference",
