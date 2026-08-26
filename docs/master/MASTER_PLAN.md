@@ -1,6 +1,6 @@
 # PD Agent - Master Plan
 
-Status: Active strategic direction.
+Status: v0.5 closed; later direction remains subject to separate authorization.
 
 PD Agent is a small, provider-neutral Python runtime for safe, evidence-based coding and validation workflows.
 
@@ -33,9 +33,29 @@ The project remains:
 3. `v0.2` - Minecraft Test Harness Foundation - completed
 4. `v0.3` - Minecraft Brain Foundation - completed
 5. `v0.4` - Benchmark Foundation - completed
-6. `Build & Debug` advanced - future review
-7. `Fabric Agent` complete - future review
-8. Later expansions such as multi-agent, UI and `.Fuzzer` remain dependent on evidence and re-evaluation
+6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
+7. Later expansions remain subject to separate evidence and authorization.
+
+## v0.5 Closure
+
+`PD Agent v0.5 - Fabric Agent Capability Foundation` is closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `f2524a15b58c82e6ad4ad417c25895b686ecafde`;
+- implementation completeness: `IMPLEMENTED + OFFLINE VALIDATED`;
+- Post-Dispatch Recovery: `DETERMINISTIC FAULT-INJECTION VALIDATED`;
+- final focused recovery validation: `212 passed`;
+- final full suite: `741 passed, 1 skipped`.
+
+The official Gemini F9 result remains terminal, incomplete and non-pass:
+T1 `1/3 PASS`, T2 `2/3 PASS`, T3 `1/2 PASS`. This is a model/provider
+performance result and is separate from implementation completeness. The
+isolated Luna F6-T2@5 result is experimental evidence only, with observed
+cost `$0.0155072`.
+
+See `docs/validation/PD_AGENT_V0.5_FINAL_CLOSURE.md` for the complete
+closure record. Alpha is not declared reached, and this document does not
+define v0.6 scope.
 
 ## v0.2 Closure
 

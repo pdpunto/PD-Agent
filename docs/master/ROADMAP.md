@@ -1,6 +1,6 @@
 # PD Agent - Roadmap
 
-Status: Updated after v0.4 validation.
+Status: Updated after v0.5 final closure.
 
 ## Confirmed Milestones
 
@@ -9,6 +9,28 @@ Status: Updated after v0.4 validation.
 3. `v0.2` - Minecraft Test Harness Foundation - completed
 4. `v0.3` - Minecraft Brain Foundation - completed
 5. `v0.4` - Benchmark Foundation - completed
+6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
+
+## v0.5 Closure
+
+`v0.5` is formally closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `f2524a15b58c82e6ad4ad417c25895b686ecafde`;
+- implementation completeness: `IMPLEMENTED + OFFLINE VALIDATED`;
+- Post-Dispatch Recovery: `DETERMINISTIC FAULT-INJECTION VALIDATED`;
+- final focused recovery validation: `212 passed`;
+- final full suite: `741 passed, 1 skipped`.
+
+Implementation completeness is separate from model/provider performance. The
+official Gemini F9 evidence remains `TERMINAL / INCOMPLETE / NON-PASS` with
+T1 `1/3 PASS`, T2 `2/3 PASS` and T3 `1/2 PASS`. The isolated Luna F6-T2@5
+result remains experimental evidence only, with observed cost `$0.0155072`.
+
+The detailed closure record is
+`docs/validation/PD_AGENT_V0.5_FINAL_CLOSURE.md`.
+
+Alpha is not declared reached, and this roadmap does not define v0.6 scope.
 
 ## v0.2 Closure
 
