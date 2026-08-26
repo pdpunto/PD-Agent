@@ -237,6 +237,36 @@ final class HarnessResult {
         return blockEntity(config, identity, expected, actual, pass, reason);
     }
 
+    static HarnessResult tagMembership(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        JsonElement expected,
+        JsonElement actual,
+        boolean pass,
+        String reason
+    ) {
+        return blockEntity(config, identity, expected, actual, pass, reason);
+    }
+
+    static HarnessResult tagMembershipError(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        JsonElement expected,
+        JsonElement actual,
+        String outcome,
+        String reason
+    ) {
+        HarnessResult result = create(
+            config, identity, config.observationType(), false, null, null,
+            outcome, false, reason,
+            null, null, null, null, null, null, null, false
+        );
+        result.structuredObservation = new com.google.gson.JsonObject();
+        result.structuredObservation.getAsJsonObject().add("expected", expected);
+        result.structuredObservation.getAsJsonObject().add("actual", actual);
+        return result;
+    }
+
     private static HarnessResult create(
         HarnessConfig config,
         HarnessIdentity identity,

@@ -21,6 +21,9 @@ record HarnessConfig(
     int observationSlot,
     int observationCount,
     boolean observationMutation,
+    String observationTagId,
+    String observationMemberId,
+    boolean observationExpectedMembership,
     Path resultPath,
     boolean expectNeighborUpdate
 ) {
@@ -38,6 +41,9 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_SLOT = "pd.agent.observationSlot";
     static final String PROP_OBSERVATION_COUNT = "pd.agent.observationCount";
     static final String PROP_OBSERVATION_MUTATION = "pd.agent.observationMutation";
+    static final String PROP_OBSERVATION_TAG_ID = "pd.agent.observationTagId";
+    static final String PROP_OBSERVATION_MEMBER_ID = "pd.agent.observationMemberId";
+    static final String PROP_OBSERVATION_EXPECTED_MEMBERSHIP = "pd.agent.observationExpectedMembership";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
@@ -45,6 +51,7 @@ record HarnessConfig(
     static final String OBSERVATION_ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE";
     static final String OBSERVATION_BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE";
     static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
+    static final String OBSERVATION_TAG_MEMBERSHIP = "TAG_MEMBERSHIP";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -63,6 +70,8 @@ record HarnessConfig(
         observationBlockEntityId = normalizeBlockEntityId(observationType, observationBlockEntityId);
         observationSlot = normalizeSlot(observationType, observationSlot);
         observationCount = normalizeCount(observationType, observationCount);
+        observationTagId = normalizeTagId(observationType, observationTagId);
+        observationMemberId = normalizeTagMemberId(observationType, observationMemberId);
         resultPath = normalizeResultPath(resultPath);
     }
 
@@ -83,6 +92,9 @@ record HarnessConfig(
             requireInteger(PROP_OBSERVATION_SLOT, 0),
             requireInteger(PROP_OBSERVATION_COUNT, 5),
             requireBoolean(PROP_OBSERVATION_MUTATION, true),
+            requireObservationText(PROP_OBSERVATION_TAG_ID, observationType),
+            requireObservationText(PROP_OBSERVATION_MEMBER_ID, observationType),
+            requireBoolean(PROP_OBSERVATION_EXPECTED_MEMBERSHIP, true),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
         );
@@ -130,13 +142,20 @@ record HarnessConfig(
             && !OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(normalized)
             && !OBSERVATION_ITEM_COMPONENT_STATE.equals(normalized)
             && !OBSERVATION_BLOCK_ENTITY_STATE.equals(normalized)
-            && !OBSERVATION_INVENTORY_STATE.equals(normalized)) {
+            && !OBSERVATION_INVENTORY_STATE.equals(normalized)
+            && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)) {
             throw new IllegalArgumentException("unsupported observation type: " + value);
         }
         return normalized;
     }
 
     private static String normalizeObservationRegistryKind(String observationType, String value) {
+        if (OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {
+            if (!"item".equals(value)) {
+                throw new IllegalArgumentException("TAG_MEMBERSHIP only supports the item registry");
+            }
+            return value;
+        }
         if (!OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType)) {
             return null;
         }
@@ -206,6 +225,28 @@ record HarnessConfig(
         return value;
     }
 
+    private static String normalizeTagId(String observationType, String value) {
+        if (!OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {
+            return null;
+        }
+        if (!"pdagentl11_harness:i4_controlled_members".equals(value)) {
+            throw new IllegalArgumentException("unsupported controlled I4 tag");
+        }
+        return value;
+    }
+
+    private static String normalizeTagMemberId(String observationType, String value) {
+        if (!OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {
+            return null;
+        }
+        if (!"minecraft:diamond".equals(value)
+            && !"minecraft:gold_ingot".equals(value)
+            && !"minecraft:stone".equals(value)) {
+            throw new IllegalArgumentException("member is outside the controlled I4 fixture");
+        }
+        return value;
+    }
+
     private static String requireTextValue(String label, String value) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(label + " cannot be empty");
@@ -220,10 +261,15 @@ record HarnessConfig(
         boolean componentField = PROP_OBSERVATION_COMPONENT_ID.equals(key)
             || PROP_OBSERVATION_ITEM_ID.equals(key);
         boolean blockEntityField = PROP_OBSERVATION_BLOCK_ENTITY_ID.equals(key);
-        if ((registryField && OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType))
+        boolean tagField = PROP_OBSERVATION_TAG_ID.equals(key)
+            || PROP_OBSERVATION_MEMBER_ID.equals(key);
+        if (registryField && OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType)
             || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))
             || (PROP_OBSERVATION_ITEM_ID.equals(key) && OBSERVATION_INVENTORY_STATE.equals(observationType))
             || (blockEntityField && OBSERVATION_BLOCK_ENTITY_STATE.equals(observationType))) {
+            return requireTextValue(key, value);
+        }
+        if (tagField && OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {
             return requireTextValue(key, value);
         }
         return value == null ? null : value.trim();

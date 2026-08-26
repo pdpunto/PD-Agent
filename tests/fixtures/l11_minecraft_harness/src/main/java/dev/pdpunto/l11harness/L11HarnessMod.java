@@ -23,8 +23,10 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
         while (true) {
             Object gameInstance = FabricLoader.getInstance().getGameInstance();
             if (gameInstance instanceof MinecraftServer server) {
-                onServerStarted(server);
-                return;
+                if (server.isRunning()) {
+                    onServerStarted(server);
+                    return;
+                }
             }
             sleepShort(50L);
         }
@@ -82,6 +84,9 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
             null,
             0,
             5,
+            true,
+            null,
+            null,
             true,
             java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "harness-result.json").toAbsolutePath(),
             false

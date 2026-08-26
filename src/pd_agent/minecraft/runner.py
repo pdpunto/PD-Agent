@@ -33,6 +33,7 @@ from .contracts import (
     validate_item_component_profile,
     validate_block_entity_profile,
     validate_inventory_profile,
+    validate_tag_membership_profile,
 )
 from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 
@@ -153,6 +154,22 @@ def _controlled_world_profile(observation_type: MinecraftObservationType, params
     )
 
 
+def _tag_membership_properties(params: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    selector = {
+        "registry_kind": params.get("registry_kind", "item"),
+        "tag_id": params.get("tag_id", "pdagentl11_harness:i4_controlled_members"),
+        "member_id": params.get("member_id", "minecraft:diamond"),
+    }
+    parameters = {"expected_membership": params.get("expected_membership", True)}
+    validate_tag_membership_profile(selector, parameters)
+    return (
+        selector["registry_kind"],
+        selector["tag_id"],
+        selector["member_id"],
+        str(parameters["expected_membership"]).lower(),
+    )
+
+
 def _non_empty_set(values: Sequence[str] | None) -> frozenset[str]:
     if values is None:
         return frozenset()
@@ -239,6 +256,8 @@ class MinecraftTestRunner:
             MinecraftObservationType.INVENTORY_STATE,
         }:
             _controlled_world_profile(spec.observation_type, spec.observation_params)
+        elif spec.observation_type is MinecraftObservationType.TAG_MEMBERSHIP:
+            _tag_membership_properties(spec.observation_params)
 
     def validate_target(
         self,
@@ -318,6 +337,14 @@ class MinecraftTestRunner:
                     _item_component_properties(spec.observation_params),
                 ))
                 if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationRegistryKind", "pd.agent.observationTagId", "pd.agent.observationMemberId", "pd.agent.observationExpectedMembership"),
+                    _tag_membership_properties(spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.TAG_MEMBERSHIP
                 else ()
             ),
             *(
@@ -585,6 +612,17 @@ class MinecraftTestRunner:
                     )
                 )
                 if result.spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
+                else ()
+            ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationRegistryKind", "pd.agent.observationTagId", "pd.agent.observationMemberId", "pd.agent.observationExpectedMembership"),
+                        _tag_membership_properties(result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.TAG_MEMBERSHIP
                 else ()
             ),
             *(
@@ -892,6 +930,32 @@ class MinecraftTestRunner:
                         None
                         if functional_test_result == "PASS"
                         else {"code": f"{observation_type.value}_MISMATCH", "message": reason}
+                    ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() == MinecraftObservationType.TAG_MEMBERSHIP.value:
+                observation = ObservationResult(
+                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_type=MinecraftObservationType.TAG_MEMBERSHIP,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected=dict(harness_result.get("observation_expected", {})),
+                    actual=dict(harness_result.get("observation_actual", {})),
+                    phase="RUNTIME",
+                    evidence_refs=(
+                        MinecraftEvidenceReference(
+                            kind=MinecraftEvidenceKind.OBSERVATION,
+                            ref="harness-result.json",
+                            phase="RUNTIME",
+                        ),
+                    ),
+                    error=(
+                        None
+                        if functional_test_result == "PASS"
+                        else {"code": "TAG_MEMBERSHIP_MISMATCH", "message": reason}
                     ),
                 )
                 metadata["observation_result"] = observation.to_dict()

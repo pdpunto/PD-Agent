@@ -16,6 +16,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryKeys;
+import net.minecraft.registry.RegistryWrapper;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.registry.entry.RegistryEntryList;
+import net.minecraft.registry.tag.TagKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
@@ -58,8 +63,57 @@ final class HarnessRunner {
         if (HarnessConfig.OBSERVATION_INVENTORY_STATE.equals(config.observationType())) {
             return runInventoryObservation(config, identity, world);
         }
+        if (HarnessConfig.OBSERVATION_TAG_MEMBERSHIP.equals(config.observationType())) {
+            return runTagMembershipObservation(server, config, identity);
+        }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runTagMembershipObservation(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity
+    ) {
+        server.reloadResources(server.getDataPackManager().getEnabledIds()).join();
+        Identifier tagId = parseIdentifier(config.observationTagId());
+        Identifier memberId = parseIdentifier(config.observationMemberId());
+        TagKey<Item> tagKey = TagKey.of(RegistryKeys.ITEM, tagId);
+        RegistryWrapper.Impl<Item> itemLookup = server.getReloadableRegistries()
+            .createRegistryLookup()
+            .getOrThrow(RegistryKeys.ITEM);
+        java.util.Optional<RegistryEntryList.Named<Item>> tag = itemLookup.getOptional(tagKey);
+        java.util.Optional<RegistryEntry.Reference<Item>> member = Registries.ITEM.getEntry(memberId);
+        JsonObject expected = new JsonObject();
+        expected.addProperty("registry_kind", config.observationRegistryKind());
+        expected.addProperty("tag_id", tagId.toString());
+        expected.addProperty("member_id", memberId.toString());
+        expected.addProperty("expected_membership", config.observationExpectedMembership());
+        JsonObject actual = new JsonObject();
+        actual.addProperty("registry_kind", "item");
+        actual.addProperty("tag_id", tagId.toString());
+        actual.addProperty("member_id", memberId.toString());
+        actual.addProperty("tag_resolved", tag.isPresent());
+        actual.addProperty("member_resolved", member.isPresent());
+        if (tag.isEmpty()) {
+            actual.addProperty("is_member", false);
+            return HarnessResult.tagMembershipError(
+                config, identity, expected, actual, "INVALID", "controlled tag was not resolved"
+            );
+        }
+        if (member.isEmpty()) {
+            actual.addProperty("is_member", false);
+            return HarnessResult.tagMembershipError(
+                config, identity, expected, actual, "INVALID", "controlled member was not resolved"
+            );
+        }
+        boolean isMember = tag.get().contains(member.get());
+        actual.addProperty("is_member", isMember);
+        boolean pass = isMember == config.observationExpectedMembership();
+        return HarnessResult.tagMembership(
+            config, identity, expected, actual, pass,
+            pass ? "runtime item tag membership observed" : "tag membership did not match expectation"
+        );
     }
 
     private static HarnessResult runBlockEntityObservation(

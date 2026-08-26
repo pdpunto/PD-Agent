@@ -61,6 +61,16 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
             "motd=PD Agent\n",
             Charsets.UTF_8,
         )
+        val datapackRoot = runDir.resolve("world/datapacks/i4-controlled")
+        datapackRoot.resolve("data/pdagentl11_harness/tags/item").mkdirs()
+        datapackRoot.resolve("pack.mcmeta").writeText(
+            "{\"pack\":{\"pack_format\":94,\"description\":\"PD Agent I4 controlled tag\"}}",
+            Charsets.UTF_8,
+        )
+        datapackRoot.resolve("data/pdagentl11_harness/tags/item/i4_controlled_members.json").writeText(
+            "{\"replace\":false,\"values\":[\"minecraft:diamond\",\"minecraft:gold_ingot\"]}",
+            Charsets.UTF_8,
+        )
     }
     programArgs.add("--nogui")
     jvmArgs.add("-Dpd.agent.targetModId=${providers.gradleProperty("pd.agent.targetModId").get()}")
@@ -89,6 +99,13 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     providers.gradleProperty("pd.agent.observationBlockEntityId").orNull?.let {
         jvmArgs.add("-Dpd.agent.observationBlockEntityId=$it")
     }
+    providers.gradleProperty("pd.agent.observationTagId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationTagId=$it")
+    }
+    providers.gradleProperty("pd.agent.observationMemberId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationMemberId=$it")
+    }
+    jvmArgs.add("-Dpd.agent.observationExpectedMembership=${providers.gradleProperty("pd.agent.observationExpectedMembership").orElse("true").get()}")
     jvmArgs.add("-Dpd.agent.observationSlot=${providers.gradleProperty("pd.agent.observationSlot").orElse("0").get()}")
     jvmArgs.add("-Dpd.agent.observationCount=${providers.gradleProperty("pd.agent.observationCount").orElse("5").get()}")
     jvmArgs.add("-Dpd.agent.observationMutation=${providers.gradleProperty("pd.agent.observationMutation").orElse("true").get()}")

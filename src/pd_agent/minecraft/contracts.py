@@ -29,6 +29,29 @@ _UNSAFE_PARAMETER_KEYS = {
 }
 _ITEM_COMPONENT_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
 _CONTROLLED_HOPPER_POS = (8, 64, 8)
+_I4_TAG_ID = "pdagentl11_harness:i4_controlled_members"
+_I4_TAG_MEMBERS = {"minecraft:diamond", "minecraft:gold_ingot", "minecraft:stone"}
+
+
+def validate_tag_membership_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the closed item-tag profile used by I4."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"registry_kind", "tag_id", "member_id"}:
+        raise ValueError("TAG_MEMBERSHIP selector must declare registry_kind, tag_id and member_id")
+    if selector.get("registry_kind") != "item":
+        raise ValueError("TAG_MEMBERSHIP only supports the item registry")
+    if selector.get("tag_id") != _I4_TAG_ID:
+        raise ValueError("TAG_MEMBERSHIP only supports the controlled I4 tag")
+    member_id = selector.get("member_id")
+    if member_id not in _I4_TAG_MEMBERS:
+        raise ValueError("TAG_MEMBERSHIP member is outside the controlled I4 fixture")
+    if not isinstance(parameters, Mapping) or set(parameters) != {"expected_membership"}:
+        raise ValueError("TAG_MEMBERSHIP parameters must declare expected_membership only")
+    if not isinstance(parameters["expected_membership"], bool):
+        raise ValueError("TAG_MEMBERSHIP expected_membership must be boolean")
 
 
 def _controlled_position(selector: Mapping[str, Any], *, kind: str, selector_kind: str) -> None:

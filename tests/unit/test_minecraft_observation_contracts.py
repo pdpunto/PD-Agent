@@ -15,6 +15,7 @@ from pd_agent.minecraft import (
     validate_item_component_profile,
     validate_block_entity_profile,
     validate_inventory_profile,
+    validate_tag_membership_profile,
 )
 
 
@@ -151,6 +152,32 @@ def test_i3_hopper_profiles_are_closed_and_controlled() -> None:
         {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]},
         {"slot": 0, "item_id": "minecraft:diamond", "count": 5, "mutation": True},
     )
+
+
+def test_i4_tag_membership_profile_is_closed() -> None:
+    validate_tag_membership_profile(
+        {
+            "registry_kind": "item",
+            "tag_id": "pdagentl11_harness:i4_controlled_members",
+            "member_id": "minecraft:diamond",
+        },
+        {"expected_membership": True},
+    )
+
+
+@pytest.mark.parametrize(
+    "selector, parameters",
+    [
+        ({"registry_kind": "block", "tag_id": "pdagentl11_harness:i4_controlled_members", "member_id": "minecraft:diamond"}, {"expected_membership": True}),
+        ({"registry_kind": "item", "tag_id": "minecraft:logs", "member_id": "minecraft:oak_log"}, {"expected_membership": True}),
+        ({"registry_kind": "item", "tag_id": "pdagentl11_harness:i4_controlled_members", "member_id": "minecraft:stone"}, {"expected_membership": "false"}),
+        ({"registry_kind": "item", "tag_id": "pdagentl11_harness:i4_controlled_members", "member_id": "minecraft:diamond", "path": "x"}, {"expected_membership": True}),
+        ({"registry_kind": "item", "tag_id": "pdagentl11_harness:i4_controlled_members", "member_id": "minecraft:diamond"}, {"expected_membership": True, "command": "x"}),
+    ],
+)
+def test_i4_tag_membership_profile_rejects_unsafe_or_unsupported_input(selector, parameters) -> None:
+    with pytest.raises(ValueError):
+        validate_tag_membership_profile(selector, parameters)
 
 
 @pytest.mark.parametrize(
