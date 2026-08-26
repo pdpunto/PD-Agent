@@ -413,6 +413,18 @@ class BenchmarkExecutionRunner:
             )
         return matches[0] if matches else None
 
+    @staticmethod
+    def _recovery_continuation_already_completed(
+        recovery_state: Mapping[str, Any] | None,
+    ) -> bool:
+        """Prevent a crash-resume from replaying a completed continuation."""
+
+        return bool(
+            recovery_state is not None
+            and recovery_state.get("terminal_state") == "RECOVERED"
+            and recovery_state.get("continuation_status") == "COMPLETED"
+        )
+
     def _recovery_request(
         self,
         *,
@@ -908,6 +920,24 @@ class BenchmarkExecutionRunner:
                         )
                 recovery_state = current_state.recovery_state
                 if recovery_record is not None:
+                    if self._recovery_continuation_already_completed(recovery_state):
+                        return self._paused_batch(
+                            batch_status=BenchmarkBatchStatus.BUDGET_PAUSED,
+                            reason="recovery continuation already completed; response replay is unavailable",
+                            logical_requests_used=logical_requests_used,
+                            reservation=reservation,
+                            attempt=attempt,
+                            current_state=current_state,
+                            schedule=schedule,
+                            dataset=dataset,
+                            configs=configs,
+                            tasks=tasks,
+                            manifest=manifest,
+                            execution_dir=execution_dir,
+                            manifest_path=manifest_path,
+                            schedule_path=schedule_path,
+                            execution_state_path=execution_state_path,
+                        )
                     result, recovery_state = self._recover_pending(
                         record=recovery_record,
                         task=task,
