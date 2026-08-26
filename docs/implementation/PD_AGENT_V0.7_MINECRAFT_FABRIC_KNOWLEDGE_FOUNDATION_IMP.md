@@ -1,9 +1,9 @@
 # PD Agent v0.7 - Minecraft/Fabric Knowledge Foundation IMP
 
-**Estado:** IMP propuesto para auditoria Codex  
-**Milestone:** PD Agent v0.7 - Knowledge Foundation  
-**Design:** `docs/design/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_DESIGN.md`  
-**RFC:** `docs/rfc/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_RFC.md`  
+**Estado:** IMP propuesto para auditoria Codex
+**Milestone:** PD Agent v0.7 - Knowledge Foundation
+**Design:** `docs/design/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_DESIGN.md`
+**RFC:** `docs/rfc/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_RFC.md`
 **Scope:** Minecraft 1.21.11 + Fabric exclusivamente
 
 > Este documento define como construir la arquitectura aprobada. No implementa
