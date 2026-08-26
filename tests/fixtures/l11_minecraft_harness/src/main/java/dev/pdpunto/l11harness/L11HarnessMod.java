@@ -22,6 +22,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.WorldChunk;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
     @Override
@@ -48,6 +49,21 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
                 hopper.setStack(0, new ItemStack(Items.DIAMOND, 3));
                 hopper.markDirty();
                 HarnessSignals.markWorldLoadCallbackExecuted();
+            }
+        });
+        ServerLifecycleEvents.BEFORE_SAVE.register((server, flush, force) -> {
+            if (isPersistence()) {
+                PersistenceSignals.mark("BEFORE_SAVE");
+            }
+        });
+        ServerLifecycleEvents.AFTER_SAVE.register((server, flush, force) -> {
+            if (isPersistence()) {
+                PersistenceSignals.mark("AFTER_SAVE");
+            }
+        });
+        ServerWorldEvents.UNLOAD.register((server, world) -> {
+            if (isPersistence() && world == server.getOverworld()) {
+                PersistenceSignals.mark("WORLD_UNLOAD");
             }
         });
         Thread waiter = Thread.ofPlatform().daemon().name("pd-agent-l11-harness").start(this::waitForServerStart);
@@ -93,6 +109,7 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
         try {
             config = HarnessConfig.fromSystemProperties();
             options = HarnessRuntimeOptions.fromSystemProperties();
+            configurePersistenceSignals();
             if (options.resultMode() == HarnessRuntimeOptions.ResultMode.CRASH) {
                 System.exit(1);
                 return;
@@ -121,6 +138,23 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
         } finally {
             server.stop(false);
         }
+    }
+
+    private static boolean isPersistence() {
+        return System.getProperty("pd.agent.persistencePhase") != null;
+    }
+
+    private static void configurePersistenceSignals() {
+        String phase = System.getProperty("pd.agent.persistencePhase");
+        if (phase == null) {
+            return;
+        }
+        PersistenceSignals.configure(
+            phase,
+            System.getProperty("pd.agent.persistenceScenarioId", "unknown"),
+            System.getProperty("pd.agent.persistenceWorldId", "unknown"),
+            java.nio.file.Path.of(System.getProperty("pd.agent.persistenceEvidencePath"))
+        );
     }
 
     private HarnessConfig fallbackConfig() {

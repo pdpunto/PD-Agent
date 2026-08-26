@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from dataclasses import replace
 from typing import Any, Mapping, Sequence
 
 from pd_agent.core import SecurityViolation
@@ -31,6 +32,8 @@ from .contracts import (
     MinecraftTestSpec,
     MinecraftTestStatus,
     ObservationResult,
+    PersistencePhase,
+    PersistenceScenario,
     validate_item_component_profile,
     validate_block_entity_profile,
     validate_inventory_profile,
@@ -42,6 +45,32 @@ from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmen
 
 
 DEFAULT_PRODUCTION_TASK = "productionServerRun"
+
+
+@dataclass(frozen=True, slots=True)
+class PersistenceRunResult:
+    """Durable result for the bounded two-process persistence scenario."""
+
+    scenario: PersistenceScenario
+    phase1: MinecraftTestResult
+    phase2: MinecraftTestResult | None
+    lifecycle_evidence: Mapping[str, Any]
+    status: str
+    reason: str
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "PASS"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scenario": self.scenario.to_dict(),
+            "phase1": self.phase1.to_dict(),
+            "phase2": self.phase2.to_dict() if self.phase2 is not None else None,
+            "lifecycle_evidence": dict(self.lifecycle_evidence),
+            "status": self.status,
+            "reason": self.reason,
+        }
 
 
 def _write_json(path: Path, data: Mapping[str, Any]) -> None:
@@ -346,12 +375,16 @@ class MinecraftTestRunner:
         *,
         run_id: str | None = None,
         java_version: str | None = None,
+        runtime_run_dir: Path | None = None,
+        persistence_phase: PersistencePhase | None = None,
+        persistence_scenario: PersistenceScenario | None = None,
+        persistence_evidence_path: Path | None = None,
     ) -> MinecraftLaunchPlan:
         run_id = self._resolve_run_id(run_id)
         target = self.validate_target(spec, java_version=java_version)
         target_entrypoint_class = _target_entrypoint_class(_read_manifest(target.path), target_path=target.path)
         evidence_paths = self.build_evidence_paths(run_id, create=True)
-        run_dir = evidence_paths.root / "runtime"
+        run_dir = Path(runtime_run_dir).resolve() if runtime_run_dir is not None else evidence_paths.root / "runtime"
         system_properties = (
             ("pd.agent.minecraft.run_id", run_id),
             ("pd.agent.minecraft.target_mod_id", spec.target_mod_id),
@@ -374,6 +407,18 @@ class MinecraftTestRunner:
             *(
                 (("pd.agent.observationIdentifier", observation_identifier),)
                 if (observation_identifier := _registry_identifier_from_params(spec.observation_params)) is not None
+                else ()
+            ),
+            *(
+                (
+                    ("pd.agent.persistencePhase", persistence_phase.value),
+                    ("pd.agent.persistenceScenarioId", persistence_scenario.scenario_id),
+                    ("pd.agent.persistenceWorldId", persistence_scenario.world_id),
+                    ("pd.agent.persistenceEvidencePath", persistence_evidence_path.as_posix()),
+                )
+                if persistence_phase is not None
+                and persistence_scenario is not None
+                and persistence_evidence_path is not None
                 else ()
             ),
             *(
@@ -443,13 +488,25 @@ class MinecraftTestRunner:
         *,
         run_id: str | None = None,
         java_version: str | None = None,
+        runtime_run_dir: Path | None = None,
+        persistence_phase: PersistencePhase | None = None,
+        persistence_scenario: PersistenceScenario | None = None,
+        persistence_evidence_path: Path | None = None,
     ) -> MinecraftTestResult:
         run_id = self._resolve_run_id(run_id)
         target = self.validate_target(spec, java_version=java_version)
         evidence_paths = self.build_evidence_paths(run_id, create=True)
         _write_json(evidence_paths.spec_json, spec.to_dict())
         _write_json(evidence_paths.target_json, target.to_dict())
-        launch_plan = self.build_launch_plan(spec, run_id=run_id, java_version=java_version)
+        launch_plan = self.build_launch_plan(
+            spec,
+            run_id=run_id,
+            java_version=java_version,
+            runtime_run_dir=runtime_run_dir,
+            persistence_phase=persistence_phase,
+            persistence_scenario=persistence_scenario,
+            persistence_evidence_path=persistence_evidence_path,
+        )
         now = datetime.now(timezone.utc)
         return MinecraftTestResult(
             run_id=run_id,
@@ -476,8 +533,20 @@ class MinecraftTestRunner:
         launch_mode: str = "pass",
         expected_sha256: str | None = None,
         authorized_runtime_roots: Sequence[Path] | None = None,
+        runtime_run_dir: Path | None = None,
+        persistence_phase: PersistencePhase | None = None,
+        persistence_scenario: PersistenceScenario | None = None,
+        persistence_evidence_path: Path | None = None,
     ) -> MinecraftTestResult:
-        preflight = self.prepare_run(spec, run_id=run_id, java_version=java_version)
+        preflight = self.prepare_run(
+            spec,
+            run_id=run_id,
+            java_version=java_version,
+            runtime_run_dir=runtime_run_dir,
+            persistence_phase=persistence_phase,
+            persistence_scenario=persistence_scenario,
+            persistence_evidence_path=persistence_evidence_path,
+        )
         if not self.harness_root.exists():
             return self._finalize_runtime_failure(
                 preflight,
@@ -506,7 +575,14 @@ class MinecraftTestRunner:
                         "runtime_mod_dependencies": [],
                     },
                 )
-        launch_props = self._build_launch_properties(preflight, launch_mode, expected_sha256=expected_sha256)
+        launch_props = self._build_launch_properties(
+            preflight,
+            launch_mode,
+            expected_sha256=expected_sha256,
+            persistence_phase=persistence_phase,
+            persistence_scenario=persistence_scenario,
+            persistence_evidence_path=persistence_evidence_path,
+        )
         command = self._build_command(launch_props)
         process = self._run_command(command, cwd=self.harness_root, timeout_seconds=spec.timeout_seconds)
         process_evidence = MinecraftProcessEvidence(
@@ -547,6 +623,7 @@ class MinecraftTestRunner:
             launch_mode=launch_mode,
             target=preflight.target,
             timeout_seconds=spec.timeout_seconds,
+            persistence_phase=persistence_phase.value if persistence_phase is not None else None,
         )
         runtime_evidence = MinecraftRuntimeEvidence(
             harness_result_path=runtime_evidence.harness_result_path,
@@ -622,12 +699,114 @@ class MinecraftTestRunner:
         _write_json(preflight.evidence_paths.result_json, final_result.to_dict())
         return final_result
 
+    def run_persistence(
+        self,
+        spec: MinecraftTestSpec,
+        scenario: PersistenceScenario,
+        *,
+        authorized_root: Path,
+        java_version: str | None = None,
+        timeout_seconds: int | None = None,
+    ) -> PersistenceRunResult:
+        """Execute one bounded Phase 1/Phase 2 scenario on one owned world."""
+
+        if scenario.phase is not PersistencePhase.PHASE_1:
+            raise MinecraftTestValidationError("persistence execution must start with PHASE_1")
+        root = Path(authorized_root).resolve(strict=False)
+        root.mkdir(parents=True, exist_ok=True)
+        world_root = scenario.resolve_world_root(root)
+        if world_root.exists():
+            raise MinecraftTestValidationError("persistence Phase 1 world root already exists")
+        scenario_dir = root / "scenario"
+        scenario_dir.mkdir(parents=True, exist_ok=True)
+        scenario_path = scenario_dir / "scenario.json"
+        _write_json(scenario_path, scenario.to_dict())
+        lifecycle1 = scenario_dir / "phase-1" / "lifecycle.json"
+        lifecycle2 = scenario_dir / "phase-2" / "lifecycle.json"
+        phase1 = self.run(
+            spec,
+            run_id=f"{scenario.scenario_id}-phase-1",
+            java_version=java_version,
+            launch_mode="pass",
+            expected_sha256=scenario.target_artifact_sha256,
+            runtime_run_dir=root,
+            persistence_phase=PersistencePhase.PHASE_1,
+            persistence_scenario=scenario,
+            persistence_evidence_path=lifecycle1,
+        )
+        self._mark_process_exit(lifecycle1, phase1.process_evidence.exit_code if phase1.process_evidence else None)
+        lifecycle_data = self._read_json_mapping(lifecycle1)
+        required_phase1 = {"before_save", "after_save", "save_completed", "world_unload", "shutdown_initiated"}
+        if phase1.status is not MinecraftTestStatus.PASS or not required_phase1.issubset(lifecycle_data):
+            return PersistenceRunResult(scenario, phase1, None, lifecycle_data, "BLOCKED", "Phase 1 persistence lifecycle incomplete")
+        if not world_root.exists():
+            return PersistenceRunResult(scenario, phase1, None, lifecycle_data, "BLOCKED", "owned world root missing after Phase 1")
+
+        phase2_scenario = replace(
+            scenario,
+            phase=PersistencePhase.PHASE_2,
+            process_id=f"{scenario.process_id}-phase-2",
+            predecessor_process_id=scenario.process_id,
+            same_world_required=True,
+            reopen_only=True,
+            setup_allowed=False,
+            mutation_allowed_before_observation=False,
+            world_root_must_exist=True,
+            world_fingerprint=scenario.world_fingerprint or {"level_name": "world"},
+        )
+        if not world_root.exists() or not (world_root / "level.dat").exists():
+            return PersistenceRunResult(scenario, phase1, None, lifecycle_data, "INVALID", "owned world root is not reopenable")
+        phase2 = self.run(
+            spec,
+            run_id=f"{scenario.scenario_id}-phase-2",
+            java_version=java_version,
+            launch_mode="pass",
+            expected_sha256=scenario.target_artifact_sha256,
+            runtime_run_dir=root,
+            persistence_phase=PersistencePhase.PHASE_2,
+            persistence_scenario=phase2_scenario,
+            persistence_evidence_path=lifecycle2,
+        )
+        self._mark_process_exit(lifecycle2, phase2.process_evidence.exit_code if phase2.process_evidence else None)
+        lifecycle_data.update({f"phase2_{key}": value for key, value in self._read_json_mapping(lifecycle2).items()})
+        status = "PASS" if phase2.status is MinecraftTestStatus.PASS else "FAIL"
+        reason = "persisted inventory reopened" if status == "PASS" else "PERSISTED_STATE_MISMATCH"
+        _write_json(scenario_dir / "result.json", {
+            "scenario": scenario.to_dict(),
+            "phase1": phase1.to_dict(),
+            "phase2": phase2.to_dict(),
+            "lifecycle_evidence": lifecycle_data,
+            "status": status,
+            "reason": reason,
+        })
+        return PersistenceRunResult(scenario, phase1, phase2, lifecycle_data, status, reason)
+
+    @staticmethod
+    def _read_json_mapping(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return dict(value) if isinstance(value, Mapping) else {}
+
+    @classmethod
+    def _mark_process_exit(cls, path: Path, exit_code: int | None) -> None:
+        data = cls._read_json_mapping(path)
+        data["process_exit"] = "clean" if exit_code == 0 else "abnormal"
+        data["exit_code"] = exit_code
+        _write_json(path, data)
+
     def _build_launch_properties(
         self,
         result: MinecraftTestResult,
         launch_mode: str,
         *,
         expected_sha256: str | None = None,
+        persistence_phase: PersistencePhase | None = None,
+        persistence_scenario: PersistenceScenario | None = None,
+        persistence_evidence_path: Path | None = None,
     ) -> tuple[str, ...]:
         target = result.target
         expected_block_state_id = "air" if launch_mode == "functional_fail" else "diamond_block"
@@ -645,11 +824,21 @@ class MinecraftTestRunner:
             f"-Ppd.agent.testId={result.spec.test_id}",
             f"-Ppd.agent.observationType={result.spec.observation_type.value}",
             f"-Ppd.agent.resultPath={result.evidence_paths.harness_result_json}",
-            f"-Ppd.agent.runDir={result.evidence_paths.root / 'runtime'}",
+            f"-Ppd.agent.runDir={result.launch_plan.run_dir if result.launch_plan else result.evidence_paths.root / 'runtime'}",
             f"-Ppd.agent.resultMode={result_mode}",
             f"-Ppd.agent.expectedBlockStateId={expected_block_state_id}",
             f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
+            *(
+                (
+                    f"-Ppd.agent.persistencePhase={persistence_phase.value}",
+                    f"-Ppd.agent.persistenceScenarioId={persistence_scenario.scenario_id}",
+                    f"-Ppd.agent.persistenceWorldId={persistence_scenario.world_id}",
+                    f"-Ppd.agent.persistenceEvidencePath={persistence_evidence_path}",
+                )
+                if persistence_phase is not None and persistence_scenario is not None and persistence_evidence_path is not None
+                else ()
+            ),
             *(
                 (f"-Ppd.agent.eventProfile={result.spec.event_profile}",)
                 if result.spec.event_profile is not None
@@ -900,6 +1089,7 @@ class MinecraftTestRunner:
         launch_mode: str,
         target: MinecraftTargetMetadata,
         timeout_seconds: int,
+        persistence_phase: str | None = None,
     ) -> tuple[MinecraftTestStatus, str, dict[str, Any]]:
         metadata: dict[str, Any] = {
             "launch_mode": launch_mode,
@@ -908,6 +1098,8 @@ class MinecraftTestRunner:
             "target_mod_id": target.mod_id,
             "timeout_seconds": timeout_seconds,
         }
+        if persistence_phase is not None:
+            metadata["persistence_phase"] = persistence_phase
         if process["timed_out"]:
             metadata["classification"] = "TIMEOUT"
             return MinecraftTestStatus.TIMEOUT, "execution timeout", metadata
@@ -991,12 +1183,12 @@ class MinecraftTestRunner:
                         "value_restored": harness_result.get("component_json_restored"),
                         "round_trip": harness_result.get("component_round_trip"),
                     },
-                    phase="RUNTIME",
+                    phase=persistence_phase or "RUNTIME",
                     evidence_refs=(
                         MinecraftEvidenceReference(
                             kind=MinecraftEvidenceKind.OBSERVATION,
                             ref="harness-result.json",
-                            phase="RUNTIME",
+                            phase=persistence_phase or "RUNTIME",
                         ),
                     ),
                     error=(
@@ -1021,18 +1213,25 @@ class MinecraftTestRunner:
                     ),
                     expected=dict(harness_result.get("observation_expected", {})),
                     actual=dict(harness_result.get("observation_actual", {})),
-                    phase="RUNTIME",
+                    phase=persistence_phase or "RUNTIME",
                     evidence_refs=(
                         MinecraftEvidenceReference(
                             kind=MinecraftEvidenceKind.OBSERVATION,
                             ref="harness-result.json",
-                            phase="RUNTIME",
+                            phase=persistence_phase or "RUNTIME",
                         ),
                     ),
                     error=(
                         None
                         if functional_test_result == "PASS"
-                        else {"code": f"{observation_type.value}_MISMATCH", "message": reason}
+                        else {
+                            "code": (
+                                str(harness_result.get("error_code"))
+                                if isinstance(harness_result.get("error_code"), str)
+                                else f"{observation_type.value}_MISMATCH"
+                            ),
+                            "message": reason,
+                        }
                     ),
                 )
                 metadata["observation_result"] = observation.to_dict()
@@ -1262,4 +1461,4 @@ class MinecraftTestRunner:
         return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-__all__ = ["MinecraftTestRunner"]
+__all__ = ["MinecraftTestRunner", "PersistenceRunResult"]

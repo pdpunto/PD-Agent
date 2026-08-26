@@ -238,6 +238,14 @@ final class HarnessResult {
         return blockEntity(config, identity, expected, actual, pass, reason);
     }
 
+    HarnessResult withError(String code) {
+        if (structuredObservation == null) {
+            structuredObservation = new com.google.gson.JsonObject();
+        }
+        structuredObservation.getAsJsonObject().addProperty("error_code", code);
+        return this;
+    }
+
     static HarnessResult tagMembership(
         HarnessConfig config,
         HarnessIdentity identity,
@@ -424,6 +432,7 @@ final class HarnessResult {
         appendField(builder, "component_mutation_pass", componentMutationPass).append(",\n");
         appendJsonField(builder, "observation_expected", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("expected")).append(",\n");
         appendJsonField(builder, "observation_actual", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("actual")).append(",\n");
+        appendJsonField(builder, "error_code", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("error_code")).append(",\n");
         appendJsonField(builder, "command_result", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("command_result")).append("\n");
         builder.append("}");
         return builder.toString();

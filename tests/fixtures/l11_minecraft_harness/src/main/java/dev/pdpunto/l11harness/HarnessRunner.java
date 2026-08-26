@@ -33,6 +33,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import net.minecraft.world.chunk.WorldChunk;
 
 final class HarnessRunner {
@@ -57,6 +59,11 @@ final class HarnessRunner {
         ServerWorld world = waitForOverworld(server, options.hangMillis());
         if (world == null) {
             return HarnessResult.infraError(config, "overworld not available", identity);
+        }
+
+        String persistencePhase = System.getProperty("pd.agent.persistencePhase");
+        if ("PHASE_1".equals(persistencePhase) || "PHASE_2".equals(persistencePhase)) {
+            return runPersistence(server, config, identity, world, persistencePhase, options);
         }
 
         String commandProfile = System.getProperty("pd.agent.commandProfile");
@@ -87,6 +94,108 @@ final class HarnessRunner {
         }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runPersistence(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world,
+        String phase,
+        HarnessRuntimeOptions options
+    ) {
+        CompletableFuture<HarnessResult> result = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                result.complete(runPersistenceOnServer(server, config, identity, world, phase, options));
+            } catch (RuntimeException ex) {
+                result.completeExceptionally(ex);
+            }
+        });
+        try {
+            return result.get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("persistence execution interrupted", ex);
+        } catch (ExecutionException ex) {
+            throw new IllegalStateException("persistence execution failed", ex.getCause());
+        }
+    }
+
+    private static HarnessResult runPersistenceOnServer(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world,
+        String phase,
+        HarnessRuntimeOptions options
+    ) {
+        if ("PHASE_1".equals(phase)) {
+            PersistenceSignals.mark("SETUP_STARTED");
+            world.getChunk(CONTROLLED_POS);
+            world.setBlockState(CONTROLLED_POS, Blocks.HOPPER.getDefaultState(), Block.NOTIFY_ALL);
+            BlockEntity blockEntity = ((WorldChunk) world.getChunk(CONTROLLED_POS)).getBlockEntity(
+                CONTROLLED_POS, WorldChunk.CreationType.IMMEDIATE
+            );
+            if (!(blockEntity instanceof HopperBlockEntity hopper)) {
+                return HarnessResult.inventory(config, identity, new JsonObject(), new JsonObject(), false,
+                    "controlled persistence hopper was not present");
+            }
+            int count = config.observationCount();
+            hopper.setStack(config.observationSlot(), new ItemStack(Items.DIAMOND, count));
+            hopper.markDirty();
+            PersistenceSignals.mark("MUTATION_COMPLETED");
+            JsonObject expected = new JsonObject();
+            expected.addProperty("slot", config.observationSlot());
+            expected.addProperty("item_id", "minecraft:diamond");
+            expected.addProperty("count", count);
+            JsonObject actual = new JsonObject();
+            actual.addProperty("slot", config.observationSlot());
+            actual.addProperty("item_id", String.valueOf(Registries.ITEM.getId(hopper.getStack(config.observationSlot()).getItem())));
+            actual.addProperty("count", hopper.getStack(config.observationSlot()).getCount());
+            PersistenceSignals.mark("PRE_SAVE_OBSERVATION");
+            PersistenceSignals.mark("SAVE_REQUESTED");
+            server.save(false, true, true);
+            if (!PersistenceSignals.has("AFTER_SAVE")) {
+                return HarnessResult.inventory(config, identity, expected, actual, false,
+                    "AFTER_SAVE was not observed").withError("SAVE_COMPLETION_MISSING");
+            }
+            PersistenceSignals.mark("SAVE_COMPLETED");
+            HarnessResult result = HarnessResult.inventory(config, identity, expected, actual, true,
+                "persistence phase 1 saved controlled inventory");
+            PersistenceSignals.mark("SHUTDOWN_INITIATED");
+            server.stop(false);
+            return result;
+        }
+
+        PersistenceSignals.mark("REOPEN_STARTED");
+        BlockEntity blockEntity = ((WorldChunk) world.getChunk(CONTROLLED_POS)).getBlockEntity(
+            CONTROLLED_POS, WorldChunk.CreationType.IMMEDIATE
+        );
+        if (!(blockEntity instanceof HopperBlockEntity hopper)) {
+            return HarnessResult.inventory(config, identity, new JsonObject(), new JsonObject(), false,
+                "persisted hopper was not found during reopen").withError("PERSISTED_STATE_MISMATCH");
+        }
+        JsonObject expected = new JsonObject();
+        expected.addProperty("slot", config.observationSlot());
+        expected.addProperty("item_id", "minecraft:diamond");
+        expected.addProperty("count", config.observationCount());
+        ItemStack stack = hopper.getStack(config.observationSlot());
+        JsonObject actual = new JsonObject();
+        actual.addProperty("slot", config.observationSlot());
+        actual.addProperty("item_id", stack.isEmpty() ? "minecraft:air" : String.valueOf(Registries.ITEM.getId(stack.getItem())));
+        actual.addProperty("count", stack.isEmpty() ? 0 : stack.getCount());
+        PersistenceSignals.mark("FIRST_PERSISTED_OBSERVATION");
+        boolean pass = "minecraft:diamond".equals(actual.get("item_id").getAsString())
+            && actual.get("count").getAsInt() == config.observationCount();
+        HarnessResult result = HarnessResult.inventory(config, identity, expected, actual, pass,
+            pass ? "persisted inventory reopened" : "persisted inventory mismatch");
+        if (!pass) {
+            result.withError("PERSISTED_STATE_MISMATCH");
+        }
+        PersistenceSignals.mark("SHUTDOWN_INITIATED");
+        server.stop(false);
+        return result;
     }
 
     private static HarnessResult runCommandAction(

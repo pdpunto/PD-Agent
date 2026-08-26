@@ -35,7 +35,7 @@ from .errors import (
     MinecraftTestValidationError,
     UnsupportedMinecraftEnvironmentError,
 )
-from .runner import MinecraftTestRunner
+from .runner import MinecraftTestRunner, PersistenceRunResult
 
 __all__ = [
     "MinecraftEvidencePaths",
@@ -64,6 +64,7 @@ __all__ = [
     "MinecraftTestError",
     "MinecraftTestResult",
     "MinecraftTestRunner",
+    "PersistenceRunResult",
     "MinecraftTestSpec",
     "MinecraftTestStatus",
     "MinecraftTestValidationError",
