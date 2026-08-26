@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from pd_agent.core import ArtifactResult, ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
-from pd_agent.minecraft import MinecraftTestResult, MinecraftTestStatus
+from pd_agent.minecraft import (
+    CommandResult,
+    MinecraftObservationStatus,
+    MinecraftObservationType,
+    MinecraftTestResult,
+    MinecraftTestStatus,
+    ObservationResult,
+)
 
 from .acceptance import evaluate_required_resources
 
@@ -43,6 +50,130 @@ def _is_repairable_target_crash(result: MinecraftTestResult) -> bool:
     )
 
 
+_OBSERVATION_VIOLATION_CODES = {
+    MinecraftObservationType.ITEM_COMPONENT_STATE: "ITEM_COMPONENT_VALUE_MISMATCH",
+    MinecraftObservationType.BLOCK_ENTITY_STATE: "BLOCK_ENTITY_STATE_MISMATCH",
+    MinecraftObservationType.INVENTORY_STATE: "INVENTORY_SLOT_MISMATCH",
+    MinecraftObservationType.TAG_MEMBERSHIP: "TAG_MEMBERSHIP_MISMATCH",
+    MinecraftObservationType.RECIPE_MATCH: "RECIPE_MATCH_MISMATCH",
+    MinecraftObservationType.LOOT_RESULT: "LOOT_RESULT_MISMATCH",
+    MinecraftObservationType.LEGACY_BLOCK_STATE: "LEGACY_BLOCK_STATE_MISMATCH",
+    MinecraftObservationType.REGISTRY_ENTRY_PRESENT: "REGISTRY_ENTRY_PRESENT",
+}
+_EXPLICIT_VIOLATION_CODES = {
+    "ITEM_COMPONENT_VALUE_MISMATCH",
+    "BLOCK_ENTITY_MISSING",
+    "BLOCK_ENTITY_STATE_MISMATCH",
+    "INVENTORY_SIZE_MISMATCH",
+    "INVENTORY_SLOT_MISMATCH",
+    "EVENT_SIDE_EFFECT_MISSING",
+    "TAG_MEMBERSHIP_MISMATCH",
+    "RECIPE_MATCH_MISMATCH",
+    "LOOT_RESULT_MISMATCH",
+    "PERSISTED_STATE_MISMATCH",
+}
+
+
+def _observation_violation_code(result: ObservationResult) -> str:
+    error_code = result.error.get("code") if isinstance(result.error, Mapping) else None
+    if isinstance(error_code, str) and error_code in _EXPLICIT_VIOLATION_CODES:
+        return error_code
+    if result.observation_type is MinecraftObservationType.BLOCK_ENTITY_STATE:
+        actual = result.actual
+        if isinstance(actual, Mapping) and actual.get("present") is False:
+            return "BLOCK_ENTITY_MISSING"
+    if result.observation_type is MinecraftObservationType.INVENTORY_STATE:
+        expected = result.expected
+        actual = result.actual
+        if isinstance(expected, Mapping) and isinstance(actual, Mapping):
+            if expected.get("size") != actual.get("size") and "size" in expected:
+                return "INVENTORY_SIZE_MISMATCH"
+    return _OBSERVATION_VIOLATION_CODES[result.observation_type]
+
+
+def _evidence_refs(result: ObservationResult | CommandResult) -> tuple[str, ...]:
+    return tuple(reference.ref for reference in result.evidence_refs)
+
+
+def validate_observation_result(result: ObservationResult) -> ValidationResult:
+    """Map one closed observation result into the generic validation contract."""
+
+    if not isinstance(result, ObservationResult):
+        raise TypeError("result must be ObservationResult")
+    refs = _evidence_refs(result)
+    if result.status is MinecraftObservationStatus.PASS:
+        if result.actual != result.expected:
+            violation = _observation_violation(result, "evidence contradicts PASS status")
+            return ValidationResult(
+                stage=ValidationStage.RUNTIME,
+                status=ValidationStatus.INVALID,
+                summary="observation evidence is contradictory",
+                violations=(violation,),
+                evidence_refs=refs,
+            )
+        return ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.PASS, summary="observation requirements passed", evidence_refs=refs)
+    if result.status is MinecraftObservationStatus.BLOCKED:
+        status = ValidationStatus.BLOCKED
+        summary = "observation was blocked"
+    elif result.status is MinecraftObservationStatus.INVALID:
+        status = ValidationStatus.INVALID
+        summary = "observation evidence is invalid"
+    else:
+        status = ValidationStatus.REPAIRABLE_FAIL
+        summary = "observation requirements failed"
+    violation = _observation_violation(result, summary)
+    return ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary=summary, violations=(violation,), evidence_refs=refs)
+
+
+def _observation_violation(result: ObservationResult, message: str) -> ValidationViolation:
+    return ValidationViolation(
+        code=_observation_violation_code(result),
+        requirement=f"{result.observation_type.value} observation {result.observation_id}",
+        observed={"status": result.status.value, "error": result.error},
+        message=message,
+        evidence_refs=_evidence_refs(result),
+        expected=result.expected,
+        actual=result.actual,
+        phase=result.phase,
+        observation_id=result.observation_id,
+    )
+
+
+def validate_command_result(result: CommandResult, *, side_effect_matches: bool | None = None) -> ValidationResult:
+    """Map a typed command result without treating malformed input as a task failure."""
+
+    if not isinstance(result, CommandResult):
+        raise TypeError("result must be CommandResult")
+    refs = _evidence_refs(result)
+    if not result.registered or not result.parsed:
+        status = ValidationStatus.INVALID
+        code = "COMMAND_EXECUTION_FAILED"
+        summary = "command contract was malformed or unsupported"
+    elif isinstance(result.error, Mapping) and result.error.get("category") == "infrastructure":
+        status = ValidationStatus.BLOCKED
+        code = "COMMAND_EXECUTION_FAILED"
+        summary = "command infrastructure was unavailable"
+    elif not result.executed or not result.success:
+        status = ValidationStatus.REPAIRABLE_FAIL
+        code = "COMMAND_EXECUTION_FAILED"
+        summary = "command execution failed"
+    elif side_effect_matches is False:
+        status = ValidationStatus.REPAIRABLE_FAIL
+        code = "COMMAND_SIDE_EFFECT_MISMATCH"
+        summary = "command side effect did not match"
+    else:
+        return ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.PASS, summary="command requirements passed", evidence_refs=refs)
+    violation = ValidationViolation(
+        code=code,
+        requirement=f"command invocation {result.invocation_id}",
+        observed={"registered": result.registered, "parsed": result.parsed, "executed": result.executed, "success": result.success, "error": result.error},
+        message=summary,
+        evidence_refs=refs,
+        action_id=result.invocation_id,
+    )
+    return ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary=summary, violations=(violation,), evidence_refs=refs)
+
+
 @dataclass(slots=True)
 class BenchmarkFunctionalValidator:
     """Run cheap artifact checks and one Minecraft validation per artifact."""
@@ -51,6 +182,14 @@ class BenchmarkFunctionalValidator:
     runtime_check: Callable[[ArtifactResult, str], MinecraftTestResult | None] | None = None
     last_results: tuple[ValidationResult, ...] = ()
     last_minecraft_result: MinecraftTestResult | None = None
+
+    @staticmethod
+    def validate_observation(result: ObservationResult) -> ValidationResult:
+        return validate_observation_result(result)
+
+    @staticmethod
+    def validate_command(result: CommandResult, *, side_effect_matches: bool | None = None) -> ValidationResult:
+        return validate_command_result(result, side_effect_matches=side_effect_matches)
 
     def validate(
         self,
@@ -179,4 +318,4 @@ class BenchmarkFunctionalValidator:
         )
 
 
-__all__ = ["BenchmarkFunctionalValidator"]
+__all__ = ["BenchmarkFunctionalValidator", "validate_command_result", "validate_observation_result"]

@@ -53,7 +53,7 @@ def _assert_no_forbidden_keys(value: object) -> None:
 
 def test_validation_enums_are_stable() -> None:
     assert [item.value for item in ValidationStage] == ["PRE_BUILD", "POST_ARTIFACT", "RUNTIME"]
-    assert [item.value for item in ValidationStatus] == ["PASS", "REPAIRABLE_FAIL", "BLOCKED"]
+    assert [item.value for item in ValidationStatus] == ["PASS", "REPAIRABLE_FAIL", "BLOCKED", "INVALID"]
 
 
 def test_validation_violation_and_result_round_trip() -> None:

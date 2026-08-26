@@ -56,6 +56,7 @@ class ValidationStatus(StrEnum):
     PASS = "PASS"
     REPAIRABLE_FAIL = "REPAIRABLE_FAIL"
     BLOCKED = "BLOCKED"
+    INVALID = "INVALID"
 
 
 def _validation_text(value: Any, *, field_name: str) -> str:
@@ -93,6 +94,11 @@ class ValidationViolation:
     observed: Any
     message: str
     evidence_refs: tuple[str, ...] = ()
+    expected: Any = None
+    actual: Any = None
+    phase: str | None = None
+    observation_id: str | None = None
+    action_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "code", _validation_text(self.code, field_name="code"))
@@ -105,6 +111,11 @@ class ValidationViolation:
         refs = tuple(_validation_text(ref, field_name="evidence_ref") for ref in self.evidence_refs)
         object.__setattr__(self, "evidence_refs", refs)
         object.__setattr__(self, "observed", _validation_json_ready(self.observed))
+        object.__setattr__(self, "expected", _validation_json_ready(self.expected))
+        object.__setattr__(self, "actual", _validation_json_ready(self.actual))
+        for name in ("phase", "observation_id", "action_id"):
+            value = getattr(self, name)
+            object.__setattr__(self, name, _validation_text(value, field_name=name) if value is not None else None)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +124,11 @@ class ValidationViolation:
             "observed": self.observed,
             "message": self.message,
             "evidence_refs": list(self.evidence_refs),
+            "expected": self.expected,
+            "actual": self.actual,
+            "phase": self.phase,
+            "observation_id": self.observation_id,
+            "action_id": self.action_id,
         }
 
     @classmethod
@@ -123,6 +139,11 @@ class ValidationViolation:
             observed=data.get("observed"),
             message=str(data["message"]),
             evidence_refs=tuple(str(item) for item in data.get("evidence_refs", [])),
+            expected=data.get("expected"),
+            actual=data.get("actual"),
+            phase=data.get("phase"),
+            observation_id=data.get("observation_id"),
+            action_id=data.get("action_id"),
         )
 
 
