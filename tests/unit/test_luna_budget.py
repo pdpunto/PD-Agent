@@ -219,9 +219,12 @@ def test_official_output_limit_fits_attempt_budget_for_observed_context() -> Non
 
 def test_retry_uses_same_configured_budget() -> None:
     guard = _guard(hard_budget_usd=Decimal("0.25"))
-    guard.before_request({"input": []}, retry_count=0)
+    first = guard.prepare_dispatch({"input": []}, provider="fake", model="gpt-test", retry_count=0)
+    guard.before_request({"input": []}, retry_count=0, dispatch_record=first)
+    guard.mark_dispatch_started(first)
     guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
-    decision = guard.before_request({"input": []}, retry_count=1)
+    second = guard.prepare_dispatch({"input": []}, provider="fake", model="gpt-test", retry_count=1)
+    decision = guard.before_request({"input": []}, retry_count=1, dispatch_record=second)
 
     assert Decimal(decision["remaining_budget_usd"]) < Decimal("0.25")
     assert guard.hard_budget_usd == Decimal("0.25")
@@ -385,7 +388,9 @@ def test_economic_state_round_trip_persists_ledger(tmp_path: Path) -> None:
     guard = _guard(state=state, state_store=store)
 
     guard.begin_attempt("scheduled-1")
-    guard.before_request({"input": []}, retry_count=0)
+    record = guard.prepare_dispatch({"input": []}, provider="fake", model="gpt-test", retry_count=0)
+    guard.before_request({"input": []}, retry_count=0, dispatch_record=record)
+    guard.mark_dispatch_started(record)
     guard.account_response(_usage(input_tokens=1_000, output_tokens=500))
 
     restored = LunaEconomicStateStore.load(tmp_path / "economic-state.json").state

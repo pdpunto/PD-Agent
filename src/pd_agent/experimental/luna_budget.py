@@ -568,8 +568,6 @@ class LunaBudgetGuard:
         self.state.pending_request_id = request_id
         self.state.attempt_reserved_usd += reserve
         self.state.global_reserved_usd += reserve
-        self.state.physical_request_count += 1
-        self.state.provider_retry_count = max(self.state.provider_retry_count, retry_count)
         dispatch_record.reservation_id = request_id
         dispatch_record.reserved_cost = str(reserve)
         dispatch_record.reservation_committed_at = _utc_now()
@@ -598,10 +596,27 @@ class LunaBudgetGuard:
         self._validate_dispatch_record(dispatch_record)
         if dispatch_record.reservation_id is None or dispatch_record.dispatch_state != RESERVATION_COMMITTED:
             raise self._abort("DISPATCH_RESERVATION_NOT_COMMITTED")
+        previous_physical_count = self.state.physical_request_count
+        previous_retry_count = self.state.provider_retry_count
+        previous_dispatch_started_at = dispatch_record.dispatch_started_at
+        previous_dispatch_state = dispatch_record.dispatch_state
+        self.state.physical_request_count += 1
+        self.state.provider_retry_count = max(
+            self.state.provider_retry_count,
+            int(self.state.ledger[dispatch_record.reservation_id]["retry_ordinal"]),
+        )
         dispatch_record.dispatch_started_at = _utc_now()
         dispatch_record.dispatch_state = DISPATCH_STARTED
         self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
-        self._persist()
+        try:
+            self._persist()
+        except Exception:
+            self.state.physical_request_count = previous_physical_count
+            self.state.provider_retry_count = previous_retry_count
+            dispatch_record.dispatch_started_at = previous_dispatch_started_at
+            dispatch_record.dispatch_state = previous_dispatch_state
+            self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
+            raise
 
     def abandon_pre_dispatch(self, dispatch_record: DispatchRecord, *, reason: str) -> None:
         """Record a proven pre-dispatch abandonment without touching accounting."""

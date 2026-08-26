@@ -148,6 +148,46 @@ def test_write_ahead_order_is_persisted_before_provider_call() -> None:
     assert snapshots[-1] == RESPONSE_OBSERVED
 
 
+def test_persistence_failure_before_dispatch_does_not_count_physical_request() -> None:
+    def fail_at_dispatch_started(payload):
+        records = payload.get("dispatch_records", {})
+        if records and next(iter(records.values()))["dispatch_state"] == DISPATCH_STARTED:
+            raise OSError("persist dispatch-started failed")
+
+    client = _Client(SimpleNamespace(id="never", usage=_usage(), output=[]))
+    guard = _guard(callback=fail_at_dispatch_started)
+
+    with pytest.raises(ProviderError, match="persistence failed before provider access"):
+        OpenAIProvider(model="gpt-test", client=client, budget_guard=guard).execute(_request())
+
+    assert client.responses.calls == 0
+    assert guard.physical_request_count == 0
+    assert guard.provider_retry_count == 0
+    assert next(iter(guard.state.ledger.values()))["status"] == "RESERVED"
+
+
+def test_persistence_failure_after_dispatch_does_not_retry_or_release_uncertainty() -> None:
+    dispatch_started_persists = 0
+
+    def fail_after_provider_dispatch(payload):
+        nonlocal dispatch_started_persists
+        records = payload.get("dispatch_records", {})
+        if records and next(iter(records.values()))["dispatch_state"] == DISPATCH_STARTED:
+            dispatch_started_persists += 1
+            if dispatch_started_persists == 2:
+                raise OSError("persist response evidence failed")
+
+    client = _Client(RuntimeError("transport"))
+    guard = _guard(callback=fail_after_provider_dispatch)
+
+    with pytest.raises(ProviderError, match="persistence failed before provider access"):
+        OpenAIProvider(model="gpt-test", client=client, budget_guard=guard).execute(_request())
+
+    assert client.responses.calls == 1
+    assert guard.physical_request_count == 1
+    assert next(iter(guard.state.ledger.values()))["status"] == "RESERVED"
+
+
 def test_openai_sends_durable_correlation_header_after_dispatch_started() -> None:
     state = LunaEconomicState(execution_id="header")
     guard = _guard(state=state)
