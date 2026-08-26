@@ -36,14 +36,33 @@ class SourceAuthority(StrEnum):
 
 
 class KnowledgeType(StrEnum):
-    """Supported knowledge categories for v0.3 L1."""
+    """Normative v0.7 categories plus readable legacy values."""
 
     SYMBOL = "SYMBOL"
     API = "API"
     MAPPING = "MAPPING"
     BUILD = "BUILD"
     CONCEPT = "CONCEPT"
+    PATTERN = "PATTERN"
+    EXAMPLE = "EXAMPLE"
+    VERSION_CHANGE = "VERSION_CHANGE"
+    CAPABILITY = "CAPABILITY"
+    DIAGNOSTIC = "DIAGNOSTIC"
     MIGRATION = "MIGRATION"
+
+    @classmethod
+    def migrate_legacy(cls, value: str | "KnowledgeType", *, meaning: str | None = None) -> "KnowledgeType":
+        """Map a legacy value without changing its stored identity."""
+        legacy = cls(str(value))
+        if legacy == cls.MAPPING:
+            return cls.VERSION_CHANGE if meaning == "version_change" else cls.SYMBOL
+        if legacy == cls.BUILD:
+            if meaning == "diagnostic":
+                return cls.DIAGNOSTIC
+            return cls.PATTERN if meaning == "pattern" else cls.API
+        if legacy == cls.MIGRATION:
+            return cls.VERSION_CHANGE
+        return legacy
 
 
 class KnowledgeRetrievalStatus(StrEnum):
@@ -123,6 +142,7 @@ class KnowledgeNeed:
     query: str
     environment: KnowledgeEnvironment
     hints: tuple[str, ...] = ()
+    version_sensitive: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.type, KnowledgeType):
@@ -145,6 +165,7 @@ class KnowledgeNeed:
             "query": self.query,
             "environment": self.environment.to_dict(),
             "hints": list(self.hints),
+            "version_sensitive": self.version_sensitive,
         }
 
     @classmethod
@@ -155,6 +176,7 @@ class KnowledgeNeed:
             query=str(data["query"]),
             environment=KnowledgeEnvironment.from_dict(dict(data["environment"])),
             hints=tuple(str(item) for item in data.get("hints", [])),
+            version_sensitive=bool(data.get("version_sensitive", True)),
         )
 
 
@@ -246,6 +268,7 @@ class KnowledgeItem:
     authority: SourceAuthority
     provenance: KnowledgeProvenance
     metadata: dict[str, Any] = field(default_factory=dict)
+    version_sensitive: bool = True
 
     def __post_init__(self) -> None:
         if not self.id.strip():
@@ -259,6 +282,7 @@ class KnowledgeItem:
             "authority": self.authority.value,
             "provenance": self.provenance.to_dict(),
             "metadata": _json_ready(self.metadata),
+            "version_sensitive": self.version_sensitive,
         }
 
     @classmethod
@@ -270,6 +294,7 @@ class KnowledgeItem:
             authority=SourceAuthority(str(data["authority"])),
             provenance=KnowledgeProvenance.from_dict(dict(data["provenance"])),
             metadata=dict(data.get("metadata", {})),
+            version_sensitive=bool(data.get("version_sensitive", True)),
         )
 
 

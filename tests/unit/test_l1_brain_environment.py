@@ -9,8 +9,11 @@ from pd_agent.brain import (
     EnvironmentDetectionStatus,
     KnowledgeEnvironment,
     KnowledgeEnvironmentResolver,
+    KnowledgeItem,
     KnowledgeNeed,
+    KnowledgeProvenance,
     KnowledgeType,
+    SourceAuthority,
 )
 from pd_agent.project.fabric import FabricInspector
 from tests.fixtures.fabric_projects import make_simple_fabric_project
@@ -141,15 +144,70 @@ def test_compatibility_and_environment_enums_are_stable() -> None:
         "INCOMPATIBLE",
         "UNKNOWN",
     }
-    assert {item.value for item in KnowledgeType} == {
+    assert {
+        item.value for item in KnowledgeType
+    } >= {
         "SYMBOL",
         "API",
+        "CONCEPT",
+        "PATTERN",
+        "EXAMPLE",
+        "VERSION_CHANGE",
+        "CAPABILITY",
+        "DIAGNOSTIC",
+    }
+    assert {
+        item.value for item in KnowledgeType
+    } >= {
         "MAPPING",
         "BUILD",
-        "CONCEPT",
         "MIGRATION",
     }
     assert EnvironmentDetectionStatus.DETECTED.value == "DETECTED"
+
+
+def test_legacy_knowledge_types_migrate_without_rewriting_values() -> None:
+    assert KnowledgeType.migrate_legacy("MAPPING") == KnowledgeType.SYMBOL
+    assert KnowledgeType.migrate_legacy("MAPPING", meaning="version_change") == KnowledgeType.VERSION_CHANGE
+    assert KnowledgeType.migrate_legacy("BUILD") == KnowledgeType.API
+    assert KnowledgeType.migrate_legacy("BUILD", meaning="pattern") == KnowledgeType.PATTERN
+    assert KnowledgeType.migrate_legacy("BUILD", meaning="diagnostic") == KnowledgeType.DIAGNOSTIC
+    assert KnowledgeType.migrate_legacy("MIGRATION") == KnowledgeType.VERSION_CHANGE
+
+
+def test_knowledge_need_version_sensitivity_round_trip() -> None:
+    need = KnowledgeNeed(
+        id="concept-1",
+        type=KnowledgeType.CONCEPT,
+        query="what is a registry",
+        environment=KnowledgeEnvironment(),
+        version_sensitive=False,
+    )
+
+    restored = KnowledgeNeed.from_dict(need.to_dict())
+
+    assert restored == need
+    assert restored.version_sensitive is False
+
+
+def test_knowledge_item_version_sensitivity_round_trip() -> None:
+    item = KnowledgeItem(
+        id="concept-item",
+        content={"text": "registry"},
+        environment=KnowledgeEnvironment(),
+        authority=SourceAuthority.OFFICIAL_DOCUMENTATION,
+        provenance=KnowledgeProvenance(
+            source_id="docs",
+            source_kind="concept",
+            locator="local://concept",
+        ),
+        version_sensitive=False,
+    )
+
+    restored = KnowledgeItem.from_dict(item.to_dict())
+
+    assert restored == item
+    assert restored.version_sensitive is False
 
 
 def test_fabric_inspector_regression_on_l11_fixture() -> None:

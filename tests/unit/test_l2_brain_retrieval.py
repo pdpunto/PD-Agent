@@ -154,6 +154,40 @@ def test_other_minecraft_version_is_incompatible() -> None:
     assert source.compatibility(env) == CompatibilityStatus.INCOMPATIBLE
 
 
+def test_unknown_version_sensitive_compatibility_is_rejected_online(tmp_path: Path) -> None:
+    source = YarnKnowledgeSource(artifact_bytes=_artifact_bytes())
+    brain = MinecraftBrain(source=source, cache=FileKnowledgeCache(tmp_path / "brain-cache"))
+    need = KnowledgeNeed(
+        id="unknown-sensitive",
+        type=KnowledgeType.SYMBOL,
+        query="Identifier",
+        environment=KnowledgeEnvironment(),
+    )
+
+    result = brain.retrieve(need, offline=False)
+
+    assert result.status == KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE
+    assert result.need.environment == KnowledgeEnvironment()
+    assert "requires known compatibility" in (result.error or "")
+
+
+def test_unknown_version_insensitive_knowledge_keeps_existing_unknown_semantics(tmp_path: Path) -> None:
+    source = YarnKnowledgeSource(artifact_bytes=_artifact_bytes())
+    brain = MinecraftBrain(source=source, cache=FileKnowledgeCache(tmp_path / "brain-cache"))
+    need = KnowledgeNeed(
+        id="unknown-insensitive",
+        type=KnowledgeType.SYMBOL,
+        query="Identifier",
+        environment=KnowledgeEnvironment(),
+        version_sensitive=False,
+    )
+
+    result = brain.retrieve(need)
+
+    assert result.status == KnowledgeRetrievalStatus.SUCCESS
+    assert result.items
+
+
 def test_source_queries_identifier_registries_and_block_lookup() -> None:
     source = YarnKnowledgeSource(artifact_bytes=_artifact_bytes())
 

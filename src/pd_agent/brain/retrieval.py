@@ -179,15 +179,12 @@ class MinecraftBrain:
                 offline=offline,
                 error="source environment incompatible",
             )
-        if compatibility == CompatibilityStatus.UNKNOWN and not offline:
-            # Keep going; the source may still be able to answer if it has exact data.
-            pass
-        elif compatibility == CompatibilityStatus.UNKNOWN:
+        if compatibility == CompatibilityStatus.UNKNOWN and need.version_sensitive:
             return KnowledgeRetrievalResult(
                 status=KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE,
                 need=need,
-                offline=True,
-                error="environment compatibility unknown for offline retrieval",
+                offline=offline,
+                error="version-sensitive knowledge requires known compatibility",
             )
 
         checksum = getattr(self.source, "artifact_checksum", None)
