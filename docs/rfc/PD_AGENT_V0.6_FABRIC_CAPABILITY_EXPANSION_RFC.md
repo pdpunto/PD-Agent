@@ -1,6 +1,6 @@
 # PD Agent v0.6 - Fabric Capability Expansion - RFC
 
-Status: RFC DRAFT PERSISTED / READY FOR ARCHITECTURE REVIEW
+Status: RFC CLOSED / PASS
 Milestone: PD Agent v0.6 - Fabric Capability Expansion
 Design authority: `docs/design/PD_AGENT_V0.6_FABRIC_CAPABILITY_EXPANSION_DESIGN.md`
 Compatibility: Minecraft/Fabric `1.21.11` only
@@ -127,18 +127,21 @@ reflection, UI state or client state.
 
 The parameters identify the component id and the operation being observed.
 The expectation can require presence, absence, initial value and post-mutation
-value. Values must use the component's canonical, JSON-safe representation,
-with an explicit codec identity/version where the component has structured
-state. The harness obtains the value through the real component API, encodes
-it through the component's approved serialization codec, and records the
-canonical serialized value plus a type-safe summary. Java object identity and
-reflection output are never evidence.
+value. The canonical representation is the real component value encoded by
+the component Codec with `Codec.encodeStart(JsonOps.INSTANCE, value)`, yielding
+structured JSON. For deserialization and round-trip checks, structured JSON is
+parsed with `Codec.parse(JsonOps.INSTANCE, json)` back into the real component
+value and then observed again. Comparison is semantic over structured JSON,
+never over JSON text. No Minecraft or mod-provided codec version is required;
+the evidence format may record the stable profile `DFU_JSON_CODEC_V1` together
+with `component_id`. Codec/DataResult errors become explicit evidence and
+never trigger a reflection fallback.
 
 An A acceptance contract must identify:
 
 1. the real registered item;
 2. the controlled stack source;
-3. the component id and codec representation;
+3. the component id and `DFU_JSON_CODEC_V1` codec representation;
 4. the initial expected state;
 5. the controlled mutation;
 6. the post-mutation expected state; and
@@ -200,15 +203,21 @@ an arbitrary user save.
 Phase 1 is:
 
 `launch -> create/load controlled world -> setup -> mutation -> pre-save
-observation -> save request -> save completion -> clean shutdown -> process
-exit`
+observation -> save requested -> BEFORE_SAVE -> AFTER_SAVE/SAVE_COMPLETED ->
+controlled shutdown -> SERVER_STOPPING when applicable -> WORLD_UNLOAD ->
+clean process exit`
 
 The bridge stores the scenario, canonical world-root identity, artifact SHA,
 phase-1 observations, save evidence, shutdown evidence, process identity,
-world metadata and a deterministic world fingerprint. A save request is not
-treated as completed until the current supported lifecycle API provides the
-completion boundary. Shutdown initiated, world unloaded and process exited
-are separate evidence facts.
+world metadata and a bounded metadata/fingerprint record needed for same-world
+proof. `ServerLifecycleEvents.BEFORE_SAVE` is the observable start of the save
+boundary and `ServerLifecycleEvents.AFTER_SAVE` is the minimum positive
+`SAVE_COMPLETED` evidence. `ServerWorldEvents.UNLOAD` records world unload
+during shutdown. `SERVER_STOPPING`, when applicable, and process exit are
+additional lifecycle evidence, not substitutes for `AFTER_SAVE`; process exit
+0 alone never proves save completion. Shutdown initiated, world unloaded and
+process exited remain separate evidence facts. The fingerprint is not a
+recursive or general hash of the save.
 
 ### 7.3 Phase 2
 
@@ -254,10 +263,11 @@ Events are evaluated as:
 
 `real event -> real callback -> real side effect -> observable state`
 
-The first reference event is `ServerWorldEvents.LOAD`. A tick callback such as
-`ServerTickEvents.END_SERVER_TICK` is considered only when needed by a closed
-task and after architecture review. No general event framework and no
-`EVENT_FIRED` primitive are introduced.
+The sole frozen reference event is `ServerWorldEvents.LOAD`. Events continue
+to be evaluated as `real event -> callback -> side effect -> generic
+observation`. `ServerTickEvents.END_SERVER_TICK` is outside the v0.6 decision
+and is not required. No general event framework and no `EVENT_FIRED` primitive
+are introduced.
 
 ## 9. Vertical D - Data-driven content
 
@@ -446,26 +456,26 @@ existing evidence model. No material contradiction was found.
 
 The current implementation does not yet provide the v0.6 primitives or
 Persistence/Reopen implementation. That is an expected implementation gap,
-not a reason to claim support and not a reason to modify code in this RFC
-task. The RFC is ready for Architecture review, after which a separately
-authorized IMP and implementation may be considered.
+not a claim of support and not an implementation authorization. A separately
+authorized IMP and implementation may be considered after this closed RFC.
 
 Design Delta: NO
-Implementation readiness: `RFC_READY_FOR_REVIEW`
+Implementation readiness: `RFC_CLOSED_PASS`
 
-## 20. Open questions for Architecture review
+## 20. Remaining open questions for implementation planning
 
-1. Confirm the exact canonical component codec envelope for the first A task.
-2. Confirm the minimal typed block-entity adapter fields for the first B task.
-3. Confirm save-completion and world-unload lifecycle signals available in
-   the pinned Fabric runtime.
-4. Confirm the first closed command argument profiles.
-5. Confirm the reference event task and whether a tick callback is necessary.
-6. Confirm representative recipe and loot context profiles.
-7. Confirm the future task matrix, repetitions and threshold independently of
+1. Define the concrete typed block-entity adapter fields for the first B task.
+2. Define the first closed command argument profiles.
+3. Define the representative crafting fixture/profile.
+4. Define the minimal loot context profile.
+5. Define the future task matrix, repetitions and threshold independently of
    this technical RFC.
-8. Decide which harness changes are small extensions and which require a new
-   architecture review.
+6. Plan the exact harness implementation within the boundaries already closed
+   here, escalating only a material redesign.
+
+These questions do not reopen the six observation primitives,
+`PersistenceScenario`, `ServerWorldEvents.LOAD`, ownership, security
+boundaries or the approved v0.6 scope.
 
 ## 21. Implementation gate
 
@@ -491,4 +501,4 @@ candidate execution.
 
 ## 23. RFC Verdict
 
-`V0_6_RFC_ARCHITECTURE_READY`
+`V0_6_RFC_ARCHITECTURE_PASS`
