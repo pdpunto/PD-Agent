@@ -311,6 +311,9 @@ acceptance/evidence, rollback y commit gate. Ademas:
 - **Tests:** cada mapping, no-knowledge continuation, source failure, Brain OFF,
   feedback redaction and bounded repeated turns.
 - **Acceptance/evidence:** need-to-repair trace correlated with violation.
+  Acceptance E is not satisfied by need derivation alone: I16 must preserve
+  evidence of `real failure -> KnowledgeNeed -> retrieval -> INJECTED -> repair
+  provider turn -> tool/code change -> authoritative validation PASS`.
 - **Rollback:** desactivar knowledge-assisted repair, retaining existing repair.
 - **Commit gate:** semantic repair offline PASS; commit/push.
 
@@ -374,7 +377,9 @@ acceptance/evidence, rollback y commit gate. Ademas:
 ### I16 - Brain ON/OFF integrated runtime acceptance
 
 - **Objetivo:** validar al menos una vertical Minecraft real con Brain ON,
-  modification/repair, build, artifact, runtime y PASS, y comparar Brain OFF.
+  knowledge compatible inyectado en contexto visible al provider, un
+  `ModelProvider` real, modificacion/repair mediante tools, build, artifact,
+  runtime y PASS, y comparar Brain OFF.
 - **Dependencias:** I10-I15.
 - **Archivos probables:** harness/fixture existente y runtime integration tests;
   confirmar todos los paths antes de ejecución.
@@ -382,8 +387,14 @@ acceptance/evidence, rollback y commit gate. Ademas:
   autoridades; same fixed environment and pack identity.
 - **No tocar:** otras versiones, provider tuning, F9 or statistical benchmark.
 - **Trabajo:** ejecutar solo con autorización explícita posterior; conservar
-  full evidence and no API outside approved protocol.
-- **Tests:** offline setup first; runtime gate ON; OFF control; no leakage.
+  un provider ya soportado, no hace tuning ni benchmark y no expone secretos.
+  Debe conservar evidence de `Brain ON -> compatible knowledge injected ->
+  real provider turn -> tool/code change or Semantic Repair -> build -> valid
+  artifact -> Minecraft Harness -> PASS`.
+- **Tests:** offline setup first con fake/test provider para demostrar el
+  contexto provider-visible y el orden pre-code; despues runtime gate ON. El
+  control OFF usa la misma task, provider/model, tools, environment y
+  acceptance, con `0 external Brain knowledge injected`.
 - **Acceptance/evidence:** I gate with artifact SHA, Minecraft/Harness result,
   trace statuses and reproducible environment.
 - **Rollback:** borrar solo execution temp; never alter frozen pack or repo
@@ -416,7 +427,7 @@ acceptance/evidence, rollback y commit gate. Ademas:
 | A Pack | I2, I3, I8, I15 |
 | B Multi-source | I4, I5, I6, I7, I15 |
 | C Version isolation | I1, I9, I14, I15 |
-| D Pre-code | I10, I11, I13, I15 |
+| D Pre-code | I10, I11, I13, I15, I16 |
 | E Semantic Repair | I10, I12, I13, I16 |
 | F Trace | I13, I15, I16 |
 | G Brain OFF/ON | I10, I14, I16 |
@@ -445,9 +456,13 @@ round-trip.
 
 ### Runtime
 
-Only I16/I17 acceptance gates use Minecraft. They use an isolated fresh
-workspace, fixed Minecraft 1.21.11 + Fabric environment, frozen pack identity
-and existing Harness. No provider/API or benchmark is implied by this IMP.
+I0-I15 remain provider-free/API-free whenever possible; fake/test providers
+may prove wiring and provider-visible context offline. I16/I17 are the only
+gates that may use a real provider or Minecraft, and only after separate
+explicit authorization. I16 uses an isolated fresh workspace, fixed
+Minecraft 1.21.11 + Fabric environment, frozen pack identity and existing
+Harness. It is integrated acceptance, not a statistical benchmark; no live
+provider/API is executed by this IMP itself.
 
 ## 8. Licensing and policy implementation plan
 
