@@ -60,7 +60,14 @@ def _closed_json(value: Any, *, field_name: str, reject_unsafe_keys: bool = True
             )
         return result
     if isinstance(value, (tuple, list)):
-        return [_closed_json(item, field_name=field_name) for item in value]
+        return [
+            _closed_json(
+                item,
+                field_name=field_name,
+                reject_unsafe_keys=reject_unsafe_keys,
+            )
+            for item in value
+        ]
     raise ValueError(f"{field_name} must contain JSON-compatible values")
 
 
@@ -292,7 +299,11 @@ class ObservationResult:
         object.__setattr__(self, "observation_id", _identity("observation_id", self.observation_id))
         object.__setattr__(self, "observation_type", MinecraftObservationType(str(self.observation_type)))
         object.__setattr__(self, "status", MinecraftObservationStatus(str(self.status)))
-        object.__setattr__(self, "expected", _closed_json(self.expected, field_name="expected"))
+        object.__setattr__(
+            self,
+            "expected",
+            _closed_json(self.expected, field_name="expected", reject_unsafe_keys=False),
+        )
         object.__setattr__(
             self,
             "actual",

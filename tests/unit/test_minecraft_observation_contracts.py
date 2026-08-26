@@ -52,6 +52,31 @@ def test_observation_request_round_trip_is_semantically_equal() -> None:
     assert restored == original
 
 
+def test_structured_semantic_data_allows_control_named_keys_and_nested_lists() -> None:
+    semantic_data = {"path": "semantic-value", "entries": [{"path": "semantic-value"}]}
+    request = ObservationRequest(
+        observation_id="obs-data",
+        observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+        profile="controlled_stack",
+        selector={"kind": "harness_stack"},
+        expected=semantic_data,
+    )
+    result = ObservationResult(
+        observation_id="obs-data",
+        observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+        status=MinecraftObservationStatus.PASS,
+        expected=semantic_data,
+        actual={"nbt": {"foo": "bar"}, "entries": [{"path": "semantic-value"}]},
+        error={"path": "semantic-error", "code": "DATA_MISMATCH"},
+    )
+
+    assert ObservationRequest.from_dict(json.loads(request.to_json())).expected == semantic_data
+    restored = ObservationResult.from_dict(json.loads(result.to_json()))
+    assert restored.expected == semantic_data
+    assert restored.actual == result.actual
+    assert restored.error == result.error
+
+
 def test_observation_request_rejects_unknown_fields_and_unsafe_payloads() -> None:
     payload = _request().to_dict()
     payload["unexpected"] = True
@@ -66,6 +91,29 @@ def test_observation_request_rejects_unknown_fields_and_unsafe_payloads() -> Non
             selector={"kind": "tag"},
             parameters={"command": "/op"},
             expected=True,
+        )
+
+    for field, value in (("selector", {"path": "outside"}), ("parameters", {"nbt": "raw"}), ("metadata", {"reflection": "x"})):
+        kwargs = {
+            "observation_id": "obs-control",
+            "observation_type": MinecraftObservationType.TAG_MEMBERSHIP,
+            "profile": "registry",
+            "selector": {"kind": "tag"},
+            "expected": True,
+        }
+        kwargs[field] = value
+        with pytest.raises(ValueError, match="prohibited key"):
+            ObservationRequest(**kwargs)
+
+
+def test_structured_semantic_data_rejects_non_json_objects() -> None:
+    with pytest.raises(ValueError, match="JSON-compatible"):
+        ObservationRequest(
+            observation_id="obs-non-json",
+            observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+            profile="controlled_stack",
+            selector={"kind": "harness_stack"},
+            expected={"value": object()},
         )
 
 
