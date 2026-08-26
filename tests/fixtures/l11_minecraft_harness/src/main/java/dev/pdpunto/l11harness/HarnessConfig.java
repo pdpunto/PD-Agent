@@ -17,6 +17,10 @@ record HarnessConfig(
     String observationComponentId,
     String observationItemId,
     boolean observationRoundTrip,
+    String observationBlockEntityId,
+    int observationSlot,
+    int observationCount,
+    boolean observationMutation,
     Path resultPath,
     boolean expectNeighborUpdate
 ) {
@@ -30,11 +34,17 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_COMPONENT_ID = "pd.agent.observationComponentId";
     static final String PROP_OBSERVATION_ITEM_ID = "pd.agent.observationItemId";
     static final String PROP_OBSERVATION_ROUND_TRIP = "pd.agent.observationRoundTrip";
+    static final String PROP_OBSERVATION_BLOCK_ENTITY_ID = "pd.agent.observationBlockEntityId";
+    static final String PROP_OBSERVATION_SLOT = "pd.agent.observationSlot";
+    static final String PROP_OBSERVATION_COUNT = "pd.agent.observationCount";
+    static final String PROP_OBSERVATION_MUTATION = "pd.agent.observationMutation";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
     static final String OBSERVATION_REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT";
     static final String OBSERVATION_ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE";
+    static final String OBSERVATION_BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE";
+    static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -50,6 +60,9 @@ record HarnessConfig(
         observationIdentifier = normalizeObservationIdentifier(observationType, observationIdentifier);
         observationComponentId = normalizeObservationComponentId(observationType, observationComponentId);
         observationItemId = normalizeObservationItemId(observationType, observationItemId);
+        observationBlockEntityId = normalizeBlockEntityId(observationType, observationBlockEntityId);
+        observationSlot = normalizeSlot(observationType, observationSlot);
+        observationCount = normalizeCount(observationType, observationCount);
         resultPath = normalizeResultPath(resultPath);
     }
 
@@ -66,6 +79,10 @@ record HarnessConfig(
             requireObservationText(PROP_OBSERVATION_COMPONENT_ID, observationType),
             requireObservationText(PROP_OBSERVATION_ITEM_ID, observationType),
             requireBoolean(PROP_OBSERVATION_ROUND_TRIP, false),
+            requireObservationText(PROP_OBSERVATION_BLOCK_ENTITY_ID, observationType),
+            requireInteger(PROP_OBSERVATION_SLOT, 0),
+            requireInteger(PROP_OBSERVATION_COUNT, 5),
+            requireBoolean(PROP_OBSERVATION_MUTATION, true),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
         );
@@ -111,7 +128,9 @@ record HarnessConfig(
         String normalized = requireTextValue("observation type", value).toUpperCase(Locale.ROOT);
         if (!OBSERVATION_LEGACY_BLOCK_STATE.equals(normalized)
             && !OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(normalized)
-            && !OBSERVATION_ITEM_COMPONENT_STATE.equals(normalized)) {
+            && !OBSERVATION_ITEM_COMPONENT_STATE.equals(normalized)
+            && !OBSERVATION_BLOCK_ENTITY_STATE.equals(normalized)
+            && !OBSERVATION_INVENTORY_STATE.equals(normalized)) {
             throw new IllegalArgumentException("unsupported observation type: " + value);
         }
         return normalized;
@@ -145,10 +164,46 @@ record HarnessConfig(
     }
 
     private static String normalizeObservationItemId(String observationType, String value) {
+        if (OBSERVATION_INVENTORY_STATE.equals(observationType)) {
+            if (!"minecraft:diamond".equals(value)) {
+                throw new IllegalArgumentException("controlled inventory supports minecraft:diamond only");
+            }
+            return value;
+        }
         if (!OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType)) {
             return null;
         }
         return parseIdentifier(requireTextValue("observation item id", value)).toString();
+    }
+
+    private static String normalizeBlockEntityId(String observationType, String value) {
+        if (!OBSERVATION_BLOCK_ENTITY_STATE.equals(observationType)) {
+            return null;
+        }
+        if (!"minecraft:hopper".equals(value)) {
+            throw new IllegalArgumentException("controlled fixture supports minecraft:hopper only");
+        }
+        return value;
+    }
+
+    private static int normalizeSlot(String observationType, int value) {
+        if (!OBSERVATION_INVENTORY_STATE.equals(observationType)) {
+            return 0;
+        }
+        if (value < 0 || value >= 5) {
+            throw new IllegalArgumentException("inventory slot must be from 0 through 4");
+        }
+        return value;
+    }
+
+    private static int normalizeCount(String observationType, int value) {
+        if (!OBSERVATION_INVENTORY_STATE.equals(observationType)) {
+            return 5;
+        }
+        if (value < 1 || value > 64) {
+            throw new IllegalArgumentException("inventory count must be from 1 through 64");
+        }
+        return value;
     }
 
     private static String requireTextValue(String label, String value) {
@@ -164,8 +219,11 @@ record HarnessConfig(
             || PROP_OBSERVATION_IDENTIFIER.equals(key);
         boolean componentField = PROP_OBSERVATION_COMPONENT_ID.equals(key)
             || PROP_OBSERVATION_ITEM_ID.equals(key);
+        boolean blockEntityField = PROP_OBSERVATION_BLOCK_ENTITY_ID.equals(key);
         if ((registryField && OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType))
-            || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))) {
+            || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))
+            || (PROP_OBSERVATION_ITEM_ID.equals(key) && OBSERVATION_INVENTORY_STATE.equals(observationType))
+            || (blockEntityField && OBSERVATION_BLOCK_ENTITY_STATE.equals(observationType))) {
             return requireTextValue(key, value);
         }
         return value == null ? null : value.trim();
@@ -203,5 +261,17 @@ record HarnessConfig(
             return false;
         }
         throw new IllegalArgumentException("invalid boolean harness property: " + key + "=" + value);
+    }
+
+    private static int requireInteger(String key, int defaultValue) {
+        String value = System.getProperty(key);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("invalid integer harness property: " + key + "=" + value, ex);
+        }
     }
 }

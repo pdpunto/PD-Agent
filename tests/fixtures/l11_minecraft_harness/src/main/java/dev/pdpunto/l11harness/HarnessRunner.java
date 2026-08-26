@@ -1,19 +1,26 @@
 package dev.pdpunto.l11harness;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.HopperBlock;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.HopperBlockEntity;
 import net.minecraft.component.ComponentType;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.WorldChunk;
 
 final class HarnessRunner {
     private static final BlockPos CONTROLLED_POS = new BlockPos(8, 64, 8);
@@ -45,8 +52,107 @@ final class HarnessRunner {
         if (HarnessConfig.OBSERVATION_ITEM_COMPONENT_STATE.equals(config.observationType())) {
             return runItemComponentObservation(config, identity);
         }
+        if (HarnessConfig.OBSERVATION_BLOCK_ENTITY_STATE.equals(config.observationType())) {
+            return runBlockEntityObservation(config, identity, world);
+        }
+        if (HarnessConfig.OBSERVATION_INVENTORY_STATE.equals(config.observationType())) {
+            return runInventoryObservation(config, identity, world);
+        }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runBlockEntityObservation(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world
+    ) {
+        world.getChunk(CONTROLLED_POS);
+        world.setBlockState(CONTROLLED_POS, Blocks.HOPPER.getDefaultState(), Block.NOTIFY_ALL);
+        BlockEntity blockEntity = ((WorldChunk) world.getChunk(CONTROLLED_POS)).getBlockEntity(
+            CONTROLLED_POS,
+            WorldChunk.CreationType.IMMEDIATE
+        );
+        if (!(blockEntity instanceof HopperBlockEntity hopper)) {
+            return HarnessResult.blockEntity(config, identity, new JsonObject(), new JsonObject(), false,
+                "controlled hopper BlockEntity was not present");
+        }
+        String typeId = String.valueOf(Registries.BLOCK_ENTITY_TYPE.getId(hopper.getType()));
+        String blockId = String.valueOf(Registries.BLOCK.getId(world.getBlockState(CONTROLLED_POS).getBlock()));
+        String facingBefore = world.getBlockState(CONTROLLED_POS).get(HopperBlock.FACING).asString();
+        boolean enabledBefore = world.getBlockState(CONTROLLED_POS).get(HopperBlock.ENABLED);
+        boolean enabledAfter = config.observationMutation() ? false : enabledBefore;
+        if (config.observationMutation()) {
+            world.setBlockState(
+                CONTROLLED_POS,
+                world.getBlockState(CONTROLLED_POS).with(HopperBlock.ENABLED, false),
+                Block.NOTIFY_ALL
+            );
+        }
+        BlockState afterState = world.getBlockState(CONTROLLED_POS);
+        JsonObject expected = new JsonObject();
+        expected.addProperty("block_entity_type", config.observationBlockEntityId());
+        expected.addProperty("block_id", "minecraft:hopper");
+        expected.addProperty("enabled", enabledAfter);
+        JsonObject actual = new JsonObject();
+        actual.addProperty("present", true);
+        actual.addProperty("block_entity_type", typeId);
+        actual.addProperty("block_id", blockId);
+        actual.addProperty("facing_before", facingBefore);
+        actual.addProperty("enabled_before", enabledBefore);
+        actual.addProperty("enabled_after", afterState.get(HopperBlock.ENABLED));
+        boolean pass = typeId.equals(config.observationBlockEntityId())
+            && "minecraft:hopper".equals(blockId)
+            && afterState.get(HopperBlock.ENABLED) == enabledAfter;
+        return HarnessResult.blockEntity(
+            config, identity, expected, actual, pass,
+            pass ? "controlled HopperBlockEntity state observed" : "BlockEntity type or state mismatch"
+        );
+    }
+
+    private static HarnessResult runInventoryObservation(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world
+    ) {
+        world.getChunk(CONTROLLED_POS);
+        world.setBlockState(CONTROLLED_POS, Blocks.HOPPER.getDefaultState(), Block.NOTIFY_ALL);
+        BlockEntity blockEntity = ((WorldChunk) world.getChunk(CONTROLLED_POS)).getBlockEntity(
+            CONTROLLED_POS,
+            WorldChunk.CreationType.IMMEDIATE
+        );
+        if (!(blockEntity instanceof Inventory inventory)) {
+            return HarnessResult.inventory(config, identity, new JsonObject(), new JsonObject(), false,
+                "controlled hopper inventory was not present");
+        }
+        ItemStack before = inventory.getStack(config.observationSlot());
+        if (config.observationMutation()) {
+            inventory.setStack(config.observationSlot(), new ItemStack(Items.DIAMOND, config.observationCount()));
+            inventory.markDirty();
+        }
+        ItemStack after = inventory.getStack(config.observationSlot());
+        String itemId = after.isEmpty() ? "minecraft:air" : String.valueOf(Registries.ITEM.getId(after.getItem()));
+        JsonObject expected = new JsonObject();
+        expected.addProperty("inventory_present", true);
+        expected.addProperty("size", 5);
+        expected.addProperty("selected_slot", config.observationSlot());
+        expected.addProperty("item_id", "minecraft:diamond");
+        expected.addProperty("count", config.observationCount());
+        JsonObject actual = new JsonObject();
+        actual.addProperty("inventory_present", true);
+        actual.addProperty("size", inventory.size());
+        actual.addProperty("selected_slot", config.observationSlot());
+        actual.addProperty("empty_before", before.isEmpty());
+        actual.addProperty("item_id_after", itemId);
+        actual.addProperty("count_after", after.isEmpty() ? 0 : after.getCount());
+        boolean pass = inventory.size() == 5
+            && before.isEmpty()
+            && "minecraft:diamond".equals(itemId)
+            && after.getCount() == config.observationCount();
+        return HarnessResult.inventory(
+            config, identity, expected, actual, pass,
+            pass ? "controlled HopperBlockEntity inventory mutation observed" : "inventory state mismatch"
+        );
     }
 
     private static HarnessResult runLegacyBlockStateObservation(

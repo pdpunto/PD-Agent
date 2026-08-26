@@ -28,6 +28,7 @@ final class HarnessResult {
     private final JsonElement componentJsonRestored;
     private final Boolean componentRoundTrip;
     private final Boolean componentMutationPass;
+    private JsonElement structuredObservation;
 
     HarnessResult(
         int schemaVersion,
@@ -54,7 +55,8 @@ final class HarnessResult {
         JsonElement componentJsonAfter,
         JsonElement componentJsonRestored,
         Boolean componentRoundTrip,
-        Boolean componentMutationPass
+        Boolean componentMutationPass,
+        JsonElement structuredObservation
     ) {
         this.schemaVersion = schemaVersion;
         this.testId = testId;
@@ -81,6 +83,7 @@ final class HarnessResult {
         this.componentJsonRestored = componentJsonRestored;
         this.componentRoundTrip = componentRoundTrip;
         this.componentMutationPass = componentMutationPass;
+        this.structuredObservation = structuredObservation;
     }
 
     static HarnessResult passLegacy(HarnessConfig config, HarnessIdentity identity, boolean neighborUpdateTriggered) {
@@ -204,6 +207,36 @@ final class HarnessResult {
         );
     }
 
+    static HarnessResult blockEntity(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        JsonElement expected,
+        JsonElement actual,
+        boolean pass,
+        String reason
+    ) {
+        HarnessResult result = create(
+            config, identity, config.observationType(), pass, null, null,
+            pass ? "PASS" : "FAIL", false, reason,
+            null, null, null, null, null, null, null, pass
+        );
+        result.structuredObservation = new com.google.gson.JsonObject();
+        result.structuredObservation.getAsJsonObject().add("expected", expected);
+        result.structuredObservation.getAsJsonObject().add("actual", actual);
+        return result;
+    }
+
+    static HarnessResult inventory(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        JsonElement expected,
+        JsonElement actual,
+        boolean pass,
+        String reason
+    ) {
+        return blockEntity(config, identity, expected, actual, pass, reason);
+    }
+
     private static HarnessResult create(
         HarnessConfig config,
         HarnessIdentity identity,
@@ -248,7 +281,8 @@ final class HarnessResult {
             componentJsonAfter,
             componentJsonRestored,
             componentRoundTrip,
-            componentMutationPass
+            componentMutationPass,
+            null
         );
     }
 
@@ -279,7 +313,9 @@ final class HarnessResult {
         appendJsonField(builder, "component_json_after", componentJsonAfter).append(",\n");
         appendJsonField(builder, "component_json_restored", componentJsonRestored).append(",\n");
         appendField(builder, "component_round_trip", componentRoundTrip).append(",\n");
-        appendField(builder, "component_mutation_pass", componentMutationPass).append("\n");
+        appendField(builder, "component_mutation_pass", componentMutationPass).append(",\n");
+        appendJsonField(builder, "observation_expected", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("expected")).append(",\n");
+        appendJsonField(builder, "observation_actual", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("actual")).append("\n");
         builder.append("}");
         return builder.toString();
     }

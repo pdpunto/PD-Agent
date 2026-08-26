@@ -13,6 +13,8 @@ from pd_agent.minecraft import (
     ObservationResult,
     MinecraftTestSpec,
     validate_item_component_profile,
+    validate_block_entity_profile,
+    validate_inventory_profile,
 )
 
 
@@ -140,6 +142,32 @@ def test_item_component_profile_is_closed_and_supports_round_trip() -> None:
         },
     )
     assert spec.from_dict(spec.to_dict()) == spec
+
+
+def test_i3_hopper_profiles_are_closed_and_controlled() -> None:
+    selector = {"kind": "harness_block_entity", "fixture": "hopper", "pos": [8, 64, 8]}
+    validate_block_entity_profile(selector, {"block_entity_id": "minecraft:hopper", "mutation": True})
+    validate_inventory_profile(
+        {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]},
+        {"slot": 0, "item_id": "minecraft:diamond", "count": 5, "mutation": True},
+    )
+
+
+@pytest.mark.parametrize(
+    "validator, selector, parameters",
+    [
+        (validate_block_entity_profile, {"kind": "harness_block_entity", "fixture": "hopper", "pos": [9, 64, 8]}, {}),
+        (validate_block_entity_profile, {"kind": "harness_block_entity", "fixture": "hopper", "pos": [8, 64, 8]}, {"path": "x"}),
+        (validate_block_entity_profile, {"kind": "harness_block_entity", "fixture": "hopper", "pos": [8, 64, 8]}, {"block_entity_id": "minecraft:chest"}),
+        (validate_inventory_profile, {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]}, {"slot": -1}),
+        (validate_inventory_profile, {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]}, {"slot": 5}),
+        (validate_inventory_profile, {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]}, {"slot": 0, "nbt": "raw"}),
+        (validate_inventory_profile, {"kind": "harness_inventory", "fixture": "hopper", "pos": [8, 64, 8]}, {"slot": 0, "item_id": "minecraft:stone"}),
+    ],
+)
+def test_i3_profiles_reject_unsafe_or_out_of_fixture_controls(validator, selector, parameters) -> None:
+    with pytest.raises(ValueError):
+        validator(selector, parameters)
 
 
 @pytest.mark.parametrize(

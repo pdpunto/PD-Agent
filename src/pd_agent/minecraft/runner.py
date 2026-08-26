@@ -31,6 +31,8 @@ from .contracts import (
     MinecraftTestStatus,
     ObservationResult,
     validate_item_component_profile,
+    validate_block_entity_profile,
+    validate_inventory_profile,
 )
 from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 
@@ -132,6 +134,25 @@ def _item_component_properties(params: Mapping[str, Any]) -> tuple[str, str, str
     return component_id, item_id, str(round_trip).lower()
 
 
+def _controlled_world_profile(observation_type: MinecraftObservationType, params: Mapping[str, Any]) -> tuple[str, ...]:
+    selector_kind = (
+        "harness_block_entity"
+        if observation_type is MinecraftObservationType.BLOCK_ENTITY_STATE
+        else "harness_inventory"
+    )
+    selector = {"kind": selector_kind, "fixture": "hopper", "pos": [8, 64, 8]}
+    if observation_type is MinecraftObservationType.BLOCK_ENTITY_STATE:
+        validate_block_entity_profile(selector, params)
+        return (str(params.get("block_entity_id", "minecraft:hopper")), str(params.get("mutation", True)).lower())
+    validate_inventory_profile(selector, params)
+    return (
+        str(params.get("slot", 0)),
+        str(params.get("item_id", "minecraft:diamond")),
+        str(params.get("count", 5)),
+        str(params.get("mutation", True)).lower(),
+    )
+
+
 def _non_empty_set(values: Sequence[str] | None) -> frozenset[str]:
     if values is None:
         return frozenset()
@@ -213,6 +234,11 @@ class MinecraftTestRunner:
             raise UnsupportedMinecraftEnvironmentError(f"unsupported java_version: {java_version}")
         if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE:
             _item_component_params(spec.observation_params)
+        elif spec.observation_type in {
+            MinecraftObservationType.BLOCK_ENTITY_STATE,
+            MinecraftObservationType.INVENTORY_STATE,
+        }:
+            _controlled_world_profile(spec.observation_type, spec.observation_params)
 
     def validate_target(
         self,
@@ -292,6 +318,22 @@ class MinecraftTestRunner:
                     _item_component_properties(spec.observation_params),
                 ))
                 if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationBlockEntityId", "pd.agent.observationMutation"),
+                    _controlled_world_profile(spec.observation_type, spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.BLOCK_ENTITY_STATE
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationSlot", "pd.agent.observationItemId", "pd.agent.observationCount", "pd.agent.observationMutation"),
+                    _controlled_world_profile(spec.observation_type, spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.INVENTORY_STATE
                 else ()
             ),
         )
@@ -543,6 +585,28 @@ class MinecraftTestRunner:
                     )
                 )
                 if result.spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE
+                else ()
+            ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationBlockEntityId", "pd.agent.observationMutation"),
+                        _controlled_world_profile(result.spec.observation_type, result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.BLOCK_ENTITY_STATE
+                else ()
+            ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationSlot", "pd.agent.observationItemId", "pd.agent.observationCount", "pd.agent.observationMutation"),
+                        _controlled_world_profile(result.spec.observation_type, result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.INVENTORY_STATE
                 else ()
             ),
         )
@@ -798,6 +862,36 @@ class MinecraftTestRunner:
                         None
                         if functional_test_result == "PASS"
                         else {"code": "ITEM_COMPONENT_STATE_MISMATCH", "message": reason}
+                    ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() in {
+                MinecraftObservationType.BLOCK_ENTITY_STATE.value,
+                MinecraftObservationType.INVENTORY_STATE.value,
+            }:
+                observation_type = MinecraftObservationType(str(result_type).upper())
+                observation = ObservationResult(
+                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_type=observation_type,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected=dict(harness_result.get("observation_expected", {})),
+                    actual=dict(harness_result.get("observation_actual", {})),
+                    phase="RUNTIME",
+                    evidence_refs=(
+                        MinecraftEvidenceReference(
+                            kind=MinecraftEvidenceKind.OBSERVATION,
+                            ref="harness-result.json",
+                            phase="RUNTIME",
+                        ),
+                    ),
+                    error=(
+                        None
+                        if functional_test_result == "PASS"
+                        else {"code": f"{observation_type.value}_MISMATCH", "message": reason}
                     ),
                 )
                 metadata["observation_result"] = observation.to_dict()

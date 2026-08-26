@@ -28,6 +28,62 @@ _UNSAFE_PARAMETER_KEYS = {
     "world_root",
 }
 _ITEM_COMPONENT_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
+_CONTROLLED_HOPPER_POS = (8, 64, 8)
+
+
+def _controlled_position(selector: Mapping[str, Any], *, kind: str, selector_kind: str) -> None:
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "fixture", "pos"}:
+        raise ValueError(f"{kind} selector must declare kind, fixture and pos")
+    if selector.get("kind") != selector_kind or selector.get("fixture") != "hopper":
+        raise ValueError(f"{kind} selector must target the controlled hopper fixture")
+    position = selector.get("pos")
+    if position != list(_CONTROLLED_HOPPER_POS) and position != _CONTROLLED_HOPPER_POS:
+        raise ValueError(f"{kind} selector position is outside the authorized fixture")
+
+
+def validate_block_entity_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the closed vanilla hopper BlockEntity profile used by I3."""
+
+    _controlled_position(selector, kind="BLOCK_ENTITY_STATE", selector_kind="harness_block_entity")
+    if not isinstance(parameters, Mapping):
+        raise ValueError("BLOCK_ENTITY_STATE parameters must be an object")
+    allowed = {"block_entity_id", "mutation"}
+    unknown = set(parameters) - allowed
+    if unknown:
+        raise ValueError(f"BLOCK_ENTITY_STATE parameters contain unknown fields: {sorted(unknown)!r}")
+    block_entity_id = parameters.get("block_entity_id", "minecraft:hopper")
+    if block_entity_id != "minecraft:hopper":
+        raise ValueError("BLOCK_ENTITY_STATE only supports minecraft:hopper")
+    if not isinstance(parameters.get("mutation", True), bool):
+        raise ValueError("BLOCK_ENTITY_STATE mutation must be boolean")
+
+
+def validate_inventory_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the fixed five-slot hopper inventory profile used by I3."""
+
+    _controlled_position(selector, kind="INVENTORY_STATE", selector_kind="harness_inventory")
+    if not isinstance(parameters, Mapping):
+        raise ValueError("INVENTORY_STATE parameters must be an object")
+    allowed = {"slot", "item_id", "count", "mutation"}
+    unknown = set(parameters) - allowed
+    if unknown:
+        raise ValueError(f"INVENTORY_STATE parameters contain unknown fields: {sorted(unknown)!r}")
+    slot = parameters.get("slot", 0)
+    if isinstance(slot, bool) or not isinstance(slot, int) or not 0 <= slot < 5:
+        raise ValueError("INVENTORY_STATE slot must be an integer from 0 through 4")
+    if parameters.get("item_id", "minecraft:diamond") != "minecraft:diamond":
+        raise ValueError("INVENTORY_STATE only supports minecraft:diamond")
+    count = parameters.get("count", 5)
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 64:
+        raise ValueError("INVENTORY_STATE count must be an integer from 1 through 64")
+    if not isinstance(parameters.get("mutation", True), bool):
+        raise ValueError("INVENTORY_STATE mutation must be boolean")
 
 
 def validate_item_component_profile(
