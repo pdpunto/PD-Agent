@@ -124,7 +124,7 @@ class OpenAIProvider(ProviderRecoveryAdapter, ModelProvider):
         request_client = self._request_client(timeout_seconds)
         last_error: ProviderError | None = None
         physical_request_count = 0
-        if self.budget_guard is not None:
+        if self.budget_guard is not None and recovery_generation == 0:
             self.budget_guard.begin_logical_turn()
         for attempt in range(retry_limit + 1):
             dispatch_record: DispatchRecord | None = None

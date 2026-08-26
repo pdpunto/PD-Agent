@@ -288,10 +288,15 @@ class LunaEconomicState:
             raise ValueError("economic counters must be non-negative")
         if not isinstance(self.dispatch_records, Mapping):
             raise ValueError("dispatch_records must be an object")
+        reservation_ids: set[str] = set()
         for physical_request_id, record in self.dispatch_records.items():
             if str(physical_request_id) != str(record.get("physical_request_id")):
                 raise ValueError("dispatch record identity mismatch")
-            DispatchRecord.from_dict(record)
+            parsed = DispatchRecord.from_dict(record)
+            if parsed.reservation_id is not None:
+                if parsed.reservation_id in reservation_ids:
+                    raise ValueError("reservation identity reused by multiple dispatches")
+                reservation_ids.add(parsed.reservation_id)
 
     @property
     def global_remaining_usd(self) -> Decimal:
