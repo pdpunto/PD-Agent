@@ -13,6 +13,19 @@ from .recovery import (
     RecoveryResult,
     validate_recovered_result,
 )
+from .recovery_coordinator import (
+    RECOVERY_BUDGET_BLOCKED,
+    RECOVERY_DISPATCH_UNCERTAIN,
+    RECOVERY_EXISTING_RESPONSE,
+    RECOVERY_IDENTITY_INVALID,
+    RECOVERY_LIMIT_EXHAUSTED,
+    RECOVERY_PRE_DISPATCH_FAILED,
+    RECOVERY_PROVIDER_FAILURE,
+    RECOVERY_RECONCILIATION_UNSUPPORTED,
+    RECOVERY_REISSUE_SUCCEEDED,
+    RecoveryCoordinator,
+    RecoveryCoordinatorResult,
+)
 
 __all__ = [
     "CAPABILITY_NAMES",
@@ -24,4 +37,15 @@ __all__ = [
     "RecoveryLookupRequest",
     "RecoveryResult",
     "validate_recovered_result",
+    "RecoveryCoordinator",
+    "RecoveryCoordinatorResult",
+    "RECOVERY_BUDGET_BLOCKED",
+    "RECOVERY_DISPATCH_UNCERTAIN",
+    "RECOVERY_EXISTING_RESPONSE",
+    "RECOVERY_IDENTITY_INVALID",
+    "RECOVERY_LIMIT_EXHAUSTED",
+    "RECOVERY_PRE_DISPATCH_FAILED",
+    "RECOVERY_PROVIDER_FAILURE",
+    "RECOVERY_RECONCILIATION_UNSUPPORTED",
+    "RECOVERY_REISSUE_SUCCEEDED",
 ]

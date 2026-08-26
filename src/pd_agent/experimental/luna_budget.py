@@ -491,10 +491,12 @@ class LunaBudgetGuard:
         provider: str,
         model: str,
         retry_count: int,
+        recovery_generation: int = 0,
+        recovery_of: str | None = None,
     ) -> DispatchRecord:
         """Persist REQUEST_PREPARED before reserving or crossing the provider boundary."""
 
-        if self.abort_reason is not None:
+        if self.abort_reason is not None and recovery_generation == 0:
             raise self._blocked(self.abort_reason)
         if self.state.active_attempt_id is None:
             self.begin_attempt("legacy-attempt")
@@ -507,6 +509,8 @@ class LunaBudgetGuard:
             model=model,
             request_fingerprint=self._request_fingerprint(payload),
             client_correlation_id=f"corr-{uuid4()}",
+            recovery_generation=recovery_generation,
+            recovery_of=recovery_of,
         )
         self.state.dispatch_records[physical_request_id] = record.to_dict()
         self._persist()
@@ -518,8 +522,9 @@ class LunaBudgetGuard:
         *,
         retry_count: int,
         dispatch_record: DispatchRecord | None = None,
+        recovery_dispatch: bool = False,
     ) -> dict[str, Any]:
-        if self.abort_reason is not None:
+        if self.abort_reason is not None and not recovery_dispatch:
             raise self._blocked(self.abort_reason)
         if self.state.active_attempt_id is None:
             self.begin_attempt("legacy-attempt")

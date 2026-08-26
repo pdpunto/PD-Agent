@@ -112,6 +112,14 @@ class OpenAIProvider(ProviderRecoveryAdapter, ModelProvider):
         timeout_seconds = self._effective_timeout_seconds(request)
         retry_limit = self._effective_retry_limit(request)
         payload = self._build_request_payload(request, model=model)
+        recovery_generation = int(request.model_config.get("_recovery_generation", 0))
+        recovery_of = request.model_config.get("_recovery_of")
+        if recovery_generation < 0 or (recovery_generation == 0 and recovery_of is not None):
+            raise ProviderError(
+                "invalid recovery dispatch identity",
+                kind="recovery_invalid",
+                provider="openai",
+            )
 
         request_client = self._request_client(timeout_seconds)
         last_error: ProviderError | None = None
@@ -126,12 +134,15 @@ class OpenAIProvider(ProviderRecoveryAdapter, ModelProvider):
                     provider="openai",
                     model=model,
                     retry_count=attempt,
+                    recovery_generation=recovery_generation,
+                    recovery_of=(str(recovery_of) if recovery_of is not None else None),
                 )
                 try:
                     self.budget_guard.before_request(
                         payload,
                         retry_count=attempt,
                         dispatch_record=dispatch_record,
+                        recovery_dispatch=recovery_generation > 0,
                     )
                 except ProviderError:
                     if dispatch_record.dispatch_state == "REQUEST_PREPARED":
