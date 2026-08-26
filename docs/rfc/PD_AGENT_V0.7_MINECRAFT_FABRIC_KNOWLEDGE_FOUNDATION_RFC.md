@@ -1,9 +1,9 @@
 # PD Agent v0.7 - Minecraft/Fabric Knowledge Foundation RFC
 
-**Estado:** RFC propuesto para aprobacion de Arquitectura  
-**Milestone:** PD Agent v0.7 - Knowledge Foundation  
-**Area:** 03 - Knowledge Base / Minecraft Brain  
-**Design authority:** `docs/design/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_DESIGN.md`  
+**Estado:** RFC propuesto para aprobacion de Arquitectura
+**Milestone:** PD Agent v0.7 - Knowledge Foundation
+**Area:** 03 - Knowledge Base / Minecraft Brain
+**Design authority:** `docs/design/PD_AGENT_V0.7_MINECRAFT_FABRIC_KNOWLEDGE_FOUNDATION_DESIGN.md`
 **Scope:** Minecraft 1.21.11 + Fabric exclusivamente
 
 > Este RFC define contratos, limites y decisiones tecnicas. No autoriza por si
@@ -422,15 +422,15 @@ no altera el pack ni su identidad.
 
 La futura implementacion debera demostrar offline, sin provider:
 
-**A - Pack:** manifest, records, checksum, freeze y rebuild reproducible.  
-**B - Multi-source:** las tres categorias mediante mas de un adapter.  
-**C - Isolation:** record incompatible no llega a contexto.  
-**D - Pre-code:** need aplicable recuperado e inyectado antes de la primera mutacion.  
-**E - Repair:** fallo real -> need -> retrieval -> injection -> repair -> build/runtime PASS.  
-**F - Trace:** RETRIEVED/SELECTED/INJECTED/REFERENCED/EVIDENCED completos.  
-**G - Brain OFF/ON:** OFF no inyecta y ON respeta gates.  
-**H - No leakage:** sin answer keys, Harness internals ni conocimiento incompatible.  
-**I - Runtime:** knowledge no sustituye Harness ni acceptance.  
+**A - Pack:** manifest, records, checksum, freeze y rebuild reproducible.
+**B - Multi-source:** las tres categorias mediante mas de un adapter.
+**C - Isolation:** record incompatible no llega a contexto.
+**D - Pre-code:** need aplicable recuperado e inyectado antes de la primera mutacion.
+**E - Repair:** fallo real -> need -> retrieval -> injection -> repair -> build/runtime PASS.
+**F - Trace:** RETRIEVED/SELECTED/INJECTED/REFERENCED/EVIDENCED completos.
+**G - Brain OFF/ON:** OFF no inyecta y ON respeta gates.
+**H - No leakage:** sin answer keys, Harness internals ni conocimiento incompatible.
+**I - Runtime:** knowledge no sustituye Harness ni acceptance.
 **J - Regression:** v0.1-v0.6 siguen PASS y no cambia el provider contract.
 
 Los tests deben cubrir miss, source unavailable, unknown/incompatible
