@@ -136,6 +136,7 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     providers.gradleProperty("pd.agent.commandProfile").orNull?.let { jvmArgs.add("-Dpd.agent.commandProfile=$it") }
     providers.gradleProperty("pd.agent.commandInvocationId").orNull?.let { jvmArgs.add("-Dpd.agent.commandInvocationId=$it") }
     providers.gradleProperty("pd.agent.commandCount").orNull?.let { jvmArgs.add("-Dpd.agent.commandCount=$it") }
+    providers.gradleProperty("pd.agent.eventProfile").orNull?.let { jvmArgs.add("-Dpd.agent.eventProfile=$it") }
     javaLauncher = javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     }

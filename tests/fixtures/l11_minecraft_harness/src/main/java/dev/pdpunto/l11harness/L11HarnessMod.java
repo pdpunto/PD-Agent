@@ -21,6 +21,7 @@ import net.minecraft.item.Items;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.chunk.WorldChunk;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
     @Override
@@ -33,6 +34,22 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
                         .requires(source -> source.getEntity() == null)
                         .executes(context -> markInventory(context.getSource(), IntegerArgumentType.getInteger(context, "count"))))))
         );
+        ServerWorldEvents.LOAD.register((server, world) -> {
+            if (!"i8_world_load_effect".equals(System.getProperty("pd.agent.eventProfile"))) {
+                return;
+            }
+            BlockPos position = new BlockPos(8, 64, 8);
+            world.getChunk(position);
+            world.setBlockState(position, Blocks.HOPPER.getDefaultState(), Block.NOTIFY_ALL);
+            BlockEntity blockEntity = ((WorldChunk) world.getChunk(position)).getBlockEntity(
+                position, WorldChunk.CreationType.IMMEDIATE
+            );
+            if (blockEntity instanceof HopperBlockEntity hopper) {
+                hopper.setStack(0, new ItemStack(Items.DIAMOND, 3));
+                hopper.markDirty();
+                HarnessSignals.markWorldLoadCallbackExecuted();
+            }
+        });
         Thread waiter = Thread.ofPlatform().daemon().name("pd-agent-l11-harness").start(this::waitForServerStart);
         if (waiter == null) {
             throw new IllegalStateException("failed to start harness waiter thread");

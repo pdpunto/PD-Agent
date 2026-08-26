@@ -374,6 +374,7 @@ class MinecraftEvidenceReference:
 
 _I7_COMMAND_PROFILE = "i7_inventory_mark"
 _I7_COMMAND_TEXT = "pdagent_i7 mark"
+_I8_EVENT_PROFILE = "i8_world_load_effect"
 
 
 @dataclass(frozen=True, slots=True)
@@ -679,6 +680,7 @@ class MinecraftTestSpec:
     expect_neighbor_update: bool = False
     runtime_mod_jars: tuple[Path, ...] = ()
     command_invocation: CommandInvocation | None = None
+    event_profile: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
@@ -707,6 +709,8 @@ class MinecraftTestSpec:
         object.__setattr__(self, "expect_neighbor_update", bool(self.expect_neighbor_update))
         if self.command_invocation is not None and not isinstance(self.command_invocation, CommandInvocation):
             object.__setattr__(self, "command_invocation", CommandInvocation.from_dict(self.command_invocation))
+        if self.event_profile is not None and self.event_profile != _I8_EVENT_PROFILE:
+            raise ValueError("unsupported event profile")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -725,6 +729,7 @@ class MinecraftTestSpec:
                 if self.command_invocation is not None
                 else {}
             ),
+            **({"event_profile": self.event_profile} if self.event_profile is not None else {}),
         }
 
     @classmethod
@@ -747,6 +752,7 @@ class MinecraftTestSpec:
                 if data.get("command_invocation") is not None
                 else None
             ),
+            event_profile=data.get("event_profile"),
         )
 
 

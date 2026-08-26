@@ -68,6 +68,9 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert "Thread.ofPlatform().daemon().name(\"pd-agent-l11-harness\")" in mod_source
     assert "waitForServerStart" in mod_source
     assert "ServerLifecycleEvents.SERVER_STARTED" not in mod_source
+    assert "ServerWorldEvents.LOAD" in mod_source
+    assert "ServerTickEvents" not in mod_source
+    assert 'i8_world_load_effect' in mod_source
     assert "server.stop(false)" in mod_source
     assert "HarnessSignals.reset()" in mod_source
     assert "HarnessBlocks" not in mod_source

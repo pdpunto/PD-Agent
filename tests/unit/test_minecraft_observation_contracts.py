@@ -71,6 +71,31 @@ def test_i7_command_result_requires_complete_success_path() -> None:
         )
 
 
+def test_i8_world_load_profile_is_closed_and_round_trips() -> None:
+    spec = MinecraftTestSpec(
+        target_jar="build/libs/target.jar",
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="i8-profile",
+        timeout_seconds=60,
+        observation_type=MinecraftObservationType.INVENTORY_STATE,
+        observation_params={"slot": 0, "item_id": "minecraft:diamond", "count": 3, "mutation": True},
+        event_profile="i8_world_load_effect",
+    )
+    assert MinecraftTestSpec.from_dict(spec.to_dict()).event_profile == "i8_world_load_effect"
+    with pytest.raises(ValueError, match="unsupported event profile"):
+        MinecraftTestSpec(
+            target_jar="build/libs/target.jar",
+            target_mod_id="pdagentl11",
+            minecraft_version="1.21.11",
+            loader_version="0.19.3",
+            test_id="i8-invalid-profile",
+            timeout_seconds=60,
+            event_profile="ServerTickEvents.END_SERVER_TICK",
+        )
+
+
 NEW_TYPES = {
     "ITEM_COMPONENT_STATE",
     "BLOCK_ENTITY_STATE",

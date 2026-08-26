@@ -7,6 +7,7 @@ import net.minecraft.util.math.BlockPos;
 
 public final class HarnessSignals {
     private static final AtomicBoolean NEIGHBOR_UPDATE_TRIGGERED = new AtomicBoolean(false);
+    private static final AtomicBoolean WORLD_LOAD_CALLBACK_EXECUTED = new AtomicBoolean(false);
     private static final AtomicReference<BlockPos> ARMED_NEIGHBOR_UPDATE_POS = new AtomicReference<>();
 
     private HarnessSignals() {
@@ -14,6 +15,7 @@ public final class HarnessSignals {
 
     public static void reset() {
         NEIGHBOR_UPDATE_TRIGGERED.set(false);
+        WORLD_LOAD_CALLBACK_EXECUTED.set(false);
         ARMED_NEIGHBOR_UPDATE_POS.set(null);
     }
 
@@ -34,5 +36,13 @@ public final class HarnessSignals {
 
     public static boolean neighborUpdateTriggered() {
         return NEIGHBOR_UPDATE_TRIGGERED.get();
+    }
+
+    public static void markWorldLoadCallbackExecuted() {
+        WORLD_LOAD_CALLBACK_EXECUTED.set(true);
+    }
+
+    public static boolean worldLoadCallbackExecuted() {
+        return WORLD_LOAD_CALLBACK_EXECUTED.get();
     }
 }

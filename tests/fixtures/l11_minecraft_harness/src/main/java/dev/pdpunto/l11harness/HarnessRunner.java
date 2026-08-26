@@ -334,7 +334,8 @@ final class HarnessRunner {
                 "controlled hopper inventory was not present");
         }
         ItemStack before = inventory.getStack(config.observationSlot());
-        if (config.observationMutation()) {
+        boolean eventDrivenObservation = "i8_world_load_effect".equals(System.getProperty("pd.agent.eventProfile"));
+        if (config.observationMutation() && !eventDrivenObservation) {
             inventory.setStack(config.observationSlot(), new ItemStack(Items.DIAMOND, config.observationCount()));
             inventory.markDirty();
         }
@@ -353,10 +354,15 @@ final class HarnessRunner {
         actual.addProperty("empty_before", before.isEmpty());
         actual.addProperty("item_id_after", itemId);
         actual.addProperty("count_after", after.isEmpty() ? 0 : after.getCount());
+        actual.addProperty("world_load_callback_executed", HarnessSignals.worldLoadCallbackExecuted());
         boolean pass = inventory.size() == 5
-            && before.isEmpty()
             && "minecraft:diamond".equals(itemId)
             && after.getCount() == config.observationCount();
+        if (eventDrivenObservation) {
+            pass = pass && HarnessSignals.worldLoadCallbackExecuted();
+        } else {
+            pass = pass && before.isEmpty();
+        }
         return HarnessResult.inventory(
             config, identity, expected, actual, pass,
             pass ? "controlled HopperBlockEntity inventory mutation observed" : "inventory state mismatch"

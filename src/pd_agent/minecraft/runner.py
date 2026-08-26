@@ -651,6 +651,11 @@ class MinecraftTestRunner:
             f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
             *(
+                (f"-Ppd.agent.eventProfile={result.spec.event_profile}",)
+                if result.spec.event_profile is not None
+                else ()
+            ),
+            *(
                 (
                     f"-Ppd.agent.commandProfile={result.spec.command_invocation.profile}",
                     f"-Ppd.agent.commandInvocationId={result.spec.command_invocation.invocation_id}",
