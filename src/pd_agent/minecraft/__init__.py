@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from .contracts import (
+    MinecraftEvidenceKind,
+    MinecraftEvidenceReference,
     MinecraftEvidencePaths,
     MinecraftLaunchPlan,
     MinecraftProcessEvidence,
     MinecraftRuntimeEvidence,
     MinecraftObservationType,
+    MinecraftObservationStatus,
+    MinecraftObservationRequest,
+    MinecraftObservationResult,
+    ObservationRequest,
+    ObservationResult,
     MinecraftTargetMetadata,
     MinecraftTestResult,
     MinecraftTestSpec,
@@ -22,9 +29,16 @@ from .runner import MinecraftTestRunner
 
 __all__ = [
     "MinecraftEvidencePaths",
+    "MinecraftEvidenceKind",
+    "MinecraftEvidenceReference",
     "MinecraftLaunchPlan",
     "MinecraftProcessEvidence",
     "MinecraftObservationType",
+    "MinecraftObservationStatus",
+    "MinecraftObservationRequest",
+    "MinecraftObservationResult",
+    "ObservationRequest",
+    "ObservationResult",
     "MinecraftRuntimeEvidence",
     "MinecraftTargetMetadata",
     "MinecraftTestError",

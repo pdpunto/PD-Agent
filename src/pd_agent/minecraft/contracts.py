@@ -12,6 +12,21 @@ from typing import Any, Mapping
 
 
 _MOD_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*$")
+_IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_PROFILE_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_SAFE_PARAMETER_KEY_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_UNSAFE_PARAMETER_KEYS = {
+    "arbitrary_command",
+    "code",
+    "command",
+    "executable",
+    "file",
+    "nbt",
+    "path",
+    "reflection",
+    "script",
+    "world_root",
+}
 
 
 def _json_ready(value: Any) -> Any:
@@ -26,6 +41,55 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, list):
         return [_json_ready(item) for item in value]
     return value
+
+
+def _closed_json(value: Any, *, field_name: str, reject_unsafe_keys: bool = True) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not _SAFE_PARAMETER_KEY_RE.fullmatch(key):
+                raise ValueError(f"{field_name} contains an invalid key")
+            if reject_unsafe_keys and key.casefold() in _UNSAFE_PARAMETER_KEYS:
+                raise ValueError(f"{field_name} contains a prohibited key: {key}")
+            result[key] = _closed_json(
+                item,
+                field_name=f"{field_name}.{key}",
+                reject_unsafe_keys=reject_unsafe_keys,
+            )
+        return result
+    if isinstance(value, (tuple, list)):
+        return [_closed_json(item, field_name=field_name) for item in value]
+    raise ValueError(f"{field_name} must contain JSON-compatible values")
+
+
+def _identity(name: str, value: object) -> str:
+    text = _non_empty_text(name, value)
+    if not _IDENTITY_RE.fullmatch(text):
+        raise ValueError(f"invalid {name}: {text!r}")
+    return text
+
+
+def _optional_identity(name: str, value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _identity(name, value)
+
+
+def _profile(value: object) -> str:
+    text = _non_empty_text("profile", value).casefold()
+    if not _PROFILE_RE.fullmatch(text):
+        raise ValueError(f"invalid profile: {text!r}")
+    return text
+
+
+def _strict_mapping(data: Mapping[str, Any], *, model: str, allowed: set[str]) -> None:
+    if not isinstance(data, Mapping):
+        raise ValueError(f"{model} must be an object")
+    unknown = set(data) - allowed
+    if unknown:
+        raise ValueError(f"{model} contains unknown fields: {sorted(unknown)!r}")
 
 
 def _non_empty_text(name: str, value: object) -> str:
@@ -61,6 +125,227 @@ class MinecraftObservationType(StrEnum):
 
     LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE"
     REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT"
+    ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE"
+    BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE"
+    INVENTORY_STATE = "INVENTORY_STATE"
+    TAG_MEMBERSHIP = "TAG_MEMBERSHIP"
+    RECIPE_MATCH = "RECIPE_MATCH"
+    LOOT_RESULT = "LOOT_RESULT"
+
+
+class MinecraftObservationStatus(StrEnum):
+    """Closed status set for an observation result."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    BLOCKED = "BLOCKED"
+    INVALID = "INVALID"
+
+
+class MinecraftEvidenceKind(StrEnum):
+    """Evidence categories available to later runtime contracts."""
+
+    OBSERVATION = "observation"
+    ACTION = "action"
+    PHASE = "phase"
+    PROCESS = "process"
+    WORLD = "world"
+    SCENARIO = "scenario"
+
+
+@dataclass(frozen=True, slots=True)
+class MinecraftEvidenceReference:
+    """Immutable reference to a persisted evidence payload."""
+
+    kind: MinecraftEvidenceKind
+    ref: str
+    phase: str | None = None
+    process_id: str | None = None
+    world_id: str | None = None
+    scenario_id: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", MinecraftEvidenceKind(str(self.kind)))
+        ref = _non_empty_text("evidence ref", self.ref)
+        if Path(ref).is_absolute() or ".." in Path(ref).parts:
+            raise ValueError("evidence ref must be relative and confined")
+        object.__setattr__(self, "ref", ref.replace("\\", "/"))
+        object.__setattr__(self, "phase", _optional_identity("phase", self.phase))
+        object.__setattr__(self, "process_id", _optional_identity("process_id", self.process_id))
+        object.__setattr__(self, "world_id", _optional_identity("world_id", self.world_id))
+        object.__setattr__(self, "scenario_id", _optional_identity("scenario_id", self.scenario_id))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind.value,
+            "ref": self.ref,
+            "phase": self.phase,
+            "process_id": self.process_id,
+            "world_id": self.world_id,
+            "scenario_id": self.scenario_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "MinecraftEvidenceReference":
+        _strict_mapping(
+            data,
+            model="MinecraftEvidenceReference",
+            allowed={"kind", "ref", "phase", "process_id", "world_id", "scenario_id"},
+        )
+        required = {"kind", "ref"} - set(data)
+        if required:
+            raise ValueError(f"MinecraftEvidenceReference missing fields: {sorted(required)!r}")
+        return cls(
+            kind=MinecraftEvidenceKind(str(data["kind"])),
+            ref=str(data["ref"]),
+            phase=data.get("phase"),
+            process_id=data.get("process_id"),
+            world_id=data.get("world_id"),
+            scenario_id=data.get("scenario_id"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationRequest:
+    """Closed provider-neutral request envelope for future observations."""
+
+    observation_id: str
+    observation_type: MinecraftObservationType
+    profile: str
+    selector: Mapping[str, Any]
+    expected: Any
+    parameters: Mapping[str, Any] = field(default_factory=dict)
+    phase: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observation_id", _identity("observation_id", self.observation_id))
+        object.__setattr__(self, "observation_type", MinecraftObservationType(str(self.observation_type)))
+        object.__setattr__(self, "profile", _profile(self.profile))
+        selector = _closed_json(self.selector, field_name="selector")
+        if not isinstance(selector, dict) or not selector:
+            raise ValueError("selector must be a non-empty object")
+        object.__setattr__(self, "selector", selector)
+        parameters = _closed_json(self.parameters, field_name="parameters")
+        if not isinstance(parameters, dict):
+            raise ValueError("parameters must be an object")
+        object.__setattr__(self, "parameters", parameters)
+        object.__setattr__(
+            self,
+            "expected",
+            _closed_json(self.expected, field_name="expected", reject_unsafe_keys=False),
+        )
+        object.__setattr__(self, "phase", _optional_identity("phase", self.phase))
+        metadata = _closed_json(self.metadata, field_name="metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        object.__setattr__(self, "metadata", metadata)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "observation_id": self.observation_id,
+            "observation_type": self.observation_type.value,
+            "profile": self.profile,
+            "selector": dict(self.selector),
+            "parameters": dict(self.parameters),
+            "expected": self.expected,
+            "phase": self.phase,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ObservationRequest":
+        allowed = {"observation_id", "observation_type", "profile", "selector", "parameters", "expected", "phase", "metadata"}
+        _strict_mapping(data, model="ObservationRequest", allowed=allowed)
+        required = {"observation_id", "observation_type", "profile", "selector", "expected"} - set(data)
+        if required:
+            raise ValueError(f"ObservationRequest missing fields: {sorted(required)!r}")
+        return cls(
+            observation_id=str(data["observation_id"]),
+            observation_type=MinecraftObservationType(str(data["observation_type"])),
+            profile=str(data["profile"]),
+            selector=dict(data["selector"]),
+            parameters=dict(data.get("parameters", {})),
+            expected=data["expected"],
+            phase=data.get("phase"),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationResult:
+    """Closed provider-neutral result envelope for future observations."""
+
+    observation_id: str
+    observation_type: MinecraftObservationType
+    status: MinecraftObservationStatus
+    expected: Any
+    actual: Any = None
+    phase: str | None = None
+    evidence_refs: tuple[MinecraftEvidenceReference, ...] = ()
+    error: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observation_id", _identity("observation_id", self.observation_id))
+        object.__setattr__(self, "observation_type", MinecraftObservationType(str(self.observation_type)))
+        object.__setattr__(self, "status", MinecraftObservationStatus(str(self.status)))
+        object.__setattr__(self, "expected", _closed_json(self.expected, field_name="expected"))
+        object.__setattr__(
+            self,
+            "actual",
+            _closed_json(self.actual, field_name="actual", reject_unsafe_keys=False),
+        )
+        object.__setattr__(self, "phase", _optional_identity("phase", self.phase))
+        refs = tuple(
+            item if isinstance(item, MinecraftEvidenceReference) else MinecraftEvidenceReference.from_dict(item)
+            for item in self.evidence_refs
+        )
+        object.__setattr__(self, "evidence_refs", refs)
+        if self.error is not None:
+            error = _closed_json(self.error, field_name="error", reject_unsafe_keys=False)
+            if not isinstance(error, dict) or not error:
+                raise ValueError("error must be a non-empty object")
+            object.__setattr__(self, "error", error)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "observation_id": self.observation_id,
+            "observation_type": self.observation_type.value,
+            "status": self.status.value,
+            "expected": self.expected,
+            "actual": self.actual,
+            "phase": self.phase,
+            "evidence_refs": [ref.to_dict() for ref in self.evidence_refs],
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ObservationResult":
+        allowed = {"observation_id", "observation_type", "status", "expected", "actual", "phase", "evidence_refs", "error"}
+        _strict_mapping(data, model="ObservationResult", allowed=allowed)
+        required = {"observation_id", "observation_type", "status", "expected"} - set(data)
+        if required:
+            raise ValueError(f"ObservationResult missing fields: {sorted(required)!r}")
+        return cls(
+            observation_id=str(data["observation_id"]),
+            observation_type=MinecraftObservationType(str(data["observation_type"])),
+            status=MinecraftObservationStatus(str(data["status"])),
+            expected=data["expected"],
+            actual=data.get("actual"),
+            phase=data.get("phase"),
+            evidence_refs=tuple(MinecraftEvidenceReference.from_dict(item) for item in data.get("evidence_refs", [])),
+            error=dict(data["error"]) if data.get("error") is not None else None,
+        )
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+MinecraftObservationRequest = ObservationRequest
+MinecraftObservationResult = ObservationResult
 
 
 @dataclass(frozen=True, slots=True)

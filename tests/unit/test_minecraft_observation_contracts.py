@@ -1,0 +1,147 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from pd_agent.minecraft import (
+    MinecraftEvidenceKind,
+    MinecraftEvidenceReference,
+    MinecraftObservationStatus,
+    MinecraftObservationType,
+    ObservationRequest,
+    ObservationResult,
+)
+
+
+NEW_TYPES = {
+    "ITEM_COMPONENT_STATE",
+    "BLOCK_ENTITY_STATE",
+    "INVENTORY_STATE",
+    "TAG_MEMBERSHIP",
+    "RECIPE_MATCH",
+    "LOOT_RESULT",
+}
+
+
+def _request() -> ObservationRequest:
+    return ObservationRequest(
+        observation_id="obs-001",
+        observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+        profile="controlled_stack",
+        selector={"kind": "harness_stack", "id": "target"},
+        parameters={"operation": "read"},
+        expected={"present": True, "value": {"charge": 3}},
+        phase="PHASE_1",
+        metadata={"source": "harness"},
+    )
+
+
+def test_observation_types_preserve_legacy_and_declare_v06_types() -> None:
+    values = {item.value for item in MinecraftObservationType}
+    assert {"LEGACY_BLOCK_STATE", "REGISTRY_ENTRY_PRESENT"} <= values
+    assert NEW_TYPES <= values
+    assert "COMMAND_EXECUTION" not in values
+    assert "EVENT_FIRED" not in values
+    assert "PERSISTENCE" not in values
+
+
+def test_observation_request_round_trip_is_semantically_equal() -> None:
+    original = _request()
+    restored = ObservationRequest.from_dict(json.loads(original.to_json()))
+    assert restored == original
+
+
+def test_observation_request_rejects_unknown_fields_and_unsafe_payloads() -> None:
+    payload = _request().to_dict()
+    payload["unexpected"] = True
+    with pytest.raises(ValueError, match="unknown fields"):
+        ObservationRequest.from_dict(payload)
+
+    with pytest.raises(ValueError, match="prohibited key"):
+        ObservationRequest(
+            observation_id="obs-002",
+            observation_type=MinecraftObservationType.TAG_MEMBERSHIP,
+            profile="registry",
+            selector={"kind": "tag"},
+            parameters={"command": "/op"},
+            expected=True,
+        )
+
+
+def test_observation_request_rejects_invalid_identity_profile_and_selector() -> None:
+    with pytest.raises(ValueError):
+        ObservationRequest(
+            observation_id="../outside",
+            observation_type=MinecraftObservationType.RECIPE_MATCH,
+            profile="crafting",
+            selector={"kind": "recipe"},
+            expected=True,
+        )
+    with pytest.raises(ValueError):
+        ObservationRequest(
+            observation_id="obs-003",
+            observation_type=MinecraftObservationType.RECIPE_MATCH,
+            profile="not a profile",
+            selector={"kind": "recipe"},
+            expected=True,
+        )
+    with pytest.raises(ValueError):
+        ObservationRequest(
+            observation_id="obs-004",
+            observation_type=MinecraftObservationType.RECIPE_MATCH,
+            profile="crafting",
+            selector={},
+            expected=True,
+        )
+
+
+def test_observation_result_round_trip_preserves_status_and_evidence() -> None:
+    reference = MinecraftEvidenceReference(
+        kind=MinecraftEvidenceKind.OBSERVATION,
+        ref="runtime/phase-1/observation.json",
+        phase="PHASE_1",
+        process_id="process-001",
+    )
+    original = ObservationResult(
+        observation_id="obs-001",
+        observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
+        status=MinecraftObservationStatus.PASS,
+        expected={"value": 3},
+        actual={"value": 3},
+        phase="PHASE_1",
+        evidence_refs=(reference,),
+    )
+    restored = ObservationResult.from_dict(json.loads(original.to_json()))
+    assert restored == original
+
+
+@pytest.mark.parametrize("status", list(MinecraftObservationStatus))
+def test_observation_result_supports_closed_statuses(status: MinecraftObservationStatus) -> None:
+    result = ObservationResult(
+        observation_id="obs-status",
+        observation_type=MinecraftObservationType.LOOT_RESULT,
+        status=status,
+        expected={"items": []},
+        error={"code": "NOT_AVAILABLE"} if status is MinecraftObservationStatus.BLOCKED else None,
+    )
+    assert result.status is status
+
+
+def test_observation_result_rejects_unknown_status_and_evidence_traversal() -> None:
+    payload = {
+        "observation_id": "obs-005",
+        "observation_type": "TAG_MEMBERSHIP",
+        "status": "UNKNOWN",
+        "expected": True,
+    }
+    with pytest.raises(ValueError):
+        ObservationResult.from_dict(payload)
+
+    with pytest.raises(ValueError, match="confined"):
+        MinecraftEvidenceReference(kind="observation", ref="../secret.json")
+
+
+def test_legacy_types_remain_usable_without_v06_fields() -> None:
+    assert MinecraftObservationType("LEGACY_BLOCK_STATE") is MinecraftObservationType.LEGACY_BLOCK_STATE
+    assert MinecraftObservationType("REGISTRY_ENTRY_PRESENT") is MinecraftObservationType.REGISTRY_ENTRY_PRESENT
