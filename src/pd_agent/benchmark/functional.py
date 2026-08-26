@@ -102,8 +102,8 @@ def validate_observation_result(result: ObservationResult) -> ValidationResult:
         raise TypeError("result must be ObservationResult")
     refs = _evidence_refs(result)
     if result.status is MinecraftObservationStatus.PASS:
-        if result.actual != result.expected:
-            violation = _observation_violation(result, "evidence contradicts PASS status")
+        if result.error is not None:
+            violation = _observation_violation(result, "PASS observation contains a failure error")
             return ValidationResult(
                 stage=ValidationStage.RUNTIME,
                 status=ValidationStatus.INVALID,

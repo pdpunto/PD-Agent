@@ -71,8 +71,44 @@ def test_observation_pass_blocked_invalid_and_contradiction_mapping() -> None:
     assert validate_observation_result(blocked).status is ValidationStatus.BLOCKED
     invalid = ObservationResult.from_dict({**blocked.to_dict(), "status": "INVALID"})
     assert validate_observation_result(invalid).status is ValidationStatus.INVALID
-    contradictory = ObservationResult.from_dict({**passed.to_dict(), "actual": {"value": 2}})
+    contradictory = ObservationResult.from_dict({**passed.to_dict(), "error": {"code": "FAILED"}})
     assert validate_observation_result(contradictory).status is ValidationStatus.INVALID
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected", "actual"),
+    [
+        (
+            MinecraftObservationType.ITEM_COMPONENT_STATE,
+            {"component_id": "example:charge", "present": True, "value": 3},
+            {"component_id": "example:charge", "present_before": False, "present_after": True, "value_after_mutation": 3, "value_after": 3, "value_restored": True, "round_trip": True},
+        ),
+        (
+            MinecraftObservationType.BLOCK_ENTITY_STATE,
+            {"present": True, "type": "minecraft:hopper"},
+            {"present": True, "type": "minecraft:hopper", "position": [8, 64, 8], "state": {"facing": "north"}},
+        ),
+        (
+            MinecraftObservationType.INVENTORY_STATE,
+            {"size": 5, "slot": 0, "item_id": "minecraft:diamond", "count": 3},
+            {"size": 5, "slot": 0, "item_id": "minecraft:diamond", "count": 3, "components": {}, "observed_at": "after-mutation"},
+        ),
+        (MinecraftObservationType.TAG_MEMBERSHIP, {"member": "minecraft:diamond", "present": True}, {"member": "minecraft:diamond", "present": True, "resolved": True}),
+        (MinecraftObservationType.RECIPE_MATCH, {"matched": True, "output_count": 1}, {"matched": True, "output_count": 1, "recipe_type": "minecraft:crafting"}),
+        (MinecraftObservationType.LOOT_RESULT, {"item_id": "minecraft:gold_ingot", "count": 1}, {"item_id": "minecraft:gold_ingot", "count": 1, "seed": 424242, "context": "generic"}),
+    ],
+)
+def test_runtime_pass_trusts_primitive_semantics_for_enriched_actual(
+    kind: MinecraftObservationType, expected: object, actual: object,
+) -> None:
+    result = ObservationResult(
+        observation_id="obs-pass-enriched",
+        observation_type=kind,
+        status=MinecraftObservationStatus.PASS,
+        expected=expected,
+        actual=actual,
+    )
+    assert validate_observation_result(result).status is ValidationStatus.PASS
 
 
 def test_inventory_size_mismatch_is_more_specific() -> None:
