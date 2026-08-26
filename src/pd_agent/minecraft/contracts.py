@@ -34,6 +34,8 @@ _I4_TAG_MEMBERS = {"minecraft:diamond", "minecraft:gold_ingot", "minecraft:stone
 _I5_RECIPE_ID = "pdagentl11_harness:i5_marble_lantern"
 _I5_INPUT_ITEM = "minecraft:diamond"
 _I5_OUTPUT_ITEM = "minecraft:gold_ingot"
+_I6_LOOT_TABLE_ID = "pdagentl11_harness:i6_fixed_drop"
+_LOOT_ITEM_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
 
 
 def validate_recipe_match_profile(
@@ -56,6 +58,31 @@ def validate_recipe_match_profile(
         raise ValueError("RECIPE_MATCH only supports the controlled I5 output")
     if isinstance(parameters["expected_output_count"], bool) or parameters["expected_output_count"] != 1:
         raise ValueError("RECIPE_MATCH expected_output_count must be one")
+
+
+def validate_loot_result_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the single deterministic generic loot profile used by I6."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "loot_table_id"}:
+        raise ValueError("LOOT_RESULT selector must declare kind and loot_table_id")
+    if selector.get("kind") != "loot_table" or selector.get("loot_table_id") != _I6_LOOT_TABLE_ID:
+        raise ValueError("LOOT_RESULT only supports the controlled I6 loot table")
+    allowed = {"context_profile", "seed", "expected_item_id", "expected_count"}
+    if not isinstance(parameters, Mapping) or set(parameters) != allowed:
+        raise ValueError("LOOT_RESULT parameters contain unsupported fields")
+    if parameters["context_profile"] != "generic":
+        raise ValueError("LOOT_RESULT only supports the generic context profile")
+    if isinstance(parameters["seed"], bool) or not isinstance(parameters["seed"], int):
+        raise ValueError("LOOT_RESULT seed must be an integer")
+    item_id = parameters["expected_item_id"]
+    if not isinstance(item_id, str) or not _LOOT_ITEM_ID_RE.fullmatch(item_id):
+        raise ValueError("LOOT_RESULT expected_item_id must be a namespaced identifier")
+    count = parameters["expected_count"]
+    if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 64:
+        raise ValueError("LOOT_RESULT expected_count must be an integer from 0 through 64")
 
 
 def validate_tag_membership_profile(

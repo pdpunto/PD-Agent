@@ -17,6 +17,7 @@ from pd_agent.minecraft import (
     validate_inventory_profile,
     validate_tag_membership_profile,
     validate_recipe_match_profile,
+    validate_loot_result_profile,
 )
 
 
@@ -269,6 +270,29 @@ def test_recipe_match_request_and_result_round_trip() -> None:
         actual={"path": "semantic data", "output_count": 1},
     )
     assert ObservationResult.from_dict(json.loads(result.to_json())) == result
+
+
+def test_loot_result_profile_accepts_bounded_generic_context() -> None:
+    validate_loot_result_profile(
+        {"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"},
+        {"context_profile": "generic", "seed": 0, "expected_item_id": "minecraft:gold_ingot", "expected_count": 1},
+    )
+
+
+@pytest.mark.parametrize(
+    "selector, parameters",
+    [
+        ({"kind": "loot_table", "loot_table_id": "minecraft:missing"}, {"context_profile": "generic", "seed": 0, "expected_item_id": "minecraft:gold_ingot", "expected_count": 1}),
+        ({"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"}, {"context_profile": "arbitrary", "seed": 0, "expected_item_id": "minecraft:gold_ingot", "expected_count": 1}),
+        ({"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"}, {"context_profile": "generic", "seed": True, "expected_item_id": "minecraft:gold_ingot", "expected_count": 1}),
+        ({"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"}, {"context_profile": "generic", "seed": 0, "expected_item_id": "../secret", "expected_count": 1}),
+        ({"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"}, {"context_profile": "generic", "seed": 0, "expected_item_id": "minecraft:gold_ingot", "expected_count": 65}),
+        ({"kind": "loot_table", "loot_table_id": "pdagentl11_harness:i6_fixed_drop"}, {"context_profile": "generic", "seed": 0, "expected_item_id": "minecraft:gold_ingot", "expected_count": 1, "path": "x"}),
+    ],
+)
+def test_loot_result_profile_rejects_uncontrolled_inputs(selector, parameters) -> None:
+    with pytest.raises(ValueError):
+        validate_loot_result_profile(selector, parameters)
     with pytest.raises(ValueError):
         ObservationRequest(
             observation_id="obs-003",

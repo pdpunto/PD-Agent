@@ -76,6 +76,11 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
             "{\"type\":\"minecraft:crafting_shaped\",\"pattern\":[\"A\"],\"key\":{\"A\":\"minecraft:diamond\"},\"result\":{\"id\":\"minecraft:gold_ingot\",\"count\":1}}",
             Charsets.UTF_8,
         )
+        datapackRoot.resolve("data/pdagentl11_harness/loot_table").mkdirs()
+        datapackRoot.resolve("data/pdagentl11_harness/loot_table/i6_fixed_drop.json").writeText(
+            "{\"type\":\"minecraft:generic\",\"pools\":[{\"rolls\":1,\"entries\":[{\"type\":\"minecraft:item\",\"name\":\"minecraft:gold_ingot\"}]}]}",
+            Charsets.UTF_8,
+        )
     }
     programArgs.add("--nogui")
     jvmArgs.add("-Dpd.agent.targetModId=${providers.gradleProperty("pd.agent.targetModId").get()}")
@@ -116,6 +121,11 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     jvmArgs.add("-Dpd.agent.observationInputCount=${providers.gradleProperty("pd.agent.observationInputCount").orElse("1").get()}")
     providers.gradleProperty("pd.agent.observationExpectedOutputItemId").orNull?.let { jvmArgs.add("-Dpd.agent.observationExpectedOutputItemId=$it") }
     jvmArgs.add("-Dpd.agent.observationExpectedOutputCount=${providers.gradleProperty("pd.agent.observationExpectedOutputCount").orElse("1").get()}")
+    providers.gradleProperty("pd.agent.observationLootTableId").orNull?.let { jvmArgs.add("-Dpd.agent.observationLootTableId=$it") }
+    providers.gradleProperty("pd.agent.observationLootContextProfile").orNull?.let { jvmArgs.add("-Dpd.agent.observationLootContextProfile=$it") }
+    jvmArgs.add("-Dpd.agent.observationLootSeed=${providers.gradleProperty("pd.agent.observationLootSeed").orElse("0").get()}")
+    providers.gradleProperty("pd.agent.observationLootExpectedItemId").orNull?.let { jvmArgs.add("-Dpd.agent.observationLootExpectedItemId=$it") }
+    jvmArgs.add("-Dpd.agent.observationLootExpectedCount=${providers.gradleProperty("pd.agent.observationLootExpectedCount").orElse("1").get()}")
     jvmArgs.add("-Dpd.agent.observationSlot=${providers.gradleProperty("pd.agent.observationSlot").orElse("0").get()}")
     jvmArgs.add("-Dpd.agent.observationCount=${providers.gradleProperty("pd.agent.observationCount").orElse("5").get()}")
     jvmArgs.add("-Dpd.agent.observationMutation=${providers.gradleProperty("pd.agent.observationMutation").orElse("true").get()}")

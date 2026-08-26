@@ -29,6 +29,11 @@ record HarnessConfig(
     int observationInputCount,
     String observationExpectedOutputItemId,
     int observationExpectedOutputCount,
+    String observationLootTableId,
+    String observationLootContextProfile,
+    long observationLootSeed,
+    String observationLootExpectedItemId,
+    int observationLootExpectedCount,
     Path resultPath,
     boolean expectNeighborUpdate
 ) {
@@ -54,6 +59,11 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_INPUT_COUNT = "pd.agent.observationInputCount";
     static final String PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID = "pd.agent.observationExpectedOutputItemId";
     static final String PROP_OBSERVATION_EXPECTED_OUTPUT_COUNT = "pd.agent.observationExpectedOutputCount";
+    static final String PROP_OBSERVATION_LOOT_TABLE_ID = "pd.agent.observationLootTableId";
+    static final String PROP_OBSERVATION_LOOT_CONTEXT_PROFILE = "pd.agent.observationLootContextProfile";
+    static final String PROP_OBSERVATION_LOOT_SEED = "pd.agent.observationLootSeed";
+    static final String PROP_OBSERVATION_LOOT_EXPECTED_ITEM_ID = "pd.agent.observationLootExpectedItemId";
+    static final String PROP_OBSERVATION_LOOT_EXPECTED_COUNT = "pd.agent.observationLootExpectedCount";
     static final String PROP_RESULT_PATH = "pd.agent.resultPath";
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
@@ -63,6 +73,7 @@ record HarnessConfig(
     static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
     static final String OBSERVATION_TAG_MEMBERSHIP = "TAG_MEMBERSHIP";
     static final String OBSERVATION_RECIPE_MATCH = "RECIPE_MATCH";
+    static final String OBSERVATION_LOOT_RESULT = "LOOT_RESULT";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
     private static final Pattern SHA256_RE = Pattern.compile("^[0-9a-fA-F]{64}$");
@@ -88,6 +99,11 @@ record HarnessConfig(
         observationInputCount = normalizeRecipeCount(observationType, observationInputCount, "input");
         observationExpectedOutputItemId = normalizeRecipeField(observationType, observationExpectedOutputItemId, "minecraft:gold_ingot");
         observationExpectedOutputCount = normalizeRecipeCount(observationType, observationExpectedOutputCount, "output");
+        observationLootTableId = normalizeLootField(observationType, observationLootTableId, "pdagentl11_harness:i6_fixed_drop");
+        observationLootContextProfile = normalizeLootField(observationType, observationLootContextProfile, "generic");
+        observationLootSeed = normalizeLootSeed(observationType, observationLootSeed);
+        observationLootExpectedItemId = normalizeLootField(observationType, observationLootExpectedItemId, null);
+        observationLootExpectedCount = normalizeLootExpectedCount(observationType, observationLootExpectedCount);
         resultPath = normalizeResultPath(resultPath);
     }
 
@@ -116,6 +132,11 @@ record HarnessConfig(
             requireInteger(PROP_OBSERVATION_INPUT_COUNT, 1),
             requireObservationText(PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID, observationType),
             requireInteger(PROP_OBSERVATION_EXPECTED_OUTPUT_COUNT, 1),
+            requireObservationText(PROP_OBSERVATION_LOOT_TABLE_ID, observationType),
+            requireObservationText(PROP_OBSERVATION_LOOT_CONTEXT_PROFILE, observationType),
+            requireLong(PROP_OBSERVATION_LOOT_SEED, 0),
+            requireObservationText(PROP_OBSERVATION_LOOT_EXPECTED_ITEM_ID, observationType),
+            requireInteger(PROP_OBSERVATION_LOOT_EXPECTED_COUNT, 1),
             Path.of(requireText(PROP_RESULT_PATH)),
             requireBoolean(PROP_EXPECT_NEIGHBOR_UPDATE, false)
         );
@@ -166,7 +187,9 @@ record HarnessConfig(
             && !OBSERVATION_INVENTORY_STATE.equals(normalized)
             && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)
             && !OBSERVATION_RECIPE_MATCH.equals(normalized)) {
-            throw new IllegalArgumentException("unsupported observation type: " + value);
+            if (!OBSERVATION_LOOT_RESULT.equals(normalized)) {
+                throw new IllegalArgumentException("unsupported observation type: " + value);
+            }
         }
         return normalized;
     }
@@ -289,6 +312,33 @@ record HarnessConfig(
         return value;
     }
 
+    private static String normalizeLootField(String observationType, String value, String expected) {
+        if (!OBSERVATION_LOOT_RESULT.equals(observationType)) {
+            return null;
+        }
+        if (value == null || value.trim().isEmpty() || (expected != null && !expected.equals(value))) {
+            throw new IllegalArgumentException("invalid controlled loot field");
+        }
+        return value;
+    }
+
+    private static long normalizeLootSeed(String observationType, long value) {
+        if (!OBSERVATION_LOOT_RESULT.equals(observationType)) {
+            return 0L;
+        }
+        return value;
+    }
+
+    private static int normalizeLootExpectedCount(String observationType, int value) {
+        if (!OBSERVATION_LOOT_RESULT.equals(observationType)) {
+            return 1;
+        }
+        if (value < 0 || value > 64) {
+            throw new IllegalArgumentException("loot expected count must be from 0 through 64");
+        }
+        return value;
+    }
+
     private static String requireTextValue(String label, String value) {
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException(label + " cannot be empty");
@@ -315,6 +365,12 @@ record HarnessConfig(
             && (PROP_OBSERVATION_RECIPE_ID.equals(key)
                 || PROP_OBSERVATION_INPUT_ITEM_ID.equals(key)
                 || PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID.equals(key))) {
+            return requireTextValue(key, value);
+        }
+        if (OBSERVATION_LOOT_RESULT.equals(observationType)
+            && (PROP_OBSERVATION_LOOT_TABLE_ID.equals(key)
+                || PROP_OBSERVATION_LOOT_CONTEXT_PROFILE.equals(key)
+                || PROP_OBSERVATION_LOOT_EXPECTED_ITEM_ID.equals(key))) {
             return requireTextValue(key, value);
         }
         if (tagField && OBSERVATION_TAG_MEMBERSHIP.equals(observationType)) {
@@ -366,6 +422,18 @@ record HarnessConfig(
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException ex) {
             throw new IllegalArgumentException("invalid integer harness property: " + key + "=" + value, ex);
+        }
+    }
+
+    private static long requireLong(String key, long defaultValue) {
+        String value = System.getProperty(key);
+        if (value == null || value.trim().isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("invalid long harness property: " + key + "=" + value, ex);
         }
     }
 }

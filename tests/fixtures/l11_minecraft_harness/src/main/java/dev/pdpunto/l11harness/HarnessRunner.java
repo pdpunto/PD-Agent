@@ -25,6 +25,10 @@ import net.minecraft.recipe.CraftingRecipe;
 import net.minecraft.recipe.RecipeEntry;
 import net.minecraft.recipe.input.CraftingRecipeInput;
 import net.minecraft.registry.RegistryKey;
+import net.minecraft.loot.LootTable;
+import net.minecraft.loot.context.LootWorldContext;
+import net.minecraft.loot.context.LootContextParameters;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
@@ -73,6 +77,9 @@ final class HarnessRunner {
         if (HarnessConfig.OBSERVATION_RECIPE_MATCH.equals(config.observationType())) {
             return runRecipeMatchObservation(server, config, identity, world);
         }
+        if (HarnessConfig.OBSERVATION_LOOT_RESULT.equals(config.observationType())) {
+            return runLootResultObservation(server, config, identity, world);
+        }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
     }
@@ -114,6 +121,60 @@ final class HarnessRunner {
             && config.observationExpectedOutputCount() == output.getCount();
         return HarnessResult.recipeMatch(config, identity, expected, actual, pass ? "PASS" : "FAIL",
             pass ? "real RecipeManager recipe match observed" : "recipe match or output mismatch");
+    }
+
+    private static HarnessResult runLootResultObservation(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world
+    ) {
+        Identifier tableId = parseIdentifier(config.observationLootTableId());
+        RegistryKey<LootTable> key = RegistryKey.of(RegistryKeys.LOOT_TABLE, tableId);
+        java.util.Optional<RegistryEntry.Reference<LootTable>> entry = server.getReloadableRegistries()
+            .createRegistryLookup().getOrThrow(RegistryKeys.LOOT_TABLE).getOptional(key);
+        JsonObject expected = new JsonObject();
+        expected.addProperty("loot_table_id", tableId.toString());
+        expected.addProperty("context_profile", config.observationLootContextProfile());
+        expected.addProperty("seed", config.observationLootSeed());
+        JsonObject expectedItem = new JsonObject();
+        expectedItem.addProperty("item_id", config.observationLootExpectedItemId());
+        expectedItem.addProperty("count", config.observationLootExpectedCount());
+        expected.add("expected_item", expectedItem);
+        JsonObject actual = new JsonObject();
+        actual.addProperty("loot_table_id", tableId.toString());
+        actual.addProperty("table_resolved", entry.isPresent());
+        actual.addProperty("context_profile", config.observationLootContextProfile());
+        actual.addProperty("seed", config.observationLootSeed());
+        if (entry.isEmpty()) {
+            return HarnessResult.lootResult(config, identity, expected, actual, "INVALID", "controlled loot table was not resolved");
+        }
+        LootWorldContext context = new LootWorldContext.Builder(world)
+            .add(LootContextParameters.ORIGIN, Vec3d.ZERO)
+            .add(LootContextParameters.THIS_ENTITY, null)
+            .add(LootContextParameters.ATTACKING_ENTITY, null)
+            .add(LootContextParameters.DIRECT_ATTACKING_ENTITY, null)
+            .add(LootContextParameters.LAST_DAMAGE_PLAYER, null)
+            .add(LootContextParameters.BLOCK_ENTITY, null)
+            .add(LootContextParameters.BLOCK_STATE, null)
+            .add(LootContextParameters.TOOL, null)
+            .add(LootContextParameters.EXPLOSION_RADIUS, null)
+            .add(LootContextParameters.DAMAGE_SOURCE, null)
+            .build(LootTable.GENERIC);
+        java.util.List<ItemStack> generated = entry.get().value().generateLoot(context, config.observationLootSeed());
+        com.google.gson.JsonArray generatedJson = new com.google.gson.JsonArray();
+        for (ItemStack stack : generated) {
+            JsonObject itemJson = new JsonObject();
+            itemJson.addProperty("item_id", String.valueOf(Registries.ITEM.getId(stack.getItem())));
+            itemJson.addProperty("count", stack.getCount());
+            generatedJson.add(itemJson);
+        }
+        actual.add("generated_items", generatedJson);
+        boolean pass = generated.size() == 1
+            && config.observationLootExpectedItemId().equals(generated.get(0).isEmpty() ? "minecraft:air" : String.valueOf(Registries.ITEM.getId(generated.get(0).getItem())))
+            && generated.get(0).getCount() == config.observationLootExpectedCount();
+        return HarnessResult.lootResult(config, identity, expected, actual, pass ? "PASS" : "FAIL",
+            pass ? "deterministic loot result observed" : "generated loot result mismatch");
     }
 
     private static HarnessResult runTagMembershipObservation(

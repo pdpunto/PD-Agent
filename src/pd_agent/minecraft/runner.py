@@ -35,6 +35,7 @@ from .contracts import (
     validate_inventory_profile,
     validate_tag_membership_profile,
     validate_recipe_match_profile,
+    validate_loot_result_profile,
 )
 from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 
@@ -182,6 +183,24 @@ def _recipe_match_properties(params: Mapping[str, Any]) -> tuple[str, str, str, 
         {"kind": "crafting_recipe", "recipe_id": params.get("recipe_id", "pdagentl11_harness:i5_marble_lantern")},
         values,
     )
+
+
+def _loot_result_properties(params: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
+    values = {
+        "context_profile": params.get("context_profile", "generic"),
+        "seed": params.get("seed", 0),
+        "expected_item_id": params.get("expected_item_id", "minecraft:gold_ingot"),
+        "expected_count": params.get("expected_count", 1),
+    }
+    loot_table_id = params.get("loot_table_id", "pdagentl11_harness:i6_fixed_drop")
+    validate_loot_result_profile({"kind": "loot_table", "loot_table_id": loot_table_id}, values)
+    return (
+        str(loot_table_id),
+        values["context_profile"],
+        str(values["seed"]),
+        values["expected_item_id"],
+        str(values["expected_count"]),
+    )
     return (
         str(params.get("recipe_id", "pdagentl11_harness:i5_marble_lantern")),
         values["input_item_id"],
@@ -281,6 +300,8 @@ class MinecraftTestRunner:
             _tag_membership_properties(spec.observation_params)
         elif spec.observation_type is MinecraftObservationType.RECIPE_MATCH:
             _recipe_match_properties(spec.observation_params)
+        elif spec.observation_type is MinecraftObservationType.LOOT_RESULT:
+            _loot_result_properties(spec.observation_params)
 
     def validate_target(
         self,
@@ -392,6 +413,14 @@ class MinecraftTestRunner:
                     _recipe_match_properties(spec.observation_params),
                 ))
                 if spec.observation_type is MinecraftObservationType.RECIPE_MATCH
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationLootTableId", "pd.agent.observationLootContextProfile", "pd.agent.observationLootSeed", "pd.agent.observationLootExpectedItemId", "pd.agent.observationLootExpectedCount"),
+                    _loot_result_properties(spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.LOOT_RESULT
                 else ()
             ),
         )
@@ -687,6 +716,17 @@ class MinecraftTestRunner:
                     )
                 )
                 if result.spec.observation_type is MinecraftObservationType.RECIPE_MATCH
+                else ()
+            ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationLootTableId", "pd.agent.observationLootContextProfile", "pd.agent.observationLootSeed", "pd.agent.observationLootExpectedItemId", "pd.agent.observationLootExpectedCount"),
+                        _loot_result_properties(result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.LOOT_RESULT
                 else ()
             ),
         )
@@ -1025,6 +1065,28 @@ class MinecraftTestRunner:
                         if functional_test_result == "PASS"
                         else {"code": "RECIPE_MATCH_MISMATCH", "message": reason}
                     ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() == MinecraftObservationType.LOOT_RESULT.value:
+                observation = ObservationResult(
+                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_type=MinecraftObservationType.LOOT_RESULT,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected=dict(harness_result.get("observation_expected", {})),
+                    actual=dict(harness_result.get("observation_actual", {})),
+                    phase="RUNTIME",
+                    evidence_refs=(MinecraftEvidenceReference(
+                        kind=MinecraftEvidenceKind.OBSERVATION,
+                        ref="harness-result.json",
+                        phase="RUNTIME",
+                    ),),
+                    error=(None if functional_test_result == "PASS" else {
+                        "code": "LOOT_RESULT_MISMATCH", "message": reason
+                    }),
                 )
                 metadata["observation_result"] = observation.to_dict()
 
