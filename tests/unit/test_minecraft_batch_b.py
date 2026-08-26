@@ -55,7 +55,7 @@ def test_batch_b_harness_fixture_is_separate_and_protocol_driven() -> None:
     assert 'archiveBaseName.set("pd-agent-l11-harness")' in build_file
     assert 'compileOnly(files("../l11_fabric_fixture/build/classes/java/main"))' not in build_file
     assert "fabric_api_version" not in build_file
-    assert "fabric-api" not in build_file
+    assert 'modImplementation("net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11")' in build_file
     assert 'id("fabric-loom") version "1.13.3"' in build_file
     assert manifest["id"] == "pdagentl11_harness"
     assert manifest["environment"] == "server"

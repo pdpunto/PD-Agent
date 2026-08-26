@@ -20,6 +20,8 @@ dependencies {
     minecraft("com.mojang:minecraft:${property("minecraft_version")}")
     mappings("net.fabricmc:yarn:${property("mappings_version")}:v2")
     modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11")
+    modRuntimeOnly("net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11")
 }
 
 java {
@@ -51,8 +53,10 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
         ?.filter { it.isNotEmpty() }
         ?.map { file(it) }
         ?: emptyList()
+    val fabricApiModFiles = configurations.getByName("modRuntimeOnly").resolve()
+        .filter { it.name.startsWith("fabric-") }
 
-    mods.from(files(targetJar, harnessJar, *runtimeModJarFiles.toTypedArray()))
+    mods.from(files(targetJar, harnessJar, *runtimeModJarFiles.toTypedArray(), *fabricApiModFiles.toTypedArray()))
     this.runDir = runDir
     doFirst {
         runDir.mkdirs()
@@ -129,6 +133,9 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     jvmArgs.add("-Dpd.agent.observationSlot=${providers.gradleProperty("pd.agent.observationSlot").orElse("0").get()}")
     jvmArgs.add("-Dpd.agent.observationCount=${providers.gradleProperty("pd.agent.observationCount").orElse("5").get()}")
     jvmArgs.add("-Dpd.agent.observationMutation=${providers.gradleProperty("pd.agent.observationMutation").orElse("true").get()}")
+    providers.gradleProperty("pd.agent.commandProfile").orNull?.let { jvmArgs.add("-Dpd.agent.commandProfile=$it") }
+    providers.gradleProperty("pd.agent.commandInvocationId").orNull?.let { jvmArgs.add("-Dpd.agent.commandInvocationId=$it") }
+    providers.gradleProperty("pd.agent.commandCount").orNull?.let { jvmArgs.add("-Dpd.agent.commandCount=$it") }
     javaLauncher = javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(21))
     }

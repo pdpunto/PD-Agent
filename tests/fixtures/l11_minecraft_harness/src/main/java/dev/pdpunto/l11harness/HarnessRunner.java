@@ -59,6 +59,11 @@ final class HarnessRunner {
             return HarnessResult.infraError(config, "overworld not available", identity);
         }
 
+        String commandProfile = System.getProperty("pd.agent.commandProfile");
+        if ("i7_inventory_mark".equals(commandProfile)) {
+            return runCommandAction(server, config, identity, world);
+        }
+
         if (HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(config.observationType())) {
             return runRegistryObservation(config, identity);
         }
@@ -82,6 +87,48 @@ final class HarnessRunner {
         }
 
         return runLegacyBlockStateObservation(config, identity, world, options);
+    }
+
+    private static HarnessResult runCommandAction(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity,
+        ServerWorld world
+    ) {
+        String invocationId = System.getProperty("pd.agent.commandInvocationId", "i7-command");
+        String countText = System.getProperty("pd.agent.commandCount", "1");
+        int count;
+        try {
+            count = Integer.parseInt(countText);
+        } catch (NumberFormatException ex) {
+            return HarnessResult.command(config, identity, invocationId, false, false, false, null, false,
+                "count is not an integer", world);
+        }
+        if (count < 1 || count > 5) {
+            return HarnessResult.command(config, identity, invocationId, true, true, false, null, false,
+                "count is outside the closed range", world);
+        }
+        boolean registered = server.getCommandManager().getDispatcher().getRoot().getChild("pdagent_i7") != null;
+        if (!registered) {
+            return HarnessResult.command(config, identity, invocationId, false, false, false, null, false,
+                "I7 command was not registered", world);
+        }
+        String command = "pdagent_i7 mark " + count;
+        try {
+            int returnCode = server.getCommandManager().getDispatcher().execute(command, server.getCommandSource());
+            BlockEntity blockEntity = ((WorldChunk) world.getChunk(new BlockPos(8, 64, 8))).getBlockEntity(
+                new BlockPos(8, 64, 8), WorldChunk.CreationType.IMMEDIATE
+            );
+            boolean sideEffect = blockEntity instanceof HopperBlockEntity hopper
+                && hopper.getStack(0).isOf(Items.DIAMOND)
+                && hopper.getStack(0).getCount() == count;
+            boolean success = returnCode == count && sideEffect;
+            return HarnessResult.command(config, identity, invocationId, true, true, true, returnCode,
+                success, success ? null : "command return code or inventory side effect mismatch", world);
+        } catch (Exception ex) {
+            return HarnessResult.command(config, identity, invocationId, true, false, false, null, false,
+                ex.getClass().getSimpleName() + ": " + ex.getMessage(), world);
+        }
     }
 
     private static HarnessResult runRecipeMatchObservation(

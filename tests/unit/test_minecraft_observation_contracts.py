@@ -5,6 +5,8 @@ import json
 import pytest
 
 from pd_agent.minecraft import (
+    CommandInvocation,
+    CommandResult,
     MinecraftEvidenceKind,
     MinecraftEvidenceReference,
     MinecraftObservationStatus,
@@ -19,6 +21,54 @@ from pd_agent.minecraft import (
     validate_recipe_match_profile,
     validate_loot_result_profile,
 )
+
+
+def test_i7_command_contract_round_trip_is_closed_and_typed() -> None:
+    invocation = CommandInvocation(
+        invocation_id="cmd-001",
+        profile="i7_inventory_mark",
+        typed_args={"count": 3},
+    )
+    restored = CommandInvocation.from_dict(json.loads(invocation.to_json()))
+    assert restored == invocation
+    assert restored.command == "pdagent_i7 mark"
+
+    result = CommandResult(
+        invocation_id=invocation.invocation_id,
+        registered=True,
+        parsed=True,
+        executed=True,
+        return_code=3,
+        success=True,
+        output_summary="controlled inventory mark executed",
+    )
+    assert CommandResult.from_dict(json.loads(result.to_json())) == result
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"count": 0},
+        {"count": 6},
+        {"count": True},
+        {"count": 1, "command": "stop"},
+    ],
+)
+def test_i7_command_invocation_rejects_untrusted_or_invalid_inputs(payload: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        CommandInvocation(invocation_id="cmd-invalid", profile="i7_inventory_mark", typed_args=payload)
+
+
+def test_i7_command_result_requires_complete_success_path() -> None:
+    with pytest.raises(ValueError):
+        CommandResult(
+            invocation_id="cmd-invalid-result",
+            registered=False,
+            parsed=False,
+            executed=False,
+            return_code=None,
+            success=True,
+        )
 
 
 NEW_TYPES = {

@@ -17,6 +17,7 @@ from pd_agent.core import SecurityViolation
 from pd_agent.tools import SecurePathResolver
 
 from .contracts import (
+    CommandResult,
     MinecraftEvidencePaths,
     MinecraftEvidenceKind,
     MinecraftEvidenceReference,
@@ -590,6 +591,7 @@ class MinecraftTestRunner:
                 "process_exit_code": process["exit_code"],
                 "process_timed_out": process["timed_out"],
                 "harness_result_state": harness_result.get("functional_test_result") if isinstance(harness_result, Mapping) else None,
+                "command_result": harness_result.get("command_result") if isinstance(harness_result, Mapping) else None,
                 "harness_result_path": str(harness_result_path),
                 "latest_log_path": str(runtime_evidence.latest_log_path) if runtime_evidence.latest_log_path else None,
                 "crash_reports_dir": str(runtime_evidence.crash_reports_dir) if runtime_evidence.crash_reports_dir else None,
@@ -648,6 +650,15 @@ class MinecraftTestRunner:
             f"-Ppd.agent.expectedBlockStateId={expected_block_state_id}",
             f"-Ppd.agent.expectNeighborUpdate={str(result.spec.expect_neighbor_update).lower()}",
             f"-Ppd.agent.hangMillis={hang_millis if launch_mode == 'hang' else '600000'}",
+            *(
+                (
+                    f"-Ppd.agent.commandProfile={result.spec.command_invocation.profile}",
+                    f"-Ppd.agent.commandInvocationId={result.spec.command_invocation.invocation_id}",
+                    f"-Ppd.agent.commandCount={result.spec.command_invocation.typed_args['count']}",
+                )
+                if result.spec.command_invocation is not None
+                else ()
+            ),
             *(
                 (f"-Ppd.agent.runtimeModJars={os.pathsep.join(path.as_posix() for path in result.spec.runtime_mod_jars)}",)
                 if result.spec.runtime_mod_jars
@@ -944,6 +955,11 @@ class MinecraftTestRunner:
                 "shutdown_requested": shutdown_requested,
             }
         )
+        if command_payload := harness_result.get("command_result"):
+            try:
+                metadata["command_result"] = CommandResult.from_dict(command_payload).to_dict()
+            except (TypeError, ValueError) as exc:
+                metadata["command_result_error"] = str(exc)
         if result_type := harness_result.get("observation_type"):
             if str(result_type).upper() == MinecraftObservationType.ITEM_COMPONENT_STATE.value:
                 observation = ObservationResult(

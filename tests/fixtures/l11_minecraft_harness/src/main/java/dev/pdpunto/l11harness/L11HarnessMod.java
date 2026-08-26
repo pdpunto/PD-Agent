@@ -8,15 +8,52 @@ import java.util.concurrent.TimeUnit;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.server.command.CommandManager;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.HopperBlockEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.chunk.WorldChunk;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
     @Override
     public void onInitializeServer() {
         HarnessSignals.reset();
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+            dispatcher.register(CommandManager.literal("pdagent_i7")
+                .then(CommandManager.literal("mark")
+                    .then(CommandManager.argument("count", IntegerArgumentType.integer(1, 5))
+                        .requires(source -> source.getEntity() == null)
+                        .executes(context -> markInventory(context.getSource(), IntegerArgumentType.getInteger(context, "count"))))))
+        );
         Thread waiter = Thread.ofPlatform().daemon().name("pd-agent-l11-harness").start(this::waitForServerStart);
         if (waiter == null) {
             throw new IllegalStateException("failed to start harness waiter thread");
         }
+    }
+
+    private static int markInventory(ServerCommandSource source, int count) {
+        MinecraftServer server = source.getServer();
+        ServerWorld world = server.getOverworld();
+        BlockPos position = new BlockPos(8, 64, 8);
+        world.getChunk(position);
+        world.setBlockState(position, Blocks.HOPPER.getDefaultState(), Block.NOTIFY_ALL);
+        BlockEntity blockEntity = ((WorldChunk) world.getChunk(position)).getBlockEntity(
+            position, WorldChunk.CreationType.IMMEDIATE
+        );
+        if (!(blockEntity instanceof HopperBlockEntity hopper)) {
+            return 0;
+        }
+        hopper.setStack(0, new ItemStack(Items.DIAMOND, count));
+        hopper.markDirty();
+        return count;
     }
 
     private void waitForServerStart() {

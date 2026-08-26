@@ -372,6 +372,151 @@ class MinecraftEvidenceReference:
         )
 
 
+_I7_COMMAND_PROFILE = "i7_inventory_mark"
+_I7_COMMAND_TEXT = "pdagent_i7 mark"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandInvocation:
+    """Closed, typed invocation for the single I7 server command profile."""
+
+    invocation_id: str
+    profile: str
+    typed_args: Mapping[str, Any]
+    source: str = "controlled_server"
+    permission_level: int = 4
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "invocation_id", _identity("invocation_id", self.invocation_id))
+        if self.profile != _I7_COMMAND_PROFILE:
+            raise ValueError("unsupported command profile")
+        args = _closed_json(self.typed_args, field_name="typed_args")
+        if not isinstance(args, dict) or set(args) != {"count"}:
+            raise ValueError("I7 command requires the typed count argument only")
+        count = args["count"]
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 5:
+            raise ValueError("I7 command count must be an integer from 1 through 5")
+        object.__setattr__(self, "typed_args", args)
+        if self.source != "controlled_server":
+            raise ValueError("I7 command source is fixed to controlled_server")
+        if self.permission_level != 4:
+            raise ValueError("I7 command permission level is fixed to 4")
+
+    @property
+    def command(self) -> str:
+        return _I7_COMMAND_TEXT
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "invocation_id": self.invocation_id,
+            "profile": self.profile,
+            "command": self.command,
+            "typed_args": dict(self.typed_args),
+            "source": self.source,
+            "permission_level": self.permission_level,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "CommandInvocation":
+        _strict_mapping(
+            data,
+            model="CommandInvocation",
+            allowed={"invocation_id", "profile", "command", "typed_args", "source", "permission_level"},
+        )
+        required = {"invocation_id", "profile", "typed_args"} - set(data)
+        if required:
+            raise ValueError(f"CommandInvocation missing fields: {sorted(required)!r}")
+        if data.get("command", _I7_COMMAND_TEXT) != _I7_COMMAND_TEXT:
+            raise ValueError("command text is not part of the closed I7 profile")
+        return cls(
+            invocation_id=str(data["invocation_id"]),
+            profile=str(data["profile"]),
+            typed_args=dict(data["typed_args"]),
+            source=str(data.get("source", "controlled_server")),
+            permission_level=int(data.get("permission_level", 4)),
+        )
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    """Structured result for a registered and typed I7 command invocation."""
+
+    invocation_id: str
+    registered: bool
+    parsed: bool
+    executed: bool
+    return_code: int | None
+    success: bool
+    output_summary: str | None = None
+    error: Mapping[str, Any] | None = None
+    evidence_refs: tuple[MinecraftEvidenceReference, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "invocation_id", _identity("invocation_id", self.invocation_id))
+        for name in ("registered", "parsed", "executed", "success"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        if self.return_code is not None and (
+            isinstance(self.return_code, bool) or not isinstance(self.return_code, int)
+        ):
+            raise ValueError("return_code must be an integer or null")
+        if self.success and not (self.registered and self.parsed and self.executed):
+            raise ValueError("successful command must be registered, parsed and executed")
+        if self.output_summary is not None:
+            object.__setattr__(self, "output_summary", _non_empty_text("output_summary", self.output_summary))
+        if self.error is not None:
+            error = _closed_json(self.error, field_name="error", reject_unsafe_keys=False)
+            if not isinstance(error, dict) or not error:
+                raise ValueError("error must be a non-empty object")
+            object.__setattr__(self, "error", error)
+        refs = tuple(
+            item if isinstance(item, MinecraftEvidenceReference) else MinecraftEvidenceReference.from_dict(item)
+            for item in self.evidence_refs
+        )
+        object.__setattr__(self, "evidence_refs", refs)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "invocation_id": self.invocation_id,
+            "registered": self.registered,
+            "parsed": self.parsed,
+            "executed": self.executed,
+            "return_code": self.return_code,
+            "success": self.success,
+            "output_summary": self.output_summary,
+            "error": self.error,
+            "evidence_refs": [ref.to_dict() for ref in self.evidence_refs],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "CommandResult":
+        _strict_mapping(
+            data,
+            model="CommandResult",
+            allowed={"invocation_id", "registered", "parsed", "executed", "return_code", "success", "output_summary", "error", "evidence_refs"},
+        )
+        required = {"invocation_id", "registered", "parsed", "executed", "success"} - set(data)
+        if required:
+            raise ValueError(f"CommandResult missing fields: {sorted(required)!r}")
+        return cls(
+            invocation_id=str(data["invocation_id"]),
+            registered=data["registered"],
+            parsed=data["parsed"],
+            executed=data["executed"],
+            return_code=data.get("return_code"),
+            success=data["success"],
+            output_summary=data.get("output_summary"),
+            error=dict(data["error"]) if data.get("error") is not None else None,
+            evidence_refs=tuple(MinecraftEvidenceReference.from_dict(item) for item in data.get("evidence_refs", [])),
+        )
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+
+
 @dataclass(frozen=True, slots=True)
 class ObservationRequest:
     """Closed provider-neutral request envelope for future observations."""
@@ -533,6 +678,7 @@ class MinecraftTestSpec:
     observation_params: Mapping[str, Any] = field(default_factory=dict)
     expect_neighbor_update: bool = False
     runtime_mod_jars: tuple[Path, ...] = ()
+    command_invocation: CommandInvocation | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
@@ -559,6 +705,8 @@ class MinecraftTestSpec:
             raise ValueError("timeout_seconds must be positive")
         object.__setattr__(self, "timeout_seconds", timeout_seconds)
         object.__setattr__(self, "expect_neighbor_update", bool(self.expect_neighbor_update))
+        if self.command_invocation is not None and not isinstance(self.command_invocation, CommandInvocation):
+            object.__setattr__(self, "command_invocation", CommandInvocation.from_dict(self.command_invocation))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -572,6 +720,11 @@ class MinecraftTestSpec:
             "observation_params": _json_ready(dict(self.observation_params)),
             "timeout_seconds": self.timeout_seconds,
             "expect_neighbor_update": self.expect_neighbor_update,
+            **(
+                {"command_invocation": self.command_invocation.to_dict()}
+                if self.command_invocation is not None
+                else {}
+            ),
         }
 
     @classmethod
@@ -589,6 +742,11 @@ class MinecraftTestSpec:
             observation_params=dict(data.get("observation_params", {})),
             timeout_seconds=int(data["timeout_seconds"]),
             expect_neighbor_update=bool(data.get("expect_neighbor_update", False)),
+            command_invocation=(
+                CommandInvocation.from_dict(data["command_invocation"])
+                if data.get("command_invocation") is not None
+                else None
+            ),
         )
 
 

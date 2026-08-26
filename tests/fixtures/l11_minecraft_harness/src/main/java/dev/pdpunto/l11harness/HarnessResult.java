@@ -1,6 +1,7 @@
 package dev.pdpunto.l11harness;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 
 final class HarnessResult {
     private final int schemaVersion;
@@ -299,6 +300,51 @@ final class HarnessResult {
         return result;
     }
 
+    static HarnessResult command(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        String invocationId,
+        boolean registered,
+        boolean parsed,
+        boolean executed,
+        Integer returnCode,
+        boolean success,
+        String error,
+        net.minecraft.server.world.ServerWorld world
+    ) {
+        JsonObject command = new JsonObject();
+        command.addProperty("invocation_id", invocationId);
+        command.addProperty("registered", registered);
+        command.addProperty("parsed", parsed);
+        command.addProperty("executed", executed);
+        if (returnCode == null) command.add("return_code", null); else command.addProperty("return_code", returnCode);
+        command.addProperty("success", success);
+        command.addProperty("output_summary", success ? "controlled inventory mark executed" : "controlled inventory mark failed");
+        if (error == null) command.add("error", null); else { JsonObject detail = new JsonObject(); detail.addProperty("code", "COMMAND_EXECUTION_FAILED"); detail.addProperty("message", error); command.add("error", detail); }
+        HarnessResult result = create(config, identity, config.observationType(), success, null, null,
+            success ? "PASS" : "FAIL", false, success ? "typed server command side effect observed" : error,
+            null, null, null, null, null, null, null, null);
+        result.structuredObservation = new JsonObject();
+        result.structuredObservation.getAsJsonObject().add("command_result", command);
+        JsonObject expected = new JsonObject();
+        expected.addProperty("slot", 0);
+        expected.addProperty("item_id", "minecraft:diamond");
+        int expectedCount;
+        try {
+            expectedCount = Integer.parseInt(System.getProperty("pd.agent.commandCount", "1"));
+        } catch (NumberFormatException ignored) {
+            expectedCount = 0;
+        }
+        expected.addProperty("count", expectedCount);
+        JsonObject actual = new JsonObject();
+        actual.addProperty("side_effect_observed", success);
+        actual.addProperty("item_id", success ? "minecraft:diamond" : "minecraft:air");
+        actual.addProperty("count", success ? expected.get("count").getAsInt() : 0);
+        result.structuredObservation.getAsJsonObject().add("expected", expected);
+        result.structuredObservation.getAsJsonObject().add("actual", actual);
+        return result;
+    }
+
     private static HarnessResult create(
         HarnessConfig config,
         HarnessIdentity identity,
@@ -377,7 +423,8 @@ final class HarnessResult {
         appendField(builder, "component_round_trip", componentRoundTrip).append(",\n");
         appendField(builder, "component_mutation_pass", componentMutationPass).append(",\n");
         appendJsonField(builder, "observation_expected", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("expected")).append(",\n");
-        appendJsonField(builder, "observation_actual", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("actual")).append("\n");
+        appendJsonField(builder, "observation_actual", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("actual")).append(",\n");
+        appendJsonField(builder, "command_result", structuredObservation == null ? null : structuredObservation.getAsJsonObject().get("command_result")).append("\n");
         builder.append("}");
         return builder.toString();
     }
