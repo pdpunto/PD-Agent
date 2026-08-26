@@ -1,7 +1,7 @@
 # PD Agent v0.6 Final Closure
 
-Status: CLOSED / PASS  
-Milestone: Fabric Capability Expansion  
+Status: CLOSED / PASS
+Milestone: Fabric Capability Expansion
 Technical closure baseline: `1d9d3e86b315ee023e41ea2c548f2399680bdc4d`
 
 ## Closure Decision
