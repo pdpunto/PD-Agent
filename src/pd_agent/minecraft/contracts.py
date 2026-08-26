@@ -36,6 +36,9 @@ _I5_INPUT_ITEM = "minecraft:diamond"
 _I5_OUTPUT_ITEM = "minecraft:gold_ingot"
 _I6_LOOT_TABLE_ID = "pdagentl11_harness:i6_fixed_drop"
 _LOOT_ITEM_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_WORLD_ROOT_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,255}$")
+_WORLD_FINGERPRINT_KEYS = {"level_name", "world_uuid", "seed", "dimension"}
 
 
 def validate_recipe_match_profile(
@@ -370,6 +373,159 @@ class MinecraftEvidenceReference:
             world_id=data.get("world_id"),
             scenario_id=data.get("scenario_id"),
         )
+
+
+class PersistencePhase(StrEnum):
+    """Closed phases of the two-process persistence scenario."""
+
+    PHASE_1 = "PHASE_1"
+    PHASE_2 = "PHASE_2"
+
+
+@dataclass(frozen=True, slots=True)
+class PersistenceScenario:
+    """Offline contract for one owned world and one persistence phase."""
+
+    scenario_id: str
+    world_id: str
+    world_root: str
+    target_artifact_sha256: str
+    test_id: str
+    phase: PersistencePhase
+    expected_observation_id: str
+    process_id: str
+    evidence_refs: tuple[MinecraftEvidenceReference, ...] = ()
+    predecessor_process_id: str | None = None
+    same_world_required: bool = False
+    reopen_only: bool = False
+    setup_allowed: bool = True
+    mutation_allowed_before_observation: bool = True
+    world_root_must_exist: bool = False
+    world_fingerprint: Mapping[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("scenario_id", "world_id", "test_id", "expected_observation_id", "process_id"):
+            object.__setattr__(self, name, _identity(name, getattr(self, name)))
+        root = _non_empty_text("world_root", self.world_root).replace("\\", "/")
+        if Path(root).is_absolute() or ".." in Path(root).parts or not _WORLD_ROOT_RE.fullmatch(root):
+            raise ValueError("world_root must be a confined relative path")
+        object.__setattr__(self, "world_root", root)
+        artifact = _non_empty_text("target_artifact_sha256", self.target_artifact_sha256).casefold()
+        if not _SHA256_RE.fullmatch(artifact):
+            raise ValueError("target_artifact_sha256 must be a SHA-256 hex digest")
+        object.__setattr__(self, "target_artifact_sha256", artifact)
+        object.__setattr__(self, "phase", PersistencePhase(str(self.phase)))
+        for name in (
+            "same_world_required",
+            "reopen_only",
+            "setup_allowed",
+            "mutation_allowed_before_observation",
+            "world_root_must_exist",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
+        predecessor = _optional_identity("predecessor_process_id", self.predecessor_process_id)
+        object.__setattr__(self, "predecessor_process_id", predecessor)
+        if self.phase is PersistencePhase.PHASE_1:
+            if (
+                predecessor is not None
+                or self.reopen_only
+                or not self.setup_allowed
+                or not self.mutation_allowed_before_observation
+                or self.world_root_must_exist
+            ):
+                raise ValueError("PHASE_1 must allow setup and mutation and cannot be reopen-only")
+            if self.same_world_required:
+                raise ValueError("PHASE_1 cannot require a previous same-world proof")
+        else:
+            if predecessor is None or predecessor == self.process_id:
+                raise ValueError("PHASE_2 requires a distinct predecessor process")
+            if (
+                not self.same_world_required
+                or not self.reopen_only
+                or self.setup_allowed
+                or self.mutation_allowed_before_observation
+                or not self.world_root_must_exist
+            ):
+                raise ValueError("PHASE_2 must be REOPEN_ONLY with setup and pre-observation mutation disabled")
+            if self.world_fingerprint is None:
+                raise ValueError("PHASE_2 requires a bounded same-world fingerprint")
+        refs = tuple(
+            item if isinstance(item, MinecraftEvidenceReference) else MinecraftEvidenceReference.from_dict(item)
+            for item in self.evidence_refs
+        )
+        for ref in refs:
+            if ref.scenario_id not in (None, self.scenario_id):
+                raise ValueError("evidence reference scenario does not match")
+            if ref.phase not in (None, self.phase.value):
+                raise ValueError("evidence reference phase does not match")
+        object.__setattr__(self, "evidence_refs", refs)
+        if self.world_fingerprint is not None:
+            fingerprint = _closed_json(self.world_fingerprint, field_name="world_fingerprint", reject_unsafe_keys=False)
+            if not isinstance(fingerprint, dict) or not fingerprint or set(fingerprint) - _WORLD_FINGERPRINT_KEYS:
+                raise ValueError("world_fingerprint must contain only bounded world metadata")
+            object.__setattr__(self, "world_fingerprint", fingerprint)
+
+    def resolve_world_root(self, authorized_root: Path) -> Path:
+        """Resolve the scenario world only inside the authorized execution root."""
+
+        from pd_agent.tools import SecurePathResolver
+
+        return SecurePathResolver(Path(authorized_root)).resolve_relative(self.world_root)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scenario_id": self.scenario_id,
+            "world_id": self.world_id,
+            "world_root": self.world_root,
+            "target_artifact_sha256": self.target_artifact_sha256,
+            "test_id": self.test_id,
+            "phase": self.phase.value,
+            "expected_observation_id": self.expected_observation_id,
+            "process_id": self.process_id,
+            "predecessor_process_id": self.predecessor_process_id,
+            "same_world_required": self.same_world_required,
+            "reopen_only": self.reopen_only,
+            "setup_allowed": self.setup_allowed,
+            "mutation_allowed_before_observation": self.mutation_allowed_before_observation,
+            "world_root_must_exist": self.world_root_must_exist,
+            "world_fingerprint": self.world_fingerprint,
+            "evidence_refs": [ref.to_dict() for ref in self.evidence_refs],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "PersistenceScenario":
+        allowed = {
+            "scenario_id", "world_id", "world_root", "target_artifact_sha256", "test_id", "phase",
+            "expected_observation_id", "process_id", "predecessor_process_id", "same_world_required",
+            "reopen_only", "setup_allowed", "mutation_allowed_before_observation", "world_fingerprint", "evidence_refs",
+            "world_root_must_exist",
+        }
+        _strict_mapping(data, model="PersistenceScenario", allowed=allowed)
+        required = {"scenario_id", "world_id", "world_root", "target_artifact_sha256", "test_id", "phase", "expected_observation_id", "process_id"} - set(data)
+        if required:
+            raise ValueError(f"PersistenceScenario missing fields: {sorted(required)!r}")
+        return cls(
+            scenario_id=str(data["scenario_id"]),
+            world_id=str(data["world_id"]),
+            world_root=str(data["world_root"]),
+            target_artifact_sha256=str(data["target_artifact_sha256"]),
+            test_id=str(data["test_id"]),
+            phase=PersistencePhase(str(data["phase"])),
+            expected_observation_id=str(data["expected_observation_id"]),
+            process_id=str(data["process_id"]),
+            predecessor_process_id=data.get("predecessor_process_id"),
+            same_world_required=data.get("same_world_required", False),
+            reopen_only=data.get("reopen_only", False),
+            setup_allowed=data.get("setup_allowed", True),
+            mutation_allowed_before_observation=data.get("mutation_allowed_before_observation", True),
+            world_root_must_exist=data.get("world_root_must_exist", False),
+            world_fingerprint=data.get("world_fingerprint"),
+            evidence_refs=tuple(MinecraftEvidenceReference.from_dict(item) for item in data.get("evidence_refs", [])),
+        )
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
 
 
 _I7_COMMAND_PROFILE = "i7_inventory_mark"
