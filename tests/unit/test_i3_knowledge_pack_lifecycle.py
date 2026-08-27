@@ -115,7 +115,7 @@ def test_atomic_write_reopen_detects_external_mutation_and_collision(tmp_path) -
     with pytest.raises(FileExistsError):
         KnowledgePackStore.write(pack, destination)
 
-    record_file = destination / "records" / "records/symbol.json"
+    record_file = next((destination / "records").glob("*.json"))
     record_file.write_text(record_file.read_text(encoding="utf-8").replace("Example", "Tampered"), encoding="utf-8")
     with pytest.raises(KnowledgePackIntegrityError):
         KnowledgePackStore.read(destination)

@@ -316,13 +316,8 @@ class KnowledgeService:
                                                    supported=True, items=cached.items, eligible=True))
                 items.extend(cached.items)
                 continue
-            if offline:
-                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.OFFLINE_MISS,
-                                               compatibility=compatibility, supported=True, eligible=True,
-                                               error="offline cache miss"))
-                continue
             try:
-                result = source.resolve(need, offline=False)
+                result = source.resolve(need, offline=offline)
             except Exception as exc:
                 attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.SOURCE_ERROR,
                                                compatibility=compatibility, supported=True, eligible=True, error=str(exc)))

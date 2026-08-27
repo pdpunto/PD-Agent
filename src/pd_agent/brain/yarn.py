@@ -25,6 +25,7 @@ from .models import (
     KnowledgeType,
     SourceAuthority,
 )
+from .canonical import KnowledgePack, KnowledgePackManifest, KnowledgePolicy, KnowledgeRecord, canonical_json
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +382,96 @@ class YarnKnowledgeSource:
             items=items,
             provenance=(provenance,),
         )
+
+    def materialize_records(self, environment: KnowledgeEnvironment | None = None) -> tuple[KnowledgeRecord, ...]:
+        """Materialize the loaded Tiny v2 artifact as deterministic SYMBOL records."""
+        target = environment or KnowledgeEnvironment(
+            minecraft_version=self.minecraft_version,
+            mappings_namespace=self.mappings_namespace,
+            mappings_version=self.version,
+        )
+        compatibility = self.compatibility(target)
+        if compatibility != CompatibilityStatus.COMPATIBLE:
+            raise ValueError(f"Yarn materialization requires compatible environment: {compatibility.value}")
+        document = self._load_document()
+        if document is None:
+            raise ValueError("Yarn artifact unavailable")
+        if self.artifact_checksum is not None and self.artifact_checksum != document.checksum:
+            raise ValueError("artifact checksum mismatch")
+        provenance = KnowledgeProvenance(
+            source_id=self.source_id,
+            source_kind=self.source_kind,
+            locator=self.artifact_url,
+            artifact_or_document_version=self.version,
+            revision=self.version,
+            checksum_algorithm=document.checksum_algorithm,
+            checksum=document.checksum,
+            license_id_or_policy="CC0-1.0",
+        )
+        records: list[KnowledgeRecord] = []
+        for index, symbol in enumerate(document.records):
+            content = {
+                "namespace": self.mappings_namespace,
+                "kind": symbol.kind,
+                "official": symbol.official,
+                "intermediary": symbol.intermediary,
+                "named": symbol.named,
+                "descriptor": symbol.descriptor,
+                "doc": symbol.doc,
+                "owner_named": symbol.owner_named,
+                "owner_intermediary": symbol.owner_intermediary,
+            }
+            content_checksum = hashlib.sha256(canonical_json(content).encode("utf-8")).hexdigest()
+            identity_input = {"source": self.source_id, "artifact": document.checksum, "index": index, "content": content}
+            record_id = "yarn:" + hashlib.sha256(canonical_json(identity_input).encode("utf-8")).hexdigest()
+            records.append(
+                KnowledgeRecord(
+                    record_id=record_id,
+                    kind=KnowledgeType.SYMBOL,
+                    content=content,
+                    environment=target,
+                    provenance=provenance,
+                    authority=SourceAuthority.AUTHORITATIVE_ARTIFACT,
+                    version_sensitive=True,
+                    license_policy=KnowledgePolicy.REDISTRIBUTABLE,
+                    integrity={"algorithm": "sha256", "value": content_checksum},
+                    source_revision=self.version,
+                )
+            )
+        return tuple(records)
+
+    def materialize_pack(self, environment: KnowledgeEnvironment | None = None) -> KnowledgePack:
+        """Build a partial, reproducible Yarn pack without migrating legacy caches."""
+        target = environment or KnowledgeEnvironment(
+            minecraft_version=self.minecraft_version,
+            mappings_namespace=self.mappings_namespace,
+            mappings_version=self.version,
+        )
+        records = self.materialize_records(target)
+        document = self._document
+        assert document is not None
+        inventory = tuple({"record_id": item.record_id, "record_identity": item.identity()} for item in records)
+        manifest = KnowledgePackManifest(
+            environment=target,
+            source_set=({
+                "source_id": self.source_id,
+                "source_kind": self.source_kind,
+                "version": self.version,
+                "coordinate": self.artifact_coordinate,
+                "locator": self.artifact_url,
+                "checksum_algorithm": document.checksum_algorithm,
+                "checksum": document.checksum,
+                "authority": SourceAuthority.AUTHORITATIVE_ARTIFACT.value,
+                "license_policy": "CC0-1.0",
+            },),
+            record_inventory=inventory,
+            license_policy=KnowledgePolicy.REDISTRIBUTABLE,
+        )
+        return KnowledgePack(manifest, records)
+
+    def to_knowledge_records(self, environment: KnowledgeEnvironment | None = None) -> tuple[KnowledgeRecord, ...]:
+        """Compatibility alias for callers that use conversion terminology."""
+        return self.materialize_records(environment)
 
     def _load_document(self) -> YarnMappingsDocument | None:
         if self._document is not None:

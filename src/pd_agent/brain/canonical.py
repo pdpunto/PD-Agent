@@ -418,7 +418,8 @@ class KnowledgePackStore:
             records_root = temporary / cls.RECORDS_DIR
             records_root.mkdir()
             for record in pack.records:
-                record_path = records_root / f"{normalize_logical_path(record.record_id)}.json"
+                # Identity-based filenames avoid invalid platform characters in logical IDs.
+                record_path = records_root / f"{record.identity()}.json"
                 try:
                     record_path.relative_to(records_root)
                 except ValueError as exc:
