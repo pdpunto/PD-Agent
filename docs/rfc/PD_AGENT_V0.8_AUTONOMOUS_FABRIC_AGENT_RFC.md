@@ -1,6 +1,6 @@
 # PD Agent v0.8 - Autonomous Fabric Agent Foundation RFC
 
-Status: RFC READY FOR APPROVAL
+Status: RFC APPROVED
 Design authority: `docs/design/PD_AGENT_V0.8_AUTONOMOUS_FABRIC_AGENT_DESIGN.md`
 Design status: DESIGN ACCEPTED
 Milestone: PD Agent v0.8 - Autonomous Fabric Agent Foundation
