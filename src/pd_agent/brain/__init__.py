@@ -19,6 +19,7 @@ from .models import (
 from .retrieval import FileKnowledgeCache, KnowledgeSource, MinecraftBrain
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
+from .canonical import KnowledgePackManifest, KnowledgePackState, KnowledgePolicy, KnowledgeRecord, normalize_logical_path
 
 __all__ = [
     "CompatibilityStatus",
@@ -38,4 +39,9 @@ __all__ = [
     "MinecraftBrain",
     "SourceAuthority",
     "YarnKnowledgeSource",
+    "KnowledgePackManifest",
+    "KnowledgePackState",
+    "KnowledgePolicy",
+    "KnowledgeRecord",
+    "normalize_logical_path",
 ]
