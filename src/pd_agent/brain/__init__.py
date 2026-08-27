@@ -19,6 +19,7 @@ from .models import (
 from .retrieval import FileKnowledgeCache, KnowledgeService, KnowledgeSource, MinecraftBrain
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
+from .fabric_api import FabricApiKnowledgeSource
 from .canonical import (
     KnowledgePack,
     KnowledgePackIntegrityError,
@@ -50,6 +51,7 @@ __all__ = [
     "MinecraftBrain",
     "SourceAuthority",
     "YarnKnowledgeSource",
+    "FabricApiKnowledgeSource",
     "KnowledgePackManifest",
     "KnowledgePack",
     "KnowledgePackIntegrityError",
