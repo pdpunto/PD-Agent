@@ -82,6 +82,17 @@ def test_trace_round_trip_preserves_identity_and_states() -> None:
     assert restored.provider_turn == 2
 
 
+def test_provider_turn_binding_updates_only_injected_records() -> None:
+    trace = _trace().with_provider_turn(7, stage="PRE_CODE")
+
+    assert trace.provider_turn == 7
+    assert trace.stage == "PRE_CODE"
+    assert trace.records[0].provider_turn == 7
+    assert trace.records[1].provider_turn is None
+    restored = KnowledgeTrace.from_dict(json.loads(json.dumps(trace.to_dict())))
+    assert restored == trace
+
+
 def test_legacy_trace_without_i13_fields_remains_readable() -> None:
     payload = _trace().to_dict()
     for key in ("schema_version", "records", "stage", "provider_turn", "evidence_refs"):

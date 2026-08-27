@@ -261,6 +261,18 @@ def test_final_report_json_and_markdown_and_partial_failure() -> None:
         assert reloaded.to_dict() == report.to_dict()
 
 
+def test_runtime_report_uses_latest_persisted_runtime_validation() -> None:
+    from pd_agent.reporting.report import runtime_validation_summary
+    from pd_agent.core import ValidationResult, ValidationStage, ValidationStatus
+
+    results = (
+        ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.REPAIRABLE_FAIL, summary="retry"),
+        ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.PASS, summary="harness passed"),
+    )
+    assert runtime_validation_summary(results) == "PASS"
+    assert runtime_validation_summary(()) == "NOT PERFORMED (v0.1)"
+
+
 def test_run_directories_are_isolated_per_run_id() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         storage = RunStorage(Path(temp_dir))

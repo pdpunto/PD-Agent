@@ -271,7 +271,7 @@ class KnowledgeTrace:
                 checksum=attempt.checksum if attempt else None,
                 context_item_id=item_id if item_id in injected else None,
                 stage=self.stage,
-                provider_turn=self.provider_turn,
+                provider_turn=self.provider_turn if item_id in injected else None,
             ))
         object.__setattr__(self, "records", tuple(records))
 
@@ -318,6 +318,37 @@ class KnowledgeTrace:
                 ), started_at=self.started_at, finished_at=datetime.now(timezone.utc),
             )
         raise ValueError(f"unknown knowledge item: {item_id}")
+
+    def with_provider_turn(self, provider_turn: int, *, stage: str | None = None) -> "KnowledgeTrace":
+        """Bind this injection to the logical provider turn that received it."""
+        if provider_turn < 1:
+            raise ValueError("provider_turn must be positive")
+        effective_stage = stage if stage is not None else self.stage
+        records = tuple(
+            KnowledgeTraceRecord(
+                item_id=record.item_id,
+                states=record.states,
+                need_id=record.need_id,
+                source_id=record.source_id,
+                source_revision=record.source_revision,
+                checksum=record.checksum,
+                context_item_id=record.context_item_id,
+                provider_turn=(provider_turn if KnowledgeTraceState.INJECTED in record.states else record.provider_turn),
+                stage=effective_stage,
+                evidence_refs=record.evidence_refs,
+            )
+            for record in self.records
+        )
+        return KnowledgeTrace(
+            run_id=self.run_id, environment=self.environment, needs=self.needs,
+            source_attempts=self.source_attempts, retrieved_item_ids=self.retrieved_item_ids,
+            rejected_items=self.rejected_items, selected_item_ids=self.selected_item_ids,
+            context_item_ids=self.context_item_ids, misses=self.misses, records=records,
+            stage=effective_stage,
+            provider_turn=(provider_turn if self.context_item_ids else self.provider_turn),
+            evidence_refs=self.evidence_refs, started_at=self.started_at,
+            finished_at=datetime.now(timezone.utc),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

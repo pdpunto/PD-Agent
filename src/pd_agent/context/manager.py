@@ -98,6 +98,13 @@ class ContextManager:
             )
         )
 
+    def bind_knowledge_provider_turn(self, provider_turn: int, *, stage: str | None = None) -> None:
+        """Bind current knowledge injections to one logical provider turn."""
+        self.last_knowledge_traces = tuple(
+            trace.with_provider_turn(provider_turn, stage=stage)
+            for trace in self.last_knowledge_traces
+        )
+
     def to_messages(self, request: ContextRequest) -> tuple[AgentMessage, ...]:
         return self.collect(request).to_messages()
 

@@ -48,7 +48,7 @@ from pd_agent.core.terminal_reasons import (
     TOOL_REJECTED,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
-from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
+from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage, runtime_validation_summary
 from pd_agent.tools import ToolExecutionContext, ToolExecutor, create_filesystem_tools
 
 
@@ -530,7 +530,6 @@ class AgentRuntime:
                               *self._repair_context),
             limits=limits,
         )
-        self._persist_knowledge_traces(run_state.run_id)
         messages = bundle.to_messages() + tuple(history)
         request = AgentRequest(
             messages=messages,
@@ -561,6 +560,11 @@ class AgentRuntime:
             },
         )
         run_state.record_logical_provider_request()
+        self.context_manager.bind_knowledge_provider_turn(
+            run_state.logical_provider_request_count,
+            stage=run_state.state.value,
+        )
+        self._persist_knowledge_traces(run_state.run_id)
         self._persist_state(run_state)
         try:
             return self.provider.execute(request), offered_tool_names
@@ -869,6 +873,7 @@ class AgentRuntime:
             warnings=(),
             termination_reason=run_state.termination_reason,
             evidence_refs=tuple(self._knowledge_trace_refs.get(run_state.run_id, ())),
+            minecraft_runtime_validation=runtime_validation_summary(run_state.validation_results),
         )
         if self.reporting is not None:
             self.reporting.write_run_state(run_state)

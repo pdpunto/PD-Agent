@@ -8,10 +8,20 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..core import ArtifactResult, BuildResult, RunStatus, ValidationResult
+from ..core import ArtifactResult, BuildResult, RunStatus, ValidationResult, ValidationStage
 from .redaction import Redactor, json_ready
 
 MINECRAFT_RUNTIME_VALIDATION_NOTE = "NOT PERFORMED (v0.1)"
+
+
+def runtime_validation_summary(validation_results: tuple[ValidationResult, ...]) -> str:
+    """Use the latest persisted runtime validation as the report authority."""
+    runtime_results = tuple(
+        result for result in validation_results if result.stage is ValidationStage.RUNTIME
+    )
+    if not runtime_results:
+        return MINECRAFT_RUNTIME_VALIDATION_NOTE
+    return runtime_results[-1].status.value
 
 
 @dataclass(frozen=True, slots=True)
