@@ -20,6 +20,7 @@ from .retrieval import FileKnowledgeCache, KnowledgeService, KnowledgeSource, Mi
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
 from .fabric_api import FabricApiKnowledgeSource
+from .concepts import CuratedConcept, FabricConceptPatternKnowledgeSource
 from .canonical import (
     KnowledgePack,
     KnowledgePackIntegrityError,
@@ -52,6 +53,8 @@ __all__ = [
     "SourceAuthority",
     "YarnKnowledgeSource",
     "FabricApiKnowledgeSource",
+    "CuratedConcept",
+    "FabricConceptPatternKnowledgeSource",
     "KnowledgePackManifest",
     "KnowledgePack",
     "KnowledgePackIntegrityError",
