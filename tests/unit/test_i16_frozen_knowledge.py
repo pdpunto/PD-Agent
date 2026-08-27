@@ -28,6 +28,7 @@ from pd_agent.brain import (
     KnowledgeType,
     SourceAuthority,
     compose_frozen_knowledge_pack,
+    materialize_frozen_knowledge_pack,
 )
 from pd_agent.core import ExecutionLimits
 
@@ -43,7 +44,7 @@ ENVIRONMENT = KnowledgeEnvironment(
 )
 
 
-def _source_pack(source_id: str, source_kind: str, kind: KnowledgeType, query: str) -> KnowledgePack:
+def _source_pack(source_id: str, source_kind: str, kind: KnowledgeType, query: str, *, verified: bool = True) -> KnowledgePack:
     content = {"source": source_id, "qualified_name": query, "capability": query}
     checksum = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     provenance = KnowledgeProvenance(
@@ -73,7 +74,8 @@ def _source_pack(source_id: str, source_kind: str, kind: KnowledgeType, query: s
         record_inventory=inventory,
         license_policy=KnowledgePolicy.REDISTRIBUTABLE,
     )
-    return KnowledgePack(manifest, (record,)).transition_to(KnowledgePackState.VERIFIED)
+    pack = KnowledgePack(manifest, (record,))
+    return pack.transition_to(KnowledgePackState.VERIFIED) if verified else pack
 
 
 def _packs() -> tuple[KnowledgePack, ...]:
@@ -161,6 +163,32 @@ def test_corrupt_or_wrong_identity_pack_is_rejected(tmp_path: Path) -> None:
     manifest.write_text(manifest.read_text(encoding="utf-8").replace(pack.manifest.pack_id, "0" * 64), encoding="utf-8")
     with pytest.raises(KnowledgePackIntegrityError):
         KnowledgePackStore.read(destination)
+
+
+def test_draft_source_pack_is_rejected_but_materializer_finalizes_each_source() -> None:
+    drafts = tuple(
+        _source_pack(source_id, source_kind, kind, query, verified=False)
+        for source_id, source_kind, kind, query in (
+            ("net.fabricmc:yarn", "yarn-mappings", KnowledgeType.SYMBOL, "net.minecraft.item.Item"),
+            ("net.fabricmc.fabric-api:fabric-api", "fabric-api-artifact", KnowledgeType.API, "FabricItemGroupEntries"),
+            ("fabric-docs:concept-pattern", "fabric-official-reference", KnowledgeType.CONCEPT, "data_components"),
+        )
+    )
+    with pytest.raises(ValueError, match="verified or frozen"):
+        compose_frozen_knowledge_pack(drafts, environment=ENVIRONMENT)
+
+    class Source:
+        def __init__(self, pack: KnowledgePack) -> None:
+            self.pack = pack
+
+        def materialize_pack(self, environment: KnowledgeEnvironment) -> KnowledgePack:
+            assert environment == ENVIRONMENT
+            return self.pack
+
+    finalized = materialize_frozen_knowledge_pack(
+        tuple(Source(pack) for pack in drafts), environment=ENVIRONMENT
+    )
+    assert finalized.manifest.state == KnowledgePackState.FROZEN
 
 
 def test_launcher_rejects_wrong_expected_pack_identity(tmp_path: Path) -> None:

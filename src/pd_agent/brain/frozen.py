@@ -71,8 +71,12 @@ def materialize_frozen_knowledge_pack(
 ) -> KnowledgePack:
     """Materialize, verify, freeze and optionally persist approved source packs."""
 
+    source_packs = tuple(
+        source.materialize_pack(environment).transition_to(KnowledgePackState.VERIFIED).freeze()
+        for source in sources
+    )
     pack = compose_frozen_knowledge_pack(
-        tuple(source.materialize_pack(environment) for source in sources), environment=environment
+        source_packs, environment=environment
     )
     if target is not None:
         KnowledgePackStore.write(pack, target)
