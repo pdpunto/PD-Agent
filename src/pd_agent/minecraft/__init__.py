@@ -36,6 +36,7 @@ from .errors import (
     UnsupportedMinecraftEnvironmentError,
 )
 from .runner import MinecraftTestRunner, PersistenceRunResult
+from .orchestration import FabricRuntimeOrchestrator, RuntimeOrchestrationStatus, RuntimeValidationOutcome, RuntimeValidationSpec, runtime_spec_from_requirement
 
 __all__ = [
     "MinecraftEvidencePaths",
@@ -69,4 +70,9 @@ __all__ = [
     "MinecraftTestStatus",
     "MinecraftTestValidationError",
     "UnsupportedMinecraftEnvironmentError",
+    "FabricRuntimeOrchestrator",
+    "RuntimeOrchestrationStatus",
+    "RuntimeValidationOutcome",
+    "RuntimeValidationSpec",
+    "runtime_spec_from_requirement",
 ]

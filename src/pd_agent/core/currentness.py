@@ -208,22 +208,27 @@ class RuntimeAttemptIdentity:
     validation_revision: str
     requirement_ids: tuple[str, ...] = ()
     result_refs: tuple[str, ...] = ()
+    status: str = "UNKNOWN"
 
     def __post_init__(self) -> None:
         for name in ("runtime_attempt_id", "artifact_identity", "validation_revision"):
             object.__setattr__(self, name, _text(getattr(self, name), field_name=name))
         object.__setattr__(self, "requirement_ids", tuple(_text(item, field_name="requirement_id") for item in self.requirement_ids))
         object.__setattr__(self, "result_refs", tuple(_text(item, field_name="result_ref") for item in self.result_refs))
+        object.__setattr__(self, "status", _text(self.status, field_name="status").upper())
 
     def is_current(self, *, artifact_identity: str, validation_revision: str) -> bool:
         return self.artifact_identity == artifact_identity and self.validation_revision == validation_revision
 
+    def is_current_pass(self, *, artifact_identity: str, validation_revision: str) -> bool:
+        return self.status == "PASS" and self.is_current(artifact_identity=artifact_identity, validation_revision=validation_revision)
+
     def to_dict(self) -> dict[str, Any]:
-        return {"runtime_attempt_id": self.runtime_attempt_id, "artifact_identity": self.artifact_identity, "validation_revision": self.validation_revision, "requirement_ids": list(self.requirement_ids), "result_refs": list(self.result_refs)}
+        return {"runtime_attempt_id": self.runtime_attempt_id, "artifact_identity": self.artifact_identity, "validation_revision": self.validation_revision, "requirement_ids": list(self.requirement_ids), "result_refs": list(self.result_refs), "status": self.status}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RuntimeAttemptIdentity":
-        return cls(runtime_attempt_id=data["runtime_attempt_id"], artifact_identity=data["artifact_identity"], validation_revision=data["validation_revision"], requirement_ids=tuple(data.get("requirement_ids", ())), result_refs=tuple(data.get("result_refs", ())))
+        return cls(runtime_attempt_id=data["runtime_attempt_id"], artifact_identity=data["artifact_identity"], validation_revision=data["validation_revision"], requirement_ids=tuple(data.get("requirement_ids", ())), result_refs=tuple(data.get("result_refs", ())), status=data.get("status", "UNKNOWN"))
 
 
 @dataclass(frozen=True, slots=True)
