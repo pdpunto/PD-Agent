@@ -19,7 +19,17 @@ from .models import (
 from .retrieval import FileKnowledgeCache, KnowledgeSource, MinecraftBrain
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
-from .canonical import KnowledgePackManifest, KnowledgePackState, KnowledgePolicy, KnowledgeRecord, normalize_logical_path
+from .canonical import (
+    KnowledgePack,
+    KnowledgePackIntegrityError,
+    KnowledgePackManifest,
+    KnowledgePackState,
+    KnowledgePackStore,
+    KnowledgePackVerification,
+    KnowledgePolicy,
+    KnowledgeRecord,
+    normalize_logical_path,
+)
 
 __all__ = [
     "CompatibilityStatus",
@@ -40,7 +50,11 @@ __all__ = [
     "SourceAuthority",
     "YarnKnowledgeSource",
     "KnowledgePackManifest",
+    "KnowledgePack",
+    "KnowledgePackIntegrityError",
     "KnowledgePackState",
+    "KnowledgePackStore",
+    "KnowledgePackVerification",
     "KnowledgePolicy",
     "KnowledgeRecord",
     "normalize_logical_path",

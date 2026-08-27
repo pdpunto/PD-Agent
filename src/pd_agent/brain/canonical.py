@@ -7,6 +7,10 @@ from enum import StrEnum
 import hashlib
 import json
 import math
+import os
+from pathlib import Path
+import shutil
+import tempfile
 from typing import Any, Mapping
 
 from .models import KnowledgeEnvironment, KnowledgeProvenance, KnowledgeType, SourceAuthority
@@ -240,3 +244,207 @@ class KnowledgePackManifest:
             derived_index_metadata=dict(data.get("derived_index_metadata", {})),
             pack_id=data.get("pack_id"),
         )
+
+
+class KnowledgePackIntegrityError(ValueError):
+    """Raised when canonical pack evidence cannot be verified."""
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePackVerification:
+    """Stable, serializable result of a pack integrity check."""
+
+    valid: bool
+    errors: tuple[str, ...] = ()
+    pack_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePack:
+    """A manifest and its canonical records, with fail-closed lifecycle APIs."""
+
+    manifest: KnowledgePackManifest
+    records: tuple[KnowledgeRecord, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.manifest, KnowledgePackManifest):
+            raise TypeError("manifest must be a KnowledgePackManifest")
+        object.__setattr__(self, "records", tuple(self.records))
+        if any(not isinstance(record, KnowledgeRecord) for record in self.records):
+            raise TypeError("records must contain KnowledgeRecord values")
+
+    def verify(self) -> KnowledgePackVerification:
+        errors: list[str] = []
+        records_by_id: dict[str, KnowledgeRecord] = {}
+        identities: set[str] = set()
+        environment = self.manifest.environment
+
+        for record in self.records:
+            identity = record.identity()
+            if record.record_id in records_by_id:
+                errors.append(f"duplicate record id: {record.record_id}")
+            if identity in identities:
+                errors.append(f"duplicate record identity: {identity}")
+            records_by_id[record.record_id] = record
+            identities.add(identity)
+            if record.environment != environment:
+                errors.append(f"environment mismatch: {record.record_id}")
+            provenance = record.provenance
+            if not provenance.license_id_or_policy:
+                errors.append(f"missing provenance policy: {record.record_id}")
+            if record.integrity:
+                algorithm = record.integrity.get("algorithm")
+                expected = record.integrity.get("value")
+                if algorithm != "sha256" or not isinstance(expected, str):
+                    errors.append(f"invalid record checksum metadata: {record.record_id}")
+                elif expected != _sha256(record.content):
+                    errors.append(f"record checksum mismatch: {record.record_id}")
+
+        if len(self.manifest.record_inventory) != len(self.records):
+            errors.append("record inventory does not match records")
+        inventory_ids: set[str] = set()
+        inventory_identities: set[str] = set()
+        for item in self.manifest.record_inventory:
+            record_id = item.get("record_id")
+            identity = item.get("record_identity")
+            if not isinstance(record_id, str) or not isinstance(identity, str):
+                errors.append("malformed record inventory entry")
+                continue
+            if record_id in inventory_ids or identity in inventory_identities:
+                errors.append("duplicate record inventory identity")
+            inventory_ids.add(record_id)
+            inventory_identities.add(identity)
+            record = records_by_id.get(record_id)
+            if record is None:
+                errors.append(f"missing record: {record_id}")
+            elif identity != record.identity():
+                errors.append(f"record identity mismatch: {record_id}")
+
+        if self.manifest.pack_id != self.manifest.identity():
+            errors.append("pack identity mismatch")
+        if len(inventory_identities) != len(inventory_ids):
+            errors.append("duplicate manifest record identity")
+        return KnowledgePackVerification(not errors, tuple(errors), self.manifest.pack_id)
+
+    def verify_integrity(self) -> None:
+        result = self.verify()
+        if not result.valid:
+            raise KnowledgePackIntegrityError("; ".join(result.errors))
+
+    @property
+    def can_serve(self) -> bool:
+        """Only verified, frozen, and superseded snapshots may serve knowledge."""
+        return self.manifest.state in {
+            KnowledgePackState.VERIFIED,
+            KnowledgePackState.FROZEN,
+            KnowledgePackState.SUPERSEDED,
+        } and self.verify().valid
+
+    def assert_servable(self) -> None:
+        if not self.can_serve:
+            raise KnowledgePackIntegrityError("pack is not servable in its current state")
+
+    def transition_to(self, state: KnowledgePackState) -> "KnowledgePack":
+        if not isinstance(state, KnowledgePackState):
+            raise TypeError("state must be a KnowledgePackState")
+        current = self.manifest.state
+        allowed = {
+            KnowledgePackState.DRAFT: {KnowledgePackState.VERIFIED},
+            KnowledgePackState.VERIFIED: {KnowledgePackState.FROZEN},
+            KnowledgePackState.FROZEN: {KnowledgePackState.SUPERSEDED},
+            KnowledgePackState.SUPERSEDED: set(),
+        }
+        if state not in allowed[current]:
+            raise KnowledgePackIntegrityError(f"invalid lifecycle transition: {current} -> {state}")
+        if state in {KnowledgePackState.VERIFIED, KnowledgePackState.FROZEN}:
+            self.verify_integrity()
+        manifest = replace_manifest_state(self.manifest, state)
+        return KnowledgePack(manifest, self.records)
+
+    def verify_and_transition(self, state: KnowledgePackState) -> "KnowledgePack":
+        return self.transition_to(state)
+
+    def freeze(self) -> "KnowledgePack":
+        return self.transition_to(KnowledgePackState.FROZEN)
+
+    def supersede(self) -> "KnowledgePack":
+        return self.transition_to(KnowledgePackState.SUPERSEDED)
+
+    def to_dict(self) -> dict[str, Any]:
+        self.verify_integrity()
+        return {"manifest": self.manifest.to_dict(), "records": [record.to_dict() for record in self.records]}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "KnowledgePack":
+        pack = cls(
+            KnowledgePackManifest.from_dict(dict(data["manifest"])),
+            tuple(KnowledgeRecord.from_dict(dict(item)) for item in data.get("records", [])),
+        )
+        pack.verify_integrity()
+        return pack
+
+
+def replace_manifest_state(manifest: KnowledgePackManifest, state: KnowledgePackState) -> KnowledgePackManifest:
+    """Return a state-only manifest copy while preserving canonical identity."""
+    return KnowledgePackManifest(
+        environment=manifest.environment,
+        source_set=manifest.source_set,
+        record_inventory=manifest.record_inventory,
+        schema_version=manifest.schema_version,
+        state=state,
+        generated_metadata=manifest.generated_metadata,
+        license_policy=manifest.license_policy,
+        integrity=manifest.integrity,
+        derived_index_metadata=manifest.derived_index_metadata,
+        pack_id=manifest.pack_id,
+    )
+
+
+class KnowledgePackStore:
+    """Small atomic directory store for canonical packs."""
+
+    MANIFEST_NAME = "manifest.json"
+    RECORDS_DIR = "records"
+
+    @classmethod
+    def write(cls, pack: KnowledgePack, target: str | os.PathLike[str]) -> Path:
+        pack.verify_integrity()
+        destination = Path(target)
+        if destination.exists():
+            raise FileExistsError(f"pack target already exists: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{destination.name}.", dir=destination.parent))
+        try:
+            records_root = temporary / cls.RECORDS_DIR
+            records_root.mkdir()
+            for record in pack.records:
+                record_path = records_root / f"{normalize_logical_path(record.record_id)}.json"
+                try:
+                    record_path.relative_to(records_root)
+                except ValueError as exc:
+                    raise KnowledgePackIntegrityError("record id escapes pack storage")
+                record_path.parent.mkdir(parents=True, exist_ok=True)
+                record_path.write_text(canonical_json(record.to_dict()) + "\n", encoding="utf-8", newline="\n")
+            (temporary / cls.MANIFEST_NAME).write_text(
+                canonical_json(pack.manifest.to_dict()) + "\n", encoding="utf-8", newline="\n"
+            )
+            os.replace(temporary, destination)
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+        return destination
+
+    @classmethod
+    def read(cls, target: str | os.PathLike[str]) -> KnowledgePack:
+        root = Path(target)
+        manifest_path = root / cls.MANIFEST_NAME
+        records_path = root / cls.RECORDS_DIR
+        try:
+            manifest = KnowledgePackManifest.from_dict(json.loads(manifest_path.read_text(encoding="utf-8")))
+            record_files = sorted(records_path.rglob("*.json"), key=lambda item: item.relative_to(records_path).as_posix())
+            records = tuple(KnowledgeRecord.from_dict(json.loads(path.read_text(encoding="utf-8"))) for path in record_files)
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise KnowledgePackIntegrityError(f"cannot reopen pack: {exc}") from exc
+        pack = KnowledgePack(manifest, records)
+        pack.verify_integrity()
+        return pack
