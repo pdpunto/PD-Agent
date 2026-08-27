@@ -19,6 +19,7 @@ from .models import (
 from .retrieval import (
     FileKnowledgeCache,
     KnowledgeRetrievalCandidate,
+    KnowledgeDegradedMode,
     KnowledgeRetrievalConflict,
     KnowledgeRetrievalEngine,
     KnowledgeService,
@@ -62,6 +63,7 @@ __all__ = [
     "KnowledgeSource",
     "KnowledgeService",
     "KnowledgeRetrievalCandidate",
+    "KnowledgeDegradedMode",
     "KnowledgeRetrievalConflict",
     "KnowledgeRetrievalEngine",
     "RankedKnowledgeRetrievalResult",

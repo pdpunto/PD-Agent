@@ -40,6 +40,15 @@ class RetrievalConflictStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class KnowledgeDegradedMode(StrEnum):
+    """Stable classification for knowledge availability and safety outcomes."""
+
+    CONTINUE_WITHOUT_KNOWLEDGE = "CONTINUE_WITHOUT_KNOWLEDGE"
+    DEGRADED = "DEGRADED"
+    BLOCKED = "BLOCKED"
+    INVALID = "INVALID"
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeRetrievalCandidate:
     """An eligible, explainable candidate produced by the I9 pipeline."""
@@ -429,7 +438,7 @@ class KnowledgeService:
                 continue
             attempts.append(replace(result, compatibility=compatibility, supported=True, eligible=True))
             if result.status == KnowledgeRetrievalStatus.SUCCESS:
-                items.extend(result.items)
+                items.extend(item for item in result.items if self._is_authorized(item))
 
         deduplicated = self._deduplicate(items)
         status = KnowledgeRetrievalStatus.SUCCESS if deduplicated else self._aggregate_status(attempts)
@@ -437,6 +446,16 @@ class KnowledgeService:
         return KnowledgeRetrievalResult(status=status, need=need, items=deduplicated,
                                         source_results=tuple(attempts), cache_hit=cache_hit,
                                         offline=offline, error=error)
+
+    @staticmethod
+    def _is_authorized(item: KnowledgeItem) -> bool:
+        """Reject only explicit leakage markers; knowledge remains advisory data."""
+        metadata = item.metadata
+        forbidden = (
+            "answer_key", "reference_solution", "harness_internal", "hidden_fixture",
+            "secret", "api_key", "unauthorized", "leakage",
+        )
+        return not any(bool(metadata.get(key)) for key in forbidden)
 
     def retrieve(self, need: KnowledgeNeed, offline: bool = False) -> KnowledgeRetrievalResult:
         """Alias matching the historical MinecraftBrain API."""
@@ -545,11 +564,20 @@ class KnowledgeRetrievalEngine:
                  packs: Sequence[Any] = (), offline: bool = False) -> RankedKnowledgeRetrievalResult:
         legacy = self.service.resolve(need, offline=offline)
         records: list[KnowledgeRecord] = []
+        index_degraded = False
+        canonical_blocked = False
         for index in indexes:
             if not index.verify():
+                index_degraded = True
                 continue
             records.extend(self._indexed_records(index, need))
         for pack in packs:
+            verification = pack.verify() if hasattr(pack, "verify") else None
+            if verification is not None and not verification.valid:
+                state = getattr(getattr(pack, "manifest", None), "state", None)
+                if str(state) not in {"DRAFT", "KnowledgePackState.DRAFT"}:
+                    canonical_blocked = True
+                continue
             if bool(getattr(pack, "can_serve", False)):
                 records.extend(pack.records)
 
@@ -596,12 +624,15 @@ class KnowledgeRetrievalEngine:
             candidate.record_id,
         ))
         candidates = tuple(ranked[:self.max_candidates])
-        status = KnowledgeRetrievalStatus.SUCCESS if candidates else legacy.status
+        status = KnowledgeRetrievalStatus.PROVENANCE_INVALID if canonical_blocked else (
+            KnowledgeRetrievalStatus.SUCCESS if candidates else legacy.status
+        )
         return RankedKnowledgeRetrievalResult(status=status, need=need,
             candidates=candidates, rejected=tuple(rejected), conflicts=tuple(conflicts),
             source_results=legacy.source_results,
-            degraded=bool(rejected or any(result.status != KnowledgeRetrievalStatus.SUCCESS
-                                          for result in legacy.source_results)), offline=offline)
+            degraded=bool(index_degraded or canonical_blocked or rejected or
+                           any(result.status != KnowledgeRetrievalStatus.SUCCESS
+                               for result in legacy.source_results)), offline=offline)
 
     @staticmethod
     def _indexed_records(index: Any, need: KnowledgeNeed) -> tuple[KnowledgeRecord, ...]:
