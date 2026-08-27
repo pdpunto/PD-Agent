@@ -55,6 +55,7 @@ class KnowledgeEnvironmentResolver:
 
         primary_values, evidence = self._primary_values(fabric)
         conflicts = self._conflicts(primary_values, verification_sources)
+        self._complete_from_verified_sources(primary_values, evidence, verification_sources, conflicts)
         status = self._status(primary_values, conflicts)
 
         return KnowledgeEnvironmentResolution(
@@ -95,6 +96,31 @@ class KnowledgeEnvironmentResolver:
             evidence.append(f"mappings_namespace={values['mappings_namespace']}")
 
         return values, evidence
+
+    def _complete_from_verified_sources(
+        self,
+        values: dict[str, str | None],
+        evidence: list[str],
+        verification_sources: Sequence[Mapping[str, str | None]],
+        conflicts: list[str],
+    ) -> None:
+        """Fill undetectable fields from an already-authoritative claim."""
+
+        for field in _CANONICAL_FIELDS:
+            candidates = {
+                normalized[field]
+                for source in verification_sources
+                for normalized in (self._normalize_claims(source),)
+                if normalized[field] is not None
+            }
+            if values[field] is not None:
+                continue
+            if len(candidates) == 1:
+                value = next(iter(candidates))
+                values[field] = value
+                evidence.append(f"{field}={value} (verified source)")
+            elif len(candidates) > 1:
+                conflicts.append(f"verified sources disagree on {field}: {sorted(candidates)!r}")
 
     def _detect_mappings_namespace(self, fabric: FabricInspectionResult) -> str | None:
         pattern = re.compile(

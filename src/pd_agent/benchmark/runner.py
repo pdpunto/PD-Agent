@@ -634,6 +634,8 @@ class BenchmarkExecutionRunner:
         pd_agent_commit: str | None = None,
         knowledge_needs_by_task: Mapping[tuple[str, str], Sequence[Any]] | None = None,
         preserve_workspaces: bool = False,
+        task_id: str | None = None,
+        task_version: str | None = None,
     ) -> BenchmarkExecutionBatch:
         execution_root = Path(execution_root).resolve(strict=False)
         execution_root.mkdir(parents=True, exist_ok=True)
@@ -643,12 +645,22 @@ class BenchmarkExecutionRunner:
         economic_guard = self._configure_new_economic_state(execution_id=execution_id, execution_dir=execution_dir)
 
         dataset = catalog.dataset_for(dataset_id, dataset_version)
-        tasks = tuple(catalog.task_for(ref.task_id, ref.task_version) for ref in dataset.tasks)
+        if (task_id is None) != (task_version is None):
+            raise ValueError("task_id and task_version must be provided together")
+        dataset_tasks = dataset.tasks
+        if task_id is not None and task_version is not None:
+            dataset_tasks = tuple(
+                ref for ref in dataset.tasks
+                if ref.task_id == task_id and ref.task_version == task_version
+            )
+            if not dataset_tasks:
+                raise ValueError(f"task {task_id}@{task_version} is not part of dataset {dataset_id}@{dataset_version}")
+        tasks = tuple(catalog.task_for(ref.task_id, ref.task_version) for ref in dataset_tasks)
         manifest = BenchmarkExecutionManifest(
             execution_id=execution_id,
             dataset_id=dataset.dataset_id,
             dataset_version=dataset.dataset_version,
-            dataset_tasks=dataset.tasks,
+            dataset_tasks=dataset_tasks,
             configs=tuple(configs),
             target_valid_repetitions=self.target_valid_repetitions,
             max_attempts_per_cell=self.max_attempts_per_cell,
@@ -749,7 +761,7 @@ class BenchmarkExecutionRunner:
 
         try:
             dataset = catalog.dataset_for(manifest.dataset_id, manifest.dataset_version)
-            tasks = tuple(catalog.task_for(ref.task_id, ref.task_version) for ref in dataset.tasks)
+            tasks = tuple(catalog.task_for(ref.task_id, ref.task_version) for ref in manifest.dataset_tasks)
         except AssertionError as exc:
             raise BenchmarkExecutionResumeError("dataset drift detected", code="RESUME_DRIFT") from exc
         self._validate_resume_state(

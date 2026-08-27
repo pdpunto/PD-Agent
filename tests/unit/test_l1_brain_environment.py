@@ -73,6 +73,28 @@ def test_resolver_detects_l11_fixture_environment() -> None:
     assert any(item.startswith("minecraft_version=1.21.11") for item in resolution.evidence)
 
 
+def test_resolver_completes_missing_fields_from_verified_environment() -> None:
+    resolution = KnowledgeEnvironmentResolver().resolve(
+        L11_FIXTURE,
+        verification_sources=(
+            {
+                "minecraft_version": "1.21.11",
+                "loader_version": "0.19.3",
+                "loom_version": "1.13.3",
+                "mappings_namespace": "yarn",
+                "mappings_version": "1.21.11+build.6",
+                "fabric_api_version": "0.141.6+1.21.11",
+                "java_version": "21",
+            },
+        ),
+    )
+
+    assert resolution.status == EnvironmentDetectionStatus.DETECTED
+    assert resolution.environment.java_version == "21"
+    assert resolution.environment.fabric_api_version == "0.141.6+1.21.11"
+    assert any(item == "java_version=21 (verified source)" for item in resolution.evidence)
+
+
 def test_resolver_reports_unknown_when_minecraft_version_is_missing(tmp_path: Path) -> None:
     root = _make_unknown_environment_project(tmp_path / "unknown")
 

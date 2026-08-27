@@ -149,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", type=Path, default=None)
     parser.add_argument("--dataset-id", default=None)
     parser.add_argument("--dataset-version", default=None)
+    parser.add_argument("--task-id", default=None, help="Execute exactly one task from the selected dataset.")
+    parser.add_argument("--task-version", default=None, help="Version paired with --task-id.")
     parser.add_argument("--configs-json", type=Path, default=None)
     parser.add_argument("--execution-root", type=Path, default=None)
     parser.add_argument("--gradle-seed-root", type=Path, default=None)
@@ -239,14 +241,18 @@ def main(argv: list[str] | None = None) -> int:
             pd_agent_commit=args.pd_agent_commit,
         )
     else:
-        batch = runner.run(
-            catalog,
-            dataset_id=args.dataset_id,
-            dataset_version=args.dataset_version,
-            configs=configs,
-            execution_root=execution_root,
-            pd_agent_commit=args.pd_agent_commit,
-        )
+        run_kwargs = {
+            "dataset_id": args.dataset_id,
+            "dataset_version": args.dataset_version,
+            "configs": configs,
+            "execution_root": execution_root,
+            "pd_agent_commit": args.pd_agent_commit,
+        }
+        if args.task_id is not None or args.task_version is not None:
+            if args.task_id is None or args.task_version is None:
+                raise ValueError("--task-id and --task-version must be provided together")
+            run_kwargs.update({"task_id": args.task_id, "task_version": args.task_version})
+        batch = runner.run(catalog, **run_kwargs)
     print(batch.comparison_json_path)
     return 0
 

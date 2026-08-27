@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -231,6 +231,55 @@ def test_runner_pauses_economic_budget_block_before_recording_attempt(tmp_path: 
     assert batch.schedule.cells[0].valid == 0
     assert len(batch.schedule.cells[0].planned_attempts) == 1
     assert batch.runs == ()
+
+
+def test_runner_task_selection_creates_exactly_one_task_cell(tmp_path: Path) -> None:
+    task_one = _task()
+    task_two = replace(task_one, task_id="B002")
+    config = _config()
+    dataset = BenchmarkDataset(
+        dataset_id="ds-1",
+        dataset_version="1",
+        tasks=(
+            BenchmarkTaskReference(task_id="B001", task_version="1"),
+            BenchmarkTaskReference(task_id="B002", task_version="1"),
+        ),
+    )
+
+    class MultiCatalog:
+        fixture_paths = {
+            ("B001", "1"): Path("tests/fixtures/l11_fabric_fixture").resolve(),
+            ("B002", "1"): Path("tests/fixtures/l11_fabric_fixture").resolve(),
+        }
+
+        def dataset_for(self, dataset_id: str, dataset_version: str) -> BenchmarkDataset:
+            assert (dataset_id, dataset_version) == ("ds-1", "1")
+            return dataset
+
+        def task_for(self, task_id: str, task_version: str) -> BenchmarkTask:
+            assert task_version == "1"
+            return {"B001": task_one, "B002": task_two}[task_id]
+
+    batch = BenchmarkExecutionRunner(
+        executor=_FakeExecutor(task_two, config, first_execution_status=BenchmarkExecutionStatus.COMPLETED, first_task_outcome=BenchmarkTaskOutcome.PASS),
+        scheduler=BenchmarkScheduler(),
+        target_valid_repetitions=1,
+        max_attempts_per_cell=1,
+        scheduling_seed=1,
+    ).run(
+        MultiCatalog(),
+        dataset_id="ds-1",
+        dataset_version="1",
+        configs=(config,),
+        execution_root=tmp_path / "executions",
+        task_id="B002",
+        task_version="1",
+    )
+
+    assert tuple((ref.task_id, ref.task_version) for ref in batch.manifest.dataset_tasks) == (("B002", "1"),)
+    assert tuple((cell.task_id, cell.task_version) for cell in batch.schedule.cells) == (("B002", "1"),)
+    assert len(batch.runs) == 1
+    assert batch.runs[0].task_id == "B002"
 
 
 def test_runner_resume_reuses_pending_attempt_after_economic_pause(tmp_path: Path) -> None:
