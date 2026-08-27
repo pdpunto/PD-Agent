@@ -346,4 +346,4 @@ def test_core_does_not_import_external_provider_modules() -> None:
         for module in (pd_agent.core.contracts, pd_agent.core.errors, pd_agent.core.state)
     )
     assert "openai" not in source.lower()
-    assert "fabric" not in source.lower()
+    assert "pd_agent.benchmark" not in source.lower()

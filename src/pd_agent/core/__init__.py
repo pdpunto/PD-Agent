@@ -21,6 +21,12 @@ from .contracts import (
     ValidationStage,
     ValidationStatus,
     ValidationViolation,
+    FabricEnvironmentConstraints,
+    FabricKnowledgeSignal,
+    FabricMutationExpectation,
+    FabricRequirement,
+    FabricTaskContract,
+    FabricValidationRequirement,
 )
 from .errors import (
     ArtifactValidationError,
@@ -73,5 +79,11 @@ __all__ = [
     "ValidationStage",
     "ValidationStatus",
     "ValidationViolation",
+    "FabricEnvironmentConstraints",
+    "FabricKnowledgeSignal",
+    "FabricMutationExpectation",
+    "FabricRequirement",
+    "FabricTaskContract",
+    "FabricValidationRequirement",
     "generate_run_id",
 ]
