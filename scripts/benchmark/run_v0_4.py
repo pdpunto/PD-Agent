@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pd_agent import ArtifactValidator, GradleBuildRunner, YarnKnowledgeSource
+from pd_agent import ArtifactValidator, GradleBuildRunner
 from pd_agent.benchmark import (
     BenchmarkCatalog,
     BenchmarkConfig,
@@ -20,6 +20,7 @@ from pd_agent.benchmark import (
 from pd_agent.minecraft import MinecraftTestRunner
 from pd_agent.providers import GeminiProvider, OpenAIProvider
 from pd_agent.experimental import LunaBudgetGuard, LunaSharedBudgetSession
+from pd_agent.brain import FrozenKnowledgePackSource, load_frozen_knowledge_pack, YarnKnowledgeSource
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 
 
@@ -122,8 +123,22 @@ def _wrap_provider_for_benchmark(provider: Any, pacer: BenchmarkRequestPacer) ->
     return BenchmarkPacedProvider(provider=provider, pacer=pacer)
 
 
-def _build_knowledge_source(configs: tuple[BenchmarkConfig, ...]) -> YarnKnowledgeSource | None:
-    if any(config.brain_enabled for config in configs):
+def _build_knowledge_source(
+    configs: tuple[BenchmarkConfig, ...], *, frozen_pack_path: Path | None = None
+) -> Any | None:
+    brain_config = next((config for config in configs if config.brain_enabled), None)
+    if brain_config is not None:
+        knowledge_config = brain_config.knowledge_config
+        configured_path = knowledge_config.get("frozen_pack_path")
+        pack_path = frozen_pack_path or (Path(configured_path) if configured_path else None)
+        requires_frozen = bool(knowledge_config.get("frozen_pack_required", False))
+        if pack_path is not None:
+            expected_pack_id = knowledge_config.get("frozen_pack_id")
+            return FrozenKnowledgePackSource(
+                load_frozen_knowledge_pack(pack_path, expected_pack_id=expected_pack_id)
+            )
+        if requires_frozen:
+            raise ValueError("frozen knowledge pack is required for Brain ON")
         return YarnKnowledgeSource()
     return None
 
@@ -148,6 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Persist one I16 economic ceiling shared by separate executions",
     )
+    parser.add_argument("--frozen-knowledge-pack", type=Path, default=None)
     return parser
 
 
@@ -194,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     if shared_guard is not None:
         provider = _build_provider(canonical_config, budget_guard=shared_guard)
     provider = _wrap_provider_for_benchmark(provider, _build_request_pacer())
-    knowledge_source = _build_knowledge_source(configs)
+    knowledge_source = _build_knowledge_source(configs, frozen_pack_path=args.frozen_knowledge_pack)
     repo_root = Path(__file__).resolve().parents[2]
     minecraft_runner = MinecraftTestRunner(
         project_root=execution_root,

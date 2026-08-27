@@ -47,6 +47,14 @@ from .canonical import (
 )
 from .precode import FirstEditTracker, PreCodeDerivation, PreCodeKnowledgeNeedDeriver, PreCodePhase
 from .semantic_repair import SemanticRepairDerivation, SemanticRepairKnowledgeNeedDeriver
+from .frozen import (
+    EXPECTED_FROZEN_SOURCE_IDS,
+    FROZEN_PACK_REVISION,
+    FrozenKnowledgePackSource,
+    compose_frozen_knowledge_pack,
+    load_frozen_knowledge_pack,
+    materialize_frozen_knowledge_pack,
+)
 
 __all__ = [
     "CompatibilityStatus",
@@ -96,4 +104,10 @@ __all__ = [
     "PreCodePhase",
     "SemanticRepairDerivation",
     "SemanticRepairKnowledgeNeedDeriver",
+    "FROZEN_PACK_REVISION",
+    "EXPECTED_FROZEN_SOURCE_IDS",
+    "FrozenKnowledgePackSource",
+    "compose_frozen_knowledge_pack",
+    "load_frozen_knowledge_pack",
+    "materialize_frozen_knowledge_pack",
 ]
