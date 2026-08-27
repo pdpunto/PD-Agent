@@ -17,6 +17,7 @@ from pd_agent.brain.models import (
     KnowledgeRetrievalStatus,
     SourceAuthority,
 )
+from pd_agent.brain.retrieval import RankedKnowledgeRetrievalResult
 from pd_agent.core import ContextSource
 
 from .models import ContextItem, ContextRequest
@@ -59,7 +60,7 @@ def _relevance_score(item: KnowledgeItem) -> int:
     return 0
 
 
-def _context_text(result: KnowledgeRetrievalResult, item: KnowledgeItem) -> str:
+def _context_text(result: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult, item: KnowledgeItem) -> str:
     symbol = item.content.get("symbol") if isinstance(item.content, Mapping) else None
     lines = [
         "retrieved external knowledge",
@@ -223,7 +224,7 @@ class KnowledgeTrace:
 class SelectedKnowledge:
     """Selected knowledge after ranking and budget."""
 
-    retrieval_result: KnowledgeRetrievalResult
+    retrieval_result: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult
     selected_items: tuple[KnowledgeItem, ...]
     rejected_items: tuple[KnowledgeRejection, ...]
     trace: KnowledgeTrace
@@ -255,7 +256,7 @@ class KnowledgeSelector:
 
     def select(
         self,
-        result: KnowledgeRetrievalResult,
+        result: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult,
         *,
         budget_bytes: int,
         run_id: str | None = None,
@@ -292,15 +293,28 @@ class KnowledgeSelector:
                 ),
             )
 
-        deduped, rejected = self._dedupe(result.items)
-        ordered = sorted(
-            deduped,
-            key=lambda item: (
-                _AUTHORITY_ORDER.get(item.authority, 99),
-                -_relevance_score(item),
-                item.id,
-            ),
-        )
+        if isinstance(result, RankedKnowledgeRetrievalResult):
+            ordered = []
+            rejected = []
+            for candidate in result.candidates:
+                if candidate.conflict_ids:
+                    rejected.append(KnowledgeRejection(
+                        item_id=candidate.item.id,
+                        reason="UNRESOLVED_CONFLICT",
+                        authority=candidate.item.authority,
+                    ))
+                else:
+                    ordered.append(candidate.item)
+        else:
+            deduped, rejected = self._dedupe(result.items)
+            ordered = sorted(
+                deduped,
+                key=lambda item: (
+                    _AUTHORITY_ORDER.get(item.authority, 99),
+                    -_relevance_score(item),
+                    item.id,
+                ),
+            )
         selected: list[KnowledgeItem] = []
         selected_ids: list[str] = []
         context_ids: list[str] = []
@@ -378,7 +392,7 @@ class KnowledgeSelector:
                 source_kind="unknown",
                 status=result.status,
                 retrieved_item_ids=tuple(item.id for item in result.items),
-                error=result.error,
+                error=getattr(result, "error", None),
             ),
         )
 
@@ -410,7 +424,7 @@ class KnowledgeContextSource:
         raw_inputs = tuple(
             item
             for item in request.external_context
-            if isinstance(item, (KnowledgeRetrievalResult, SelectedKnowledge))
+            if isinstance(item, (KnowledgeRetrievalResult, RankedKnowledgeRetrievalResult, SelectedKnowledge))
         )
         if not raw_inputs:
             self.last_traces = ()
@@ -433,17 +447,29 @@ class KnowledgeContextSource:
                     budget_bytes=remaining_budget,
                     run_id=request.run_state.run_id if request.run_state is not None else None,
             )
-            traces.append(selected.trace)
-            for item in selected.selected_items:
+            injected_ids: list[str] = []
+            for item in selected.selected_items[:self.max_items]:
                 context_item = self._to_context_item(selected.retrieval_result, item, context_index)
                 context_index += 1
                 items.append(context_item)
+                injected_ids.append(item.id)
                 remaining_budget = max(0, remaining_budget - len(context_item.render().encode("utf-8")))
+            trace = selected.trace
+            if tuple(injected_ids) != trace.context_item_ids:
+                trace = KnowledgeTrace(
+                    run_id=trace.run_id, environment=trace.environment, needs=trace.needs,
+                    source_attempts=trace.source_attempts, retrieved_item_ids=trace.retrieved_item_ids,
+                    rejected_items=trace.rejected_items, selected_item_ids=trace.selected_item_ids,
+                    context_item_ids=tuple(injected_ids), misses=trace.misses,
+                    started_at=trace.started_at, finished_at=datetime.now(timezone.utc),
+                )
+            traces.append(trace)
 
         self.last_traces = tuple(traces)
         return tuple(items)
 
-    def _to_context_item(self, result: KnowledgeRetrievalResult, item: KnowledgeItem, index: int) -> ContextItem:
+    def _to_context_item(self, result: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult,
+                         item: KnowledgeItem, index: int) -> ContextItem:
         content = _context_text(result, item)
         metadata = {
             "knowledge_item_id": item.id,
