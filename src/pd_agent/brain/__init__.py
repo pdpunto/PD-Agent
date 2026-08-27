@@ -47,6 +47,7 @@ from .canonical import (
 )
 from .precode import FirstEditTracker, PreCodeDerivation, PreCodeKnowledgeNeedDeriver, PreCodePhase
 from .semantic_repair import SemanticRepairDerivation, SemanticRepairKnowledgeNeedDeriver
+from .orchestration import BrainOrchestrationResult, BrainTrigger, FabricBrainOrchestrator
 from .frozen import (
     EXPECTED_FROZEN_SOURCE_IDS,
     FROZEN_PACK_REVISION,
@@ -104,6 +105,9 @@ __all__ = [
     "PreCodePhase",
     "SemanticRepairDerivation",
     "SemanticRepairKnowledgeNeedDeriver",
+    "BrainOrchestrationResult",
+    "BrainTrigger",
+    "FabricBrainOrchestrator",
     "FROZEN_PACK_REVISION",
     "EXPECTED_FROZEN_SOURCE_IDS",
     "FrozenKnowledgePackSource",
