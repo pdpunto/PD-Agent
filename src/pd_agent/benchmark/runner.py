@@ -156,6 +156,8 @@ class BenchmarkExecutionManifest:
     economic_schema_version: int | None = None
     global_economic_ceiling_usd: str | None = None
     attempt_economic_ceiling_usd: str | None = None
+    shared_economic_session_id: str | None = None
+    shared_economic_state_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -173,6 +175,8 @@ class BenchmarkExecutionManifest:
             "economic_schema_version": self.economic_schema_version,
             "global_economic_ceiling_usd": self.global_economic_ceiling_usd,
             "attempt_economic_ceiling_usd": self.attempt_economic_ceiling_usd,
+            "shared_economic_session_id": self.shared_economic_session_id,
+            "shared_economic_state_path": self.shared_economic_state_path,
         }
 
     @classmethod
@@ -193,6 +197,8 @@ class BenchmarkExecutionManifest:
             economic_schema_version=(int(data["economic_schema_version"]) if data.get("economic_schema_version") is not None else None),
             global_economic_ceiling_usd=data.get("global_economic_ceiling_usd"),
             attempt_economic_ceiling_usd=data.get("attempt_economic_ceiling_usd"),
+            shared_economic_session_id=data.get("shared_economic_session_id"),
+            shared_economic_state_path=data.get("shared_economic_state_path"),
         )
 
 
@@ -258,13 +264,20 @@ class BenchmarkExecutionRunner:
             raise BenchmarkExecutionResumeError("execution identity mismatch during reconstruction", code="RECONSTRUCTION_DRIFT")
         if manifest.economic_schema_version is None:
             return BenchmarkRecoveryReconstruction(execution_state=execution_state, economic_state=None, legacy=True)
+        manifest_economic_path = (
+            Path(manifest.shared_economic_state_path)
+            if manifest.shared_economic_state_path
+            else economic_path
+        )
         try:
-            economic_store = LunaEconomicStateStore.load(economic_path)
+            economic_store = LunaEconomicStateStore.load(manifest_economic_path)
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
             raise BenchmarkExecutionResumeError("malformed durable economic state", code="RECONSTRUCTION_ECONOMIC_STATE") from exc
         economic = economic_store.state
-        if economic.execution_id != manifest.execution_id:
+        if manifest.shared_economic_session_id is None and economic.execution_id != manifest.execution_id:
             raise BenchmarkExecutionResumeError("economic execution identity mismatch", code="RECONSTRUCTION_DRIFT")
+        if manifest.shared_economic_session_id is not None and economic.execution_id != manifest.shared_economic_session_id:
+            raise BenchmarkExecutionResumeError("shared economic session identity mismatch", code="RECONSTRUCTION_DRIFT")
         records = {}
         for physical_id, raw in economic.dispatch_records.items():
             try:
@@ -333,6 +346,11 @@ class BenchmarkExecutionRunner:
         guard = self._budget_guard()
         if guard is None:
             return None
+        if guard.shared_session_id is not None:
+            if guard.state.execution_id != guard.shared_session_id:
+                raise ValueError("shared economic session identity mismatch")
+            guard.state_store.persist()
+            return guard
         guard.state.execution_id = execution_id
         guard.state_store = LunaEconomicStateStore(guard.state, path=execution_dir / "economic-state.json")
         guard.state_store.persist()
@@ -342,7 +360,11 @@ class BenchmarkExecutionRunner:
         guard = self._budget_guard()
         if guard is None:
             return None
-        economic_path = execution_dir / "economic-state.json"
+        economic_path = (
+            Path(guard.state_store.path)
+            if guard.shared_session_id is not None and guard.state_store.path is not None
+            else execution_dir / "economic-state.json"
+        )
         if not economic_path.exists():
             raise BenchmarkExecutionResumeError("missing dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA")
         try:
@@ -350,7 +372,8 @@ class BenchmarkExecutionRunner:
         except (OSError, ValueError, TypeError) as exc:
             raise BenchmarkExecutionResumeError("incompatible dual-budget economic state", code="RESUME_ECONOMIC_SCHEMA") from exc
         if store.state.execution_id != execution_id:
-            raise BenchmarkExecutionResumeError("economic execution identity drift detected", code="RESUME_DRIFT")
+            if guard.shared_session_id is None or store.state.execution_id != guard.shared_session_id:
+                raise BenchmarkExecutionResumeError("economic execution identity drift detected", code="RESUME_DRIFT")
         if store.state.reconciliation_state != "CLEAR" and not self._has_modern_recovery_evidence(store.state):
             raise BenchmarkExecutionResumeError(
                 "economic state contains unreconciled post-dispatch consumption",
@@ -381,7 +404,13 @@ class BenchmarkExecutionRunner:
 
     def _economic_state_payload(self) -> Mapping[str, Any] | None:
         guard = self._budget_guard()
-        return guard.state.to_dict() if guard is not None else None
+        if guard is None:
+            return None
+        payload = guard.state.to_dict()
+        if guard.shared_session_id is not None:
+            payload["shared_session_id"] = guard.shared_session_id
+            payload["shared_consumer_id"] = guard.shared_consumer_id
+        return payload
 
     def _pending_recovery_record(
         self,
@@ -626,8 +655,19 @@ class BenchmarkExecutionRunner:
             scheduling_seed=self.scheduling_seed,
             pd_agent_commit=pd_agent_commit,
             economic_schema_version=LUNA_ECONOMIC_SCHEMA_VERSION if economic_guard is not None else None,
-            global_economic_ceiling_usd=str(LUNA_EXPERIMENTAL_HARD_BUDGET_USD) if economic_guard is not None else None,
+            global_economic_ceiling_usd=(
+                str(economic_guard.state.global_ceiling_usd) if economic_guard is not None else None
+            ),
             attempt_economic_ceiling_usd=str(LUNA_PER_ATTEMPT_HARD_BUDGET_USD) if economic_guard is not None else None,
+            shared_economic_session_id=(economic_guard.shared_session_id if economic_guard is not None else None),
+            shared_economic_state_path=(
+                str(economic_guard.state_store.path)
+                if economic_guard is not None
+                and economic_guard.shared_session_id is not None
+                and economic_guard.state_store is not None
+                and economic_guard.state_store.path is not None
+                else None
+            ),
         )
         manifest_path = _write_json(execution_dir / "manifest.json", manifest.to_dict())
 

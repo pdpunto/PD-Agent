@@ -17,6 +17,7 @@ from pd_agent.core.errors import ProviderError
 
 LUNA_EXPERIMENTAL_HARD_BUDGET_USD = Decimal("1.00")
 LUNA_PER_ATTEMPT_HARD_BUDGET_USD = Decimal("0.10")
+I16_SHARED_GLOBAL_CEILING_USD = Decimal("0.25")
 LUNA_ECONOMIC_SCHEMA_VERSION = 2
 RESERVED = "RESERVED"
 ACCOUNTED = "ACCOUNTED"
@@ -432,6 +433,69 @@ class LunaEconomicStateStore:
 
 
 @dataclass(slots=True)
+class LunaSharedBudgetSession:
+    """One durable economic authority shared by separate ON/OFF executions."""
+
+    session_id: str
+    state: LunaEconomicState
+    store: LunaEconomicStateStore
+    ceiling_usd: Decimal = I16_SHARED_GLOBAL_CEILING_USD
+
+    def __post_init__(self) -> None:
+        self.ceiling_usd = _decimal(self.ceiling_usd, field_name="ceiling_usd")
+        if self.ceiling_usd != I16_SHARED_GLOBAL_CEILING_USD:
+            raise ValueError("I16 shared ceiling must be exactly 0.25 USD")
+        if self.state.execution_id != self.session_id:
+            raise ValueError("shared economic session identity mismatch")
+        if self.state.global_ceiling_usd != self.ceiling_usd:
+            raise ValueError("shared economic ceiling mismatch")
+        if self.store.state is not self.state:
+            raise ValueError("shared economic store must own the session state")
+
+    @property
+    def path(self) -> Path | None:
+        return self.store.path
+
+    @classmethod
+    def create(cls, path: Path, *, session_id: str | None = None) -> "LunaSharedBudgetSession":
+        if Path(path).exists():
+            raise FileExistsError(f"shared economic state already exists: {path}")
+        identifier = str(session_id or f"shared-{uuid4()}").strip()
+        state = LunaEconomicState(
+            execution_id=identifier,
+            global_ceiling_usd=I16_SHARED_GLOBAL_CEILING_USD,
+        )
+        store = LunaEconomicStateStore(state, path=Path(path))
+        session = cls(identifier, state, store)
+        store.persist()
+        return session
+
+    @classmethod
+    def load(cls, path: Path) -> "LunaSharedBudgetSession":
+        store = LunaEconomicStateStore.load(Path(path))
+        state = store.state
+        return cls(state.execution_id, state, store)
+
+    @classmethod
+    def open_or_create(cls, path: Path) -> "LunaSharedBudgetSession":
+        return cls.load(path) if Path(path).exists() else cls.create(path)
+
+    def guard(self, *, consumer_id: str) -> "LunaBudgetGuard":
+        consumer_id = str(consumer_id).strip()
+        if not consumer_id:
+            raise ValueError("consumer_id must not be empty")
+        return LunaBudgetGuard(
+            hard_budget_usd=self.ceiling_usd,
+            state=self.state,
+            state_store=self.store,
+            experimental=False,
+            non_official=False,
+            shared_session_id=self.session_id,
+            shared_consumer_id=consumer_id,
+        )
+
+
+@dataclass(slots=True)
 class LunaBudgetGuard:
     """Fail-closed dual-ceiling guard for every physical Luna request."""
 
@@ -445,6 +509,8 @@ class LunaBudgetGuard:
     last_decision: str | None = None
     abort_reason: str | None = None
     response_records: list[dict[str, Any]] = field(default_factory=list)
+    shared_session_id: str | None = None
+    shared_consumer_id: str | None = None
 
     def __post_init__(self) -> None:
         self.hard_budget_usd = _decimal(self.hard_budget_usd, field_name="hard_budget_usd")
@@ -456,6 +522,14 @@ class LunaBudgetGuard:
             self.state = self.state_store.state
         if self.state.global_ceiling_usd != self.hard_budget_usd:
             raise ValueError("state global ceiling does not match hard_budget_usd")
+        if self.shared_session_id is not None:
+            self.shared_session_id = str(self.shared_session_id).strip()
+            if not self.shared_session_id:
+                raise ValueError("shared_session_id must not be empty")
+        if self.shared_consumer_id is not None:
+            self.shared_consumer_id = str(self.shared_consumer_id).strip()
+            if not self.shared_consumer_id:
+                raise ValueError("shared_consumer_id must not be empty")
 
     @property
     def attempt_budget_usd(self) -> Decimal:
@@ -565,6 +639,8 @@ class LunaBudgetGuard:
             "retry_ordinal": retry_count,
             "reservation_usd": str(reserve),
         }
+        if self.shared_consumer_id is not None:
+            self.state.ledger[request_id]["consumer_id"] = self.shared_consumer_id
         self.state.pending_request_id = request_id
         self.state.attempt_reserved_usd += reserve
         self.state.global_reserved_usd += reserve
@@ -588,6 +664,8 @@ class LunaBudgetGuard:
             "global_remaining_usd": str(self.state.global_remaining_usd),
             "remaining_budget_usd": _money(self.state.global_remaining_usd),
             "decision": self.last_decision,
+            "shared_session_id": self.shared_session_id,
+            "shared_consumer_id": self.shared_consumer_id,
         }
 
     def mark_dispatch_started(self, dispatch_record: DispatchRecord) -> None:
@@ -741,6 +819,8 @@ class LunaBudgetGuard:
             "global_remaining_usd": str(self.state.global_remaining_usd),
             "remaining_budget_usd": _money(self.state.global_remaining_usd),
         }
+        if self.shared_consumer_id is not None:
+            record["consumer_id"] = self.shared_consumer_id
         entry["status"] = ACCOUNTED
         entry["actual_billed_cost_usd"] = str(derived)
         entry["conservative_budget_consumed_usd"] = str(reservation)
@@ -809,6 +889,12 @@ class LunaBudgetGuard:
             for entry in self.state.ledger.values()
             if entry.get("status") == "ACCOUNTED" and isinstance(entry.get("settlement"), Mapping)
         ]
+        consumer_totals: dict[str, Decimal] = {}
+        for entry in self.state.ledger.values():
+            consumer_id = entry.get("consumer_id")
+            consumed = entry.get("conservative_budget_consumed_usd")
+            if consumer_id is not None and consumed is not None:
+                consumer_totals[str(consumer_id)] = consumer_totals.get(str(consumer_id), Decimal("0")) + Decimal(str(consumed))
         return {
             "experimental": self.experimental,
             "non_official": self.non_official,
@@ -839,6 +925,11 @@ class LunaBudgetGuard:
             "economic_settlement_count": len(settlements),
             "economic_settlements": settlements,
             "dispatch_records": [dict(record) for record in self.state.dispatch_records.values()],
+            "shared_session_id": self.shared_session_id,
+            "shared_consumer_id": self.shared_consumer_id,
+            "shared_consumption_by_consumer": {
+                consumer: _money(amount) for consumer, amount in sorted(consumer_totals.items())
+            },
         }
 
     def _persist(self) -> None:

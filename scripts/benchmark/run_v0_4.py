@@ -19,7 +19,7 @@ from pd_agent.benchmark import (
 )
 from pd_agent.minecraft import MinecraftTestRunner
 from pd_agent.providers import GeminiProvider, OpenAIProvider
-from pd_agent.experimental import LunaBudgetGuard
+from pd_agent.experimental import LunaBudgetGuard, LunaSharedBudgetSession
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 
 
@@ -68,7 +68,7 @@ def _provider_setting(source: dict[str, str], key: str, fallback: Any) -> Any:
     return value
 
 
-def _build_provider(config: BenchmarkConfig) -> Any:
+def _build_provider(config: BenchmarkConfig, *, budget_guard: LunaBudgetGuard | None = None) -> Any:
     env = os.environ
     provider_name = env.get("PD_AGENT_PROVIDER", config.provider).strip().lower()
     model = env.get("PD_AGENT_MODEL", config.model).strip()
@@ -106,7 +106,7 @@ def _build_provider(config: BenchmarkConfig) -> Any:
             api_key=api_key,
             timeout_seconds=timeout_seconds,
             provider_retry_limit=retry_limit,
-            budget_guard=LunaBudgetGuard(experimental=False, non_official=False),
+            budget_guard=budget_guard or LunaBudgetGuard(experimental=False, non_official=False),
         )
     raise ValueError(f"unsupported provider: {provider_name}")
 
@@ -142,6 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-valid-repetitions", type=int, default=3)
     parser.add_argument("--max-attempts-per-cell", type=int, default=5)
     parser.add_argument("--scheduling-seed", type=int, default=None)
+    parser.add_argument(
+        "--shared-economic-state",
+        type=Path,
+        default=None,
+        help="Persist one I16 economic ceiling shared by separate executions",
+    )
     return parser
 
 
@@ -172,7 +178,22 @@ def main(argv: list[str] | None = None) -> int:
             offline=True,
         )
 
-    provider = _wrap_provider_for_benchmark(_build_provider(canonical_config), _build_request_pacer())
+    shared_session = (
+        LunaSharedBudgetSession.open_or_create(args.shared_economic_state)
+        if args.shared_economic_state is not None
+        else None
+    )
+    if shared_session is not None and canonical_config.provider.casefold() != "openai":
+        raise ValueError("--shared-economic-state is supported only for OpenAI I16 runs")
+    shared_guard = (
+        shared_session.guard(consumer_id=canonical_config.config_id)
+        if shared_session is not None
+        else None
+    )
+    provider = _build_provider(canonical_config)
+    if shared_guard is not None:
+        provider = _build_provider(canonical_config, budget_guard=shared_guard)
+    provider = _wrap_provider_for_benchmark(provider, _build_request_pacer())
     knowledge_source = _build_knowledge_source(configs)
     repo_root = Path(__file__).resolve().parents[2]
     minecraft_runner = MinecraftTestRunner(
