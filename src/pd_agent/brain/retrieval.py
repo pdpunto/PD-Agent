@@ -384,6 +384,7 @@ class KnowledgeService:
         attempts: list[KnowledgeSourceResult] = []
         items: list[KnowledgeItem] = []
         cache_hit = False
+        unauthorized_seen = False
 
         for source in self.sources:
             source_id = source.source_id
@@ -438,10 +439,16 @@ class KnowledgeService:
                 continue
             attempts.append(replace(result, compatibility=compatibility, supported=True, eligible=True))
             if result.status == KnowledgeRetrievalStatus.SUCCESS:
-                items.extend(item for item in result.items if self._is_authorized(item))
+                authorized = tuple(item for item in result.items if self._is_authorized(item))
+                unauthorized_seen = unauthorized_seen or len(authorized) != len(result.items)
+                items.extend(authorized)
 
         deduplicated = self._deduplicate(items)
-        status = KnowledgeRetrievalStatus.SUCCESS if deduplicated else self._aggregate_status(attempts)
+        status = (
+            KnowledgeRetrievalStatus.PROVENANCE_INVALID
+            if unauthorized_seen and not deduplicated
+            else KnowledgeRetrievalStatus.SUCCESS if deduplicated else self._aggregate_status(attempts)
+        )
         error = "; ".join(item.error for item in attempts if item.error) or None
         return KnowledgeRetrievalResult(status=status, need=need, items=deduplicated,
                                         source_results=tuple(attempts), cache_hit=cache_hit,
