@@ -1,6 +1,6 @@
 # PD Agent - Roadmap
 
-Status: Updated after v0.5 final closure.
+Status: Updated after v0.7 final closure.
 
 ## Confirmed Milestones
 
@@ -11,6 +11,31 @@ Status: Updated after v0.5 final closure.
 5. `v0.4` - Benchmark Foundation - completed
 6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
 7. `v0.6` - Fabric Capability Expansion - closed / pass
+8. `v0.7` - Minecraft/Fabric Knowledge Foundation - closed / pass
+
+## v0.7 Closure
+
+`v0.7` is formally closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `42db50ca8f788dee4850c1c8e90917e6c3e37dcb`;
+- implementation status: `IMPLEMENTED + VALIDATED`;
+- Knowledge Pack: frozen, 104978 records;
+- final suite: `942 passed, 2 skipped`;
+- `compileJava --offline`: PASS;
+- `compileall`: PASS.
+
+The delivered scope includes the canonical KnowledgeRecord and KnowledgePack
+lifecycle, multi-source knowledge, Yarn/Fabric/Concept sources, SQLite FTS5
+indexing, compatibility hard gates, retrieval/ranking/selection/context
+injection, pre-code and semantic-repair knowledge needs, KnowledgeTrace,
+Brain OFF/degraded/security handling, and integrated Minecraft validation.
+The complete record is `docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md`.
+
+This closure records technical capability completeness and is separate from
+model/provider performance. No official v0.7 benchmark was required. Alpha is
+not declared, v0.8 has not started, and the next milestone remains pending a
+separate Direction decision.
 
 ## v0.6 Closure
 

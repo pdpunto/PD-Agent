@@ -1,6 +1,6 @@
 # PD Agent - Master Plan
 
-Status: v0.5 closed; later direction remains subject to separate authorization.
+Status: v0.7 closed; later direction remains subject to separate authorization.
 
 PD Agent is a small, provider-neutral Python runtime for safe, evidence-based coding and validation workflows.
 
@@ -36,6 +36,29 @@ The project remains:
 6. `v0.5` - Fabric Agent Capability Foundation - closed / pass
 7. `v0.6` - Fabric Capability Expansion - closed / pass
 8. Later expansions remain subject to separate evidence and authorization.
+
+## v0.7 Closure
+
+`PD Agent v0.7 - Minecraft/Fabric Knowledge Foundation` is closed as:
+
+- `CLOSED / PASS`;
+- technical closure baseline: `42db50ca8f788dee4850c1c8e90917e6c3e37dcb`;
+- implementation status: `IMPLEMENTED + VALIDATED`;
+- final suite: `942 passed, 2 skipped`;
+- `compileJava --offline`: PASS;
+- `compileall`: PASS;
+- `git diff --check`: PASS.
+
+The frozen Knowledge Pack is
+`9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1`, with
+104978 records and a derived SQLite FTS5 index. The complete scope and
+acceptance A-J evidence are recorded in
+`docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md`.
+
+The v0.7 closure concerns technical capability completeness, not model or
+provider performance. No official benchmark was required. Alpha is not
+declared, v0.8 has not started, and later work remains subject to a separate
+Direction decision.
 
 ## v0.6 Closure
 
