@@ -21,6 +21,7 @@ from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
 from .fabric_api import FabricApiKnowledgeSource
 from .concepts import CuratedConcept, FabricConceptPatternKnowledgeSource
+from .indexes import INDEX_SCHEMA_VERSION, KnowledgeIndexError, KnowledgeIndexMetadata, KnowledgePackIndex
 from .canonical import (
     KnowledgePack,
     KnowledgePackIntegrityError,
@@ -55,6 +56,10 @@ __all__ = [
     "FabricApiKnowledgeSource",
     "CuratedConcept",
     "FabricConceptPatternKnowledgeSource",
+    "INDEX_SCHEMA_VERSION",
+    "KnowledgeIndexError",
+    "KnowledgeIndexMetadata",
+    "KnowledgePackIndex",
     "KnowledgePackManifest",
     "KnowledgePack",
     "KnowledgePackIntegrityError",
