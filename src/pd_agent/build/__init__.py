@@ -10,13 +10,17 @@ from .normalization import (
     NormalizedBuildFailure,
     normalize_build_failure,
 )
+from .orchestration import BuildOrchestrationResult, BuildOrchestrationStatus, FabricBuildOrchestrator
 
 __all__ = [
     "BuildFailureCategory",
     "BuildFailureNormalizer",
+    "BuildOrchestrationResult",
+    "BuildOrchestrationStatus",
     "BuildInvocation",
     "FailureClassification",
     "GradleBuildRunner",
+    "FabricBuildOrchestrator",
     "NormalizedBuildFailure",
     "normalize_build_failure",
 ]
