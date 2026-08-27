@@ -51,6 +51,17 @@ from .progress import (
     PlanStepStatus,
     TaskProgressLedger,
 )
+from .currentness import (
+    ArtifactIdentity,
+    BuildAttemptIdentity,
+    EvidenceBinding,
+    RuntimeAttemptIdentity,
+    SourceRevision,
+    SOURCE_REVISION_ALGORITHM,
+    artifact_identity_from_result,
+    compute_source_revision,
+    validation_contract_revision,
+)
 from .state import ExecutionLimits, RunState, RunStatus, generate_run_id
 
 __all__ = [
@@ -89,6 +100,15 @@ __all__ = [
     "ToolResultStatus",
     "ToolValidationError",
     "TaskProgressLedger",
+    "ArtifactIdentity",
+    "BuildAttemptIdentity",
+    "EvidenceBinding",
+    "RuntimeAttemptIdentity",
+    "SourceRevision",
+    "SOURCE_REVISION_ALGORITHM",
+    "artifact_identity_from_result",
+    "compute_source_revision",
+    "validation_contract_revision",
     "ValidationResult",
     "ValidationStage",
     "ValidationStatus",

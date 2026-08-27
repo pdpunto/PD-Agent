@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 from .contracts import ArtifactResult, BuildResult, FabricTaskContract, ValidationResult
+from .currentness import ArtifactIdentity, BuildAttemptIdentity, EvidenceBinding, RuntimeAttemptIdentity, SourceRevision
 from .errors import LimitReachedError, RunStateError, StateTransitionError
 from .progress import ExecutionPlan, TaskProgressLedger
 
@@ -166,6 +167,11 @@ class RunState:
     task_contract: FabricTaskContract | None = None
     execution_plan: ExecutionPlan | None = None
     progress_ledger: TaskProgressLedger | None = None
+    source_revision: SourceRevision | None = None
+    build_identities: tuple[BuildAttemptIdentity, ...] = ()
+    artifact_identity: ArtifactIdentity | None = None
+    runtime_identities: tuple[RuntimeAttemptIdentity, ...] = ()
+    evidence_bindings: tuple[EvidenceBinding, ...] = ()
     changed_files: tuple[str, ...] = ()
     pending_mutation_targets: tuple[str, ...] = ()
     completed_mutation_targets: tuple[str, ...] = ()
@@ -297,6 +303,11 @@ class RunState:
             "task_contract": self.task_contract.to_dict() if self.task_contract is not None else None,
             "execution_plan": self.execution_plan.to_dict() if self.execution_plan is not None else None,
             "progress_ledger": self.progress_ledger.to_dict() if self.progress_ledger is not None else None,
+            "source_revision": self.source_revision.to_dict() if self.source_revision is not None else None,
+            "build_identities": [item.to_dict() for item in self.build_identities],
+            "artifact_identity": self.artifact_identity.to_dict() if self.artifact_identity is not None else None,
+            "runtime_identities": [item.to_dict() for item in self.runtime_identities],
+            "evidence_bindings": [item.to_dict() for item in self.evidence_bindings],
             "changed_files": list(self.changed_files),
             "pending_mutation_targets": list(self.pending_mutation_targets),
             "completed_mutation_targets": list(self.completed_mutation_targets),
@@ -337,6 +348,11 @@ class RunState:
             task_contract=(FabricTaskContract.from_dict(data["task_contract"]) if data.get("task_contract") is not None else None),
             execution_plan=(ExecutionPlan.from_dict(data["execution_plan"]) if data.get("execution_plan") is not None else None),
             progress_ledger=(TaskProgressLedger.from_dict(data["progress_ledger"]) if data.get("progress_ledger") is not None else None),
+            source_revision=(SourceRevision.from_dict(data["source_revision"]) if data.get("source_revision") is not None else None),
+            build_identities=tuple(BuildAttemptIdentity.from_dict(item) for item in data.get("build_identities", [])),
+            artifact_identity=(ArtifactIdentity.from_dict(data["artifact_identity"]) if data.get("artifact_identity") is not None else None),
+            runtime_identities=tuple(RuntimeAttemptIdentity.from_dict(item) for item in data.get("runtime_identities", [])),
+            evidence_bindings=tuple(EvidenceBinding.from_dict(item) for item in data.get("evidence_bindings", [])),
             changed_files=tuple(data.get("changed_files", ())),
             pending_mutation_targets=tuple(data.get("pending_mutation_targets", ())),
             completed_mutation_targets=tuple(data.get("completed_mutation_targets", ())),
