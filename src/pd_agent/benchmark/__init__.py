@@ -18,6 +18,11 @@ from .environment import (
     BenchmarkGradleSeedManifest,
 )
 from .executor import BenchmarkExecutionResult, BenchmarkExecutor
+from .fabric_adapter import (
+    BenchmarkFabricTaskAdapter,
+    BenchmarkFabricTaskAdapterError,
+    benchmark_task_to_fabric_contract,
+)
 from .experimental_ab import (
     CANONICAL_ORDER,
     ExperimentalABCell,
@@ -104,6 +109,9 @@ __all__ = [
     "BenchmarkExecutionResult",
     "BenchmarkExecutionRunner",
     "BenchmarkExecutor",
+    "BenchmarkFabricTaskAdapter",
+    "BenchmarkFabricTaskAdapterError",
+    "benchmark_task_to_fabric_contract",
     "CANONICAL_ORDER",
     "ExperimentalABCell",
     "ExperimentalABSchedule",

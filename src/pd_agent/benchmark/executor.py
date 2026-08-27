@@ -72,6 +72,7 @@ from .scheduler import BenchmarkScheduledAttempt
 from .workspace import BenchmarkWorkspace, BenchmarkWorkspaceError, compute_fixture_identity, prepare_workspace
 from .functional import BenchmarkFunctionalValidator
 from .public_validation import build_public_validation_contract
+from .fabric_adapter import BenchmarkFabricTaskAdapter
 from pd_agent.core import RunStatus
 from pd_agent.runtime import RunController
 from dataclasses import replace
@@ -409,6 +410,27 @@ class BenchmarkExecutor:
     gradle_environment: BenchmarkGradleEnvironment | None = None
     collector: BenchmarkCollector = field(default_factory=BenchmarkCollector)
     classifier: BenchmarkClassifier = field(default_factory=BenchmarkClassifier)
+
+    def execute_product_path(
+        self,
+        task: BenchmarkTask,
+        config: BenchmarkConfig,
+        *,
+        project_root: Path,
+        orchestrator: Any,
+    ) -> Any:
+        """Explicitly delegate one run to the normal product path.
+
+        Scheduling, repetitions, accounting and benchmark reporting remain in
+        the surrounding benchmark runner; this method only adapts the task.
+        """
+
+        return BenchmarkFabricTaskAdapter().execute_product(
+            task,
+            config,
+            project_root=project_root,
+            orchestrator=orchestrator,
+        )
 
     def execute(
         self,
