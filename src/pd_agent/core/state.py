@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import UUID, uuid4
 
-from .contracts import ArtifactResult, BuildResult, ValidationResult
+from .contracts import ArtifactResult, BuildResult, FabricTaskContract, ValidationResult
 from .errors import LimitReachedError, RunStateError, StateTransitionError
+from .progress import ExecutionPlan, TaskProgressLedger
 
 
 def generate_run_id() -> str:
@@ -162,6 +163,9 @@ class RunState:
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     project_snapshot: Mapping[str, Any] | None = None
     current_plan: str | None = None
+    task_contract: FabricTaskContract | None = None
+    execution_plan: ExecutionPlan | None = None
+    progress_ledger: TaskProgressLedger | None = None
     changed_files: tuple[str, ...] = ()
     pending_mutation_targets: tuple[str, ...] = ()
     completed_mutation_targets: tuple[str, ...] = ()
@@ -290,6 +294,9 @@ class RunState:
                 dict(self.project_snapshot) if self.project_snapshot is not None else None
             ),
             "current_plan": self.current_plan,
+            "task_contract": self.task_contract.to_dict() if self.task_contract is not None else None,
+            "execution_plan": self.execution_plan.to_dict() if self.execution_plan is not None else None,
+            "progress_ledger": self.progress_ledger.to_dict() if self.progress_ledger is not None else None,
             "changed_files": list(self.changed_files),
             "pending_mutation_targets": list(self.pending_mutation_targets),
             "completed_mutation_targets": list(self.completed_mutation_targets),
@@ -327,6 +334,9 @@ class RunState:
                 else None
             ),
             current_plan=data.get("current_plan"),
+            task_contract=(FabricTaskContract.from_dict(data["task_contract"]) if data.get("task_contract") is not None else None),
+            execution_plan=(ExecutionPlan.from_dict(data["execution_plan"]) if data.get("execution_plan") is not None else None),
+            progress_ledger=(TaskProgressLedger.from_dict(data["progress_ledger"]) if data.get("progress_ledger") is not None else None),
             changed_files=tuple(data.get("changed_files", ())),
             pending_mutation_targets=tuple(data.get("pending_mutation_targets", ())),
             completed_mutation_targets=tuple(data.get("completed_mutation_targets", ())),

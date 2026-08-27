@@ -43,6 +43,14 @@ from .errors import (
     ToolExecutionError,
     ToolValidationError,
 )
+from .progress import (
+    ExecutionPlan,
+    ExecutionPlanStep,
+    FailureFact,
+    FailureFactStatus,
+    PlanStepStatus,
+    TaskProgressLedger,
+)
 from .state import ExecutionLimits, RunState, RunStatus, generate_run_id
 
 __all__ = [
@@ -56,10 +64,15 @@ __all__ = [
     "ConfigurationError",
     "ContextSource",
     "ExecutionLimits",
+    "ExecutionPlan",
+    "ExecutionPlanStep",
     "FileExistsToolValidationError",
+    "FailureFact",
+    "FailureFactStatus",
     "LimitReachedError",
     "ModelProvider",
     "PDAgentError",
+    "PlanStepStatus",
     "ProjectInspectionError",
     "ProviderError",
     "ProviderContinuation",
@@ -75,6 +88,7 @@ __all__ = [
     "ToolResult",
     "ToolResultStatus",
     "ToolValidationError",
+    "TaskProgressLedger",
     "ValidationResult",
     "ValidationStage",
     "ValidationStatus",
