@@ -44,6 +44,7 @@ from .canonical import (
     KnowledgeRecord,
     normalize_logical_path,
 )
+from .precode import FirstEditTracker, PreCodeDerivation, PreCodeKnowledgeNeedDeriver, PreCodePhase
 
 __all__ = [
     "CompatibilityStatus",
@@ -86,4 +87,8 @@ __all__ = [
     "KnowledgePolicy",
     "KnowledgeRecord",
     "normalize_logical_path",
+    "FirstEditTracker",
+    "PreCodeDerivation",
+    "PreCodeKnowledgeNeedDeriver",
+    "PreCodePhase",
 ]

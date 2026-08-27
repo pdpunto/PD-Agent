@@ -12,7 +12,15 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from pd_agent.artifacts import ArtifactValidator
-from pd_agent.brain import FileKnowledgeCache, KnowledgeEnvironment, KnowledgeEnvironmentResolver, KnowledgeNeed, KnowledgeRetrievalResult, MinecraftBrain
+from pd_agent.brain import (
+    FileKnowledgeCache,
+    KnowledgeEnvironment,
+    KnowledgeEnvironmentResolver,
+    KnowledgeNeed,
+    KnowledgeRetrievalResult,
+    MinecraftBrain,
+    PreCodeKnowledgeNeedDeriver,
+)
 from pd_agent.brain.models import KnowledgeType
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager, ExternalContextSource, ProjectContextSource, RunContextSource
@@ -446,10 +454,19 @@ class BenchmarkExecutor:
             )
             resolved_environment = env_resolution.environment
 
-            requested_needs = tuple(knowledge_needs) if knowledge_needs is not None else _task_knowledge_needs(
-                task,
-                environment=resolved_environment,
-            )
+            if knowledge_needs is not None:
+                requested_needs = tuple(knowledge_needs)
+            else:
+                requested_needs = _task_knowledge_needs(task, environment=resolved_environment)
+                if not requested_needs and config.brain_enabled:
+                    spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
+                    signals = tuple(str(value) for value in task.tags)
+                    requested_needs = PreCodeKnowledgeNeedDeriver().derive(
+                        f"{task.description}\n{task.prompt}",
+                        resolved_environment,
+                        capability_signals=signals,
+                        metadata=spec,
+                    ).needs
             external_context: tuple[Any, ...] = ()
             if config.brain_enabled and requested_needs and self.knowledge_source is not None:
                 cache_root = execution_root / "brain-cache" / run_fragment
