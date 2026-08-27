@@ -544,6 +544,8 @@ class BenchmarkExecutor:
                     resource_roots=project_snapshot.resource_roots,
                 ),
                 functional_validator=functional_validator,
+                repair_knowledge_source=self.knowledge_source if config.brain_enabled else None,
+                repair_knowledge_environment=resolved_environment if config.brain_enabled else None,
             )
             run_kwargs = {
                 "external_context": external_context,

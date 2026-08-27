@@ -32,6 +32,8 @@ class RunController:
     model_config: Mapping[str, Any] | None = None
     pre_build_validator: PreBuildValidator | None = None
     functional_validator: FunctionalValidator | None = None
+    repair_knowledge_source: Any | None = None
+    repair_knowledge_environment: Any | None = None
 
     def __post_init__(self) -> None:
         if self.tool_executor is None:
@@ -70,6 +72,8 @@ class RunController:
             pre_build_validator=self.pre_build_validator,
             functional_validator=self.functional_validator,
             validation_contract=validation_contract,
+            repair_knowledge_source=self.repair_knowledge_source,
+            repair_knowledge_environment=self.repair_knowledge_environment,
         )
         run_state, report = runtime.run(
             run_state=run_state,

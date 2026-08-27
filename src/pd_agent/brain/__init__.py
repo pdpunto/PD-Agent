@@ -45,6 +45,7 @@ from .canonical import (
     normalize_logical_path,
 )
 from .precode import FirstEditTracker, PreCodeDerivation, PreCodeKnowledgeNeedDeriver, PreCodePhase
+from .semantic_repair import SemanticRepairDerivation, SemanticRepairKnowledgeNeedDeriver
 
 __all__ = [
     "CompatibilityStatus",
@@ -91,4 +92,6 @@ __all__ = [
     "PreCodeDerivation",
     "PreCodeKnowledgeNeedDeriver",
     "PreCodePhase",
+    "SemanticRepairDerivation",
+    "SemanticRepairKnowledgeNeedDeriver",
 ]

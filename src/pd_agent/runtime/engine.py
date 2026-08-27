@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextItem, ContextManager
+from pd_agent.brain import KnowledgeService, SemanticRepairKnowledgeNeedDeriver
 from pd_agent.core import (
     AgentMessage,
     AgentRequest,
@@ -122,6 +123,8 @@ class AgentRuntime:
         pre_build_validator: PreBuildValidator | None = None,
         functional_validator: FunctionalValidator | None = None,
         validation_contract: Any | None = None,
+        repair_knowledge_source: Any | None = None,
+        repair_knowledge_environment: Any | None = None,
     ) -> None:
         self.provider = provider
         self.tool_executor = tool_executor or ToolExecutor(tools=tuple(filesystem_tools) or create_filesystem_tools())
@@ -133,6 +136,11 @@ class AgentRuntime:
         self.pre_build_validator = pre_build_validator
         self.functional_validator = functional_validator
         self.validation_contract = validation_contract
+        self.repair_knowledge_source = repair_knowledge_source
+        self.repair_knowledge_environment = repair_knowledge_environment
+        self._repair_knowledge_deriver = SemanticRepairKnowledgeNeedDeriver()
+        self._repair_context: list[Any] = []
+        self._repair_cycle_keys: set[str] = set()
         self._telemetry = _LoopTelemetry()
         self._knowledge_trace_hashes: dict[str, set[str]] = {}
         self._knowledge_trace_refs: dict[str, list[str]] = {}
@@ -148,6 +156,8 @@ class AgentRuntime:
     ) -> tuple[RunState, FinalReport]:
         limits = limits or ExecutionLimits()
         self._telemetry = _LoopTelemetry()
+        self._repair_context = []
+        self._repair_cycle_keys = set()
         run_state.task = task
         run_state.project_snapshot = project_snapshot.to_dict()
         self._emit(run_state.run_id, RunEventType.STATE_CHANGED, {"state": run_state.state.value, "reason": "start"})
@@ -516,7 +526,8 @@ class AgentRuntime:
         bundle = self.context_manager.build_context(
             project_snapshot=project_snapshot,
             run_state=run_state,
-            external_context=(policy_context, *retained_evidence_context, *external_context),
+            external_context=(policy_context, *retained_evidence_context, *external_context,
+                              *self._repair_context),
             limits=limits,
         )
         self._persist_knowledge_traces(run_state.run_id)
@@ -880,6 +891,7 @@ class AgentRuntime:
             {"stage": result.stage.value, "signature": signature, "feedback": feedback},
         )
         history.append(AgentMessage(role="user", content=feedback))
+        self._prepare_repair_knowledge(result)
         self._telemetry.validation_repair_pending = True
         self._telemetry.validation_repair_mutated = False
         self._reset_action_pressure(run_state)
@@ -939,6 +951,7 @@ class AgentRuntime:
                     {"stage": staged_result.stage.value, "signature": signature, "feedback": feedback},
                 )
                 history.append(AgentMessage(role="user", content=feedback))
+                self._prepare_repair_knowledge(staged_result)
                 self._telemetry.validation_repair_pending = True
                 self._telemetry.validation_repair_mutated = False
                 self._reset_action_pressure(run_state)
@@ -952,6 +965,28 @@ class AgentRuntime:
         for violation in result.violations:
             lines.append(f"- {violation.requirement}: {violation.message}")
         return "\n".join(lines)
+
+    def _prepare_repair_knowledge(self, result: ValidationResult) -> None:
+        """Prepare bounded knowledge before the next repair provider turn."""
+        if self.repair_knowledge_source is None or self.repair_knowledge_environment is None:
+            return
+        if not result.violations:
+            return
+        violation = result.violations[0]
+        key = self._validation_signature(result)
+        if key in self._repair_cycle_keys:
+            return
+        self._repair_cycle_keys.add(key)
+        derivation = self._repair_knowledge_deriver.derive(
+            violation, self.repair_knowledge_environment
+        )
+        if not derivation.needs:
+            return
+        service = KnowledgeService((self.repair_knowledge_source,))
+        for need in derivation.needs:
+            retrieved = service.retrieve_ranked(need, offline=True)
+            if retrieved.items:
+                self._repair_context.append(retrieved)
 
     def _validation_feedback(self, result: ValidationResult) -> str:
         lines = ["Semantic validation failed before build:"]
