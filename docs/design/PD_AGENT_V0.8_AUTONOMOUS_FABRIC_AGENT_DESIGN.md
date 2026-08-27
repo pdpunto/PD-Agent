@@ -1,6 +1,6 @@
 # PD Agent v0.8 - Autonomous Fabric Agent Foundation
 
-Status: DESIGN READY FOR APPROVAL
+Status: DESIGN ACCEPTED
 Milestone: PD Agent v0.8 - Autonomous Fabric Agent Foundation
 Depends on: PD Agent v0.7 - Minecraft/Fabric Knowledge Foundation (`CLOSED / PASS`)
 
