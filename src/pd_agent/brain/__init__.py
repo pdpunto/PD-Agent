@@ -16,7 +16,7 @@ from .models import (
     KnowledgeType,
     SourceAuthority,
 )
-from .retrieval import FileKnowledgeCache, KnowledgeSource, MinecraftBrain
+from .retrieval import FileKnowledgeCache, KnowledgeService, KnowledgeSource, MinecraftBrain
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
 from .canonical import (
@@ -44,6 +44,7 @@ __all__ = [
     "KnowledgeRetrievalResult",
     "KnowledgeRetrievalStatus",
     "KnowledgeSource",
+    "KnowledgeService",
     "KnowledgeSourceResult",
     "KnowledgeType",
     "MinecraftBrain",

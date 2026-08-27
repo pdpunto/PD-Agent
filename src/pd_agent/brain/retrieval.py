@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 
@@ -251,3 +251,124 @@ class MinecraftBrain:
             seen.add(key)
             ordered.append(item)
         return tuple(ordered)
+
+
+@dataclass(slots=True)
+class KnowledgeService:
+    """Ordered, provider-agnostic aggregator for multiple knowledge sources."""
+
+    sources: tuple[KnowledgeSource, ...] = ()
+    cache: FileKnowledgeCache | None = None
+
+    def __post_init__(self) -> None:
+        self.sources = tuple(sorted(self.sources, key=lambda source: source.source_id))
+        source_ids = [source.source_id for source in self.sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("KnowledgeService source_id values must be unique")
+
+    def resolve(self, need: KnowledgeNeed, offline: bool = False) -> KnowledgeRetrievalResult:
+        attempts: list[KnowledgeSourceResult] = []
+        items: list[KnowledgeItem] = []
+        cache_hit = False
+
+        for source in self.sources:
+            source_id = source.source_id
+            source_kind = source.source_kind
+            try:
+                compatibility = source.compatibility(need.environment)
+            except Exception as exc:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.SOURCE_ERROR, eligible=False, error=str(exc)))
+                continue
+            if compatibility == CompatibilityStatus.INCOMPATIBLE:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.VERSION_MISMATCH,
+                                               compatibility=compatibility, eligible=False,
+                                               error="source environment incompatible"))
+                continue
+            if compatibility == CompatibilityStatus.UNKNOWN and need.version_sensitive:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE,
+                                               compatibility=compatibility, eligible=False,
+                                               error="version-sensitive knowledge requires known compatibility"))
+                continue
+            try:
+                supported = source.supports(need)
+            except Exception as exc:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.SOURCE_ERROR,
+                                               compatibility=compatibility, eligible=False, error=str(exc)))
+                continue
+            if not supported:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.UNSUPPORTED_NEED,
+                                               compatibility=compatibility, supported=False, eligible=False,
+                                               error="source does not support need"))
+                continue
+
+            cached = None
+            checksum = getattr(source, "artifact_checksum", None)
+            if self.cache is not None:
+                cached = self.cache.get(source_id=source_id, artifact_version=source.artifact_version,
+                                        checksum=checksum, need=need)
+            if cached is not None:
+                cache_hit = True
+                cached_attempt = next((item for item in cached.source_results if item.source_id == source_id), None)
+                if cached_attempt is not None:
+                    attempts.append(replace(cached_attempt, compatibility=compatibility, supported=True, eligible=True))
+                else:
+                    attempts.append(self._attempt(source, need, cached.status, compatibility=compatibility,
+                                                   supported=True, items=cached.items, eligible=True))
+                items.extend(cached.items)
+                continue
+            if offline:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.OFFLINE_MISS,
+                                               compatibility=compatibility, supported=True, eligible=True,
+                                               error="offline cache miss"))
+                continue
+            try:
+                result = source.resolve(need, offline=False)
+            except Exception as exc:
+                attempts.append(self._attempt(source, need, KnowledgeRetrievalStatus.SOURCE_ERROR,
+                                               compatibility=compatibility, supported=True, eligible=True, error=str(exc)))
+                continue
+            attempts.append(replace(result, compatibility=compatibility, supported=True, eligible=True))
+            if result.status == KnowledgeRetrievalStatus.SUCCESS:
+                items.extend(result.items)
+
+        deduplicated = self._deduplicate(items)
+        status = KnowledgeRetrievalStatus.SUCCESS if deduplicated else self._aggregate_status(attempts)
+        error = "; ".join(item.error for item in attempts if item.error) or None
+        return KnowledgeRetrievalResult(status=status, need=need, items=deduplicated,
+                                        source_results=tuple(attempts), cache_hit=cache_hit,
+                                        offline=offline, error=error)
+
+    def retrieve(self, need: KnowledgeNeed, offline: bool = False) -> KnowledgeRetrievalResult:
+        """Alias matching the historical MinecraftBrain API."""
+        return self.resolve(need, offline=offline)
+
+    @staticmethod
+    def _attempt(source: KnowledgeSource, need: KnowledgeNeed, status: KnowledgeRetrievalStatus,
+                 *, compatibility: CompatibilityStatus | None = None, supported: bool | None = None,
+                 eligible: bool, items: tuple[KnowledgeItem, ...] = (), error: str | None = None) -> KnowledgeSourceResult:
+        return KnowledgeSourceResult(status=status, source_id=source.source_id, source_kind=source.source_kind,
+                                     need=need, items=items, error=error, compatibility=compatibility,
+                                     supported=supported, eligible=eligible)
+
+    @staticmethod
+    def _aggregate_status(attempts: Sequence[KnowledgeSourceResult]) -> KnowledgeRetrievalStatus:
+        if not attempts:
+            return KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE
+        for status in (KnowledgeRetrievalStatus.SOURCE_ERROR, KnowledgeRetrievalStatus.SOURCE_UNAVAILABLE,
+                       KnowledgeRetrievalStatus.OFFLINE_MISS, KnowledgeRetrievalStatus.VERSION_MISMATCH,
+                       KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE, KnowledgeRetrievalStatus.UNSUPPORTED_NEED):
+            if any(item.status == status for item in attempts):
+                return status
+        return attempts[0].status
+
+    @staticmethod
+    def _deduplicate(items: Sequence[KnowledgeItem]) -> tuple[KnowledgeItem, ...]:
+        seen: set[str] = set()
+        result: list[KnowledgeItem] = []
+        for item in items:
+            identity = str(item.metadata.get("record_identity", item.id))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            result.append(item)
+        return tuple(result)

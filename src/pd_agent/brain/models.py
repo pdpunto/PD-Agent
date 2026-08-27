@@ -310,6 +310,9 @@ class KnowledgeSourceResult:
     provenance: tuple[KnowledgeProvenance, ...] = ()
     error: str | None = None
     cache_key: str | None = None
+    compatibility: CompatibilityStatus | None = None
+    supported: bool | None = None
+    eligible: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -321,6 +324,9 @@ class KnowledgeSourceResult:
             "provenance": [item.to_dict() for item in self.provenance],
             "error": self.error,
             "cache_key": self.cache_key,
+            "compatibility": self.compatibility.value if self.compatibility else None,
+            "supported": self.supported,
+            "eligible": self.eligible,
         }
 
     @classmethod
@@ -336,6 +342,9 @@ class KnowledgeSourceResult:
             ),
             error=data.get("error"),
             cache_key=data.get("cache_key"),
+            compatibility=CompatibilityStatus(str(data["compatibility"])) if data.get("compatibility") else None,
+            supported=bool(data["supported"]) if data.get("supported") is not None else None,
+            eligible=bool(data.get("eligible", True)),
         )
 
 
