@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Mapping
@@ -21,7 +21,7 @@ from pd_agent.core import (
     TaskProgressLedger,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
-from pd_agent.reporting import FinalReport, RunStorage
+from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.runtime import AgentRuntime
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 from pd_agent.validation import CompletionGate, CompletionResult
@@ -102,6 +102,16 @@ class FabricNormalOrchestrator:
         plan = self._plan(contract)
         ledger = TaskProgressLedger(contract_identity=contract.identity())
         state = RunState(project_root=Path(project_root), task=contract.task_id, task_contract=contract, execution_plan=plan, progress_ledger=ledger)
+        self._emit(state.run_id, RunEventType.CONTRACT_CREATED, {
+            "contract_identity": list(contract.identity()),
+            "requirement_ids": [item.requirement_id for item in contract.requirements],
+        })
+        self._emit(state.run_id, RunEventType.PLAN_CREATED, {
+            "contract_identity": list(contract.identity()),
+            "plan_id": plan.plan_id,
+            "plan_revision": plan.revision,
+            "requirement_ids": [item.requirement_id for item in contract.requirements],
+        })
         snapshot = self.project_inspector.inspect(Path(project_root))
         if snapshot.status != ProjectInspectionStatus.READY:
             state.state = RunStatus.INSPECTING
@@ -122,7 +132,95 @@ class FabricNormalOrchestrator:
         runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=self.functional_validator, validation_contract=self.validation_contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)
         completion = CompletionGate().evaluate(contract, state.progress_ledger, state)
+        self._emit_state_observations(state, contract, completion)
+        self._emit(state.run_id, RunEventType.COMPLETION_GATE_EVALUATED, {
+            "contract_identity": list(contract.identity()),
+            "status": completion.status.value,
+            "complete": completion.complete,
+            "pending_requirement_ids": list(completion.pending_requirement_ids),
+            "active_failure_ids": list(completion.active_failure_ids),
+            "missing_validation_ids": list(completion.missing_validation_requirement_ids),
+            "stale_validation_ids": list(completion.stale_validation_requirement_ids),
+            "blocking_refs": list(completion.invalid_blocking_validation_refs),
+            "current_evidence_refs": list(completion.current_evidence_refs),
+            "next_disposition": completion.next_disposition,
+            "reason": completion.reason,
+        })
+        report = replace(
+            report,
+            contract_identity=contract.identity(),
+            completion_status=completion.status.value,
+            pending_requirement_ids=completion.pending_requirement_ids,
+            active_failure_ids=completion.active_failure_ids,
+        )
+        if self.reporting is not None:
+            self.reporting.write_final_report(report)
         return self._result(state, contract, completion, report)
+
+    def _emit(self, run_id: str, event_type: RunEventType, payload: Mapping[str, Any]) -> None:
+        if self.reporting is not None:
+            self.reporting.append_event(RunEvent(run_id=run_id, event_type=event_type, payload=dict(payload)))
+
+    def _emit_state_observations(self, state: RunState, contract: FabricTaskContract, completion: CompletionResult) -> None:
+        """Persist bounded lifecycle facts; state machines remain elsewhere."""
+        ledger = state.progress_ledger
+        identity = list(contract.identity())
+        if ledger is not None:
+            for requirement_id in ledger.satisfied_requirement_ids:
+                self._emit(state.run_id, RunEventType.REQUIREMENT_RECONCILED, {
+                    "contract_identity": identity,
+                    "requirement_id": requirement_id,
+                    "status": "SATISFIED",
+                    "evidence_refs": list(ledger.evidence_by_requirement.get(requirement_id, ())),
+                })
+            for failure in ledger.failures:
+                event_type = (RunEventType.FAILURE_RESOLVED
+                              if failure.status.value == "RESOLVED"
+                              else RunEventType.FAILURE_ACTIVE)
+                self._emit(state.run_id, event_type, {
+                    "contract_identity": identity,
+                    "failure_id": failure.failure_id,
+                    "status": failure.status.value,
+                    "requirement_ids": list(failure.requirement_ids),
+                    "code": failure.code,
+                    "category": failure.category,
+                    "evidence_refs": list(failure.evidence_refs or failure.resolution_evidence_refs),
+                })
+        for build in state.build_identities:
+            self._emit(state.run_id, RunEventType.BUILD_ATTEMPT_RECORDED, {
+                "contract_identity": identity,
+                "build_attempt_id": build.build_attempt_id,
+                "source_revision": build.source_revision,
+                "success": build.success,
+                "result_ref": build.result_ref,
+            })
+        for runtime in state.runtime_identities:
+            self._emit(state.run_id, RunEventType.RUNTIME_VALIDATION_RECORDED, {
+                "contract_identity": identity,
+                "runtime_attempt_id": runtime.runtime_attempt_id,
+                "artifact_identity": runtime.artifact_identity,
+                "validation_revision": runtime.validation_revision,
+                "status": runtime.status,
+                "evidence_refs": list(runtime.result_refs),
+            })
+        if any(result.status.value == "REPAIRABLE_FAIL" for result in state.validation_results):
+            self._emit(state.run_id, RunEventType.REPAIR_ATTEMPT_RECORDED, {
+                "contract_identity": identity,
+                "status": "PENDING",
+                "validation_count": len(state.validation_results),
+            })
+        if state.artifact_result is not None:
+            self._emit(state.run_id, RunEventType.ARTIFACT_VALIDATED, {
+                "contract_identity": identity,
+                "artifact_identity": (state.artifact_identity.artifact_identity
+                                       if state.artifact_identity else None),
+                "classification": state.artifact_result.classification,
+            })
+        for evidence_ref in completion.stale_validation_requirement_ids:
+            self._emit(state.run_id, RunEventType.STALE_EVIDENCE_DETECTED, {
+                "contract_identity": identity,
+                "evidence_ref": evidence_ref,
+            })
 
     def _result(self, state: RunState, contract: FabricTaskContract, completion: CompletionResult, report: FinalReport | None) -> FabricOrchestrationResult:
         artifact = state.artifact_identity

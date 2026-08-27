@@ -44,6 +44,11 @@ class FinalReport:
     evidence_refs: tuple[str, ...] = ()
     minecraft_runtime_validation: str = MINECRAFT_RUNTIME_VALIDATION_NOTE
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    contract_identity: tuple[str, str, str] | None = None
+    completion_status: str | None = None
+    pending_requirement_ids: tuple[str, ...] = ()
+    active_failure_ids: tuple[str, ...] = ()
+    benchmark_outcome: str | None = None
 
     def to_dict(self, redactor: Redactor | None = None) -> dict[str, Any]:
         data = {
@@ -63,6 +68,11 @@ class FinalReport:
             "evidence_refs": list(self.evidence_refs),
             "minecraft_runtime_validation": self.minecraft_runtime_validation,
             "generated_at": self.generated_at.isoformat(),
+            "contract_identity": list(self.contract_identity) if self.contract_identity is not None else None,
+            "completion_status": self.completion_status,
+            "pending_requirement_ids": list(self.pending_requirement_ids),
+            "active_failure_ids": list(self.active_failure_ids),
+            "benchmark_outcome": self.benchmark_outcome,
         }
         data = json_ready(data)
         if redactor is not None:
@@ -82,6 +92,8 @@ class FinalReport:
             f"- Summary: {data['summary']}",
             f"- Project: {data['project']}",
             f"- Requested Task: {data['requested_task']}",
+            f"- Completion Status: `{data.get('completion_status') or data['final_state']}`",
+            f"- Contract Identity: `{data.get('contract_identity')}`",
             f"- Generated At: `{data['generated_at']}`",
             "",
             "## Files Changed",
@@ -175,4 +187,13 @@ class FinalReport:
             generated_at=datetime.fromisoformat(
                 str(data.get("generated_at", datetime.now(timezone.utc).isoformat()))
             ),
+            contract_identity=(
+                tuple(str(item) for item in data["contract_identity"])
+                if data.get("contract_identity") is not None
+                else None
+            ),
+            completion_status=data.get("completion_status"),
+            pending_requirement_ids=tuple(str(item) for item in data.get("pending_requirement_ids", [])),
+            active_failure_ids=tuple(str(item) for item in data.get("active_failure_ids", [])),
+            benchmark_outcome=data.get("benchmark_outcome"),
         )

@@ -119,6 +119,7 @@ class RunStorage:
             payload=payload,
             sequence=event.sequence,
             payload_ref=event.payload_ref,
+            schema_version=event.schema_version,
         )
 
     def write_final_report(self, report: FinalReport) -> tuple[Path, Path]:

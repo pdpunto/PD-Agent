@@ -40,6 +40,18 @@ class RunEventType(StrEnum):
     KNOWLEDGE_REFERENCED = "KNOWLEDGE_REFERENCED"
     KNOWLEDGE_EVIDENCED = "KNOWLEDGE_EVIDENCED"
     LIMIT_REACHED = "LIMIT_REACHED"
+    CONTRACT_CREATED = "CONTRACT_CREATED"
+    PLAN_CREATED = "PLAN_CREATED"
+    PLAN_REVISED = "PLAN_REVISED"
+    REQUIREMENT_RECONCILED = "REQUIREMENT_RECONCILED"
+    FAILURE_ACTIVE = "FAILURE_ACTIVE"
+    FAILURE_RESOLVED = "FAILURE_RESOLVED"
+    STALE_EVIDENCE_DETECTED = "STALE_EVIDENCE_DETECTED"
+    BUILD_ATTEMPT_RECORDED = "BUILD_ATTEMPT_RECORDED"
+    RUNTIME_VALIDATION_RECORDED = "RUNTIME_VALIDATION_RECORDED"
+    REPAIR_ATTEMPT_RECORDED = "REPAIR_ATTEMPT_RECORDED"
+    COMPLETION_GATE_EVALUATED = "COMPLETION_GATE_EVALUATED"
+    BOOTSTRAP_COMPLETED = "BOOTSTRAP_COMPLETED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,12 +88,14 @@ class RunEvent:
     payload: Mapping[str, Any] = field(default_factory=dict)
     sequence: int | None = None
     payload_ref: LargePayloadReference | None = None
+    schema_version: int = 1
 
     def to_dict(self, redactor: Redactor | None = None) -> dict[str, Any]:
         payload = json_ready(self.payload)
         if redactor is not None:
             payload = redactor.redact_data(payload)
         return {
+            "schema_version": self.schema_version,
             "run_id": self.run_id,
             "event_type": self.event_type.value,
             "timestamp": self.timestamp.isoformat(),
@@ -105,6 +119,7 @@ class RunEvent:
                 if data.get("payload_ref") is not None
                 else None
             ),
+            schema_version=int(data.get("schema_version", 1)),
         )
 
 

@@ -15,7 +15,7 @@ from pd_agent.config import AppConfig
 from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.providers import GeminiProvider, OpenAIProvider
-from pd_agent.reporting import RunStorage
+from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
@@ -141,6 +141,7 @@ class FabricBootstrap:
         seed_root: Path | None = None,
         expected_seed_identity: str | None = None,
         wrapper_source_root: Path | None = None,
+        reporting: RunStorage | None = None,
     ) -> FabricBootstrapResult:
         workspace = Path(workspace)
         if workspace.exists():
@@ -227,7 +228,7 @@ class FabricBootstrap:
                     pass
             raise
 
-        return FabricBootstrapResult(
+        result = FabricBootstrapResult(
             status=FabricBootstrapStatus.SUCCESS,
             workspace=workspace.resolve(),
             mod_id=mod_id,
@@ -239,6 +240,23 @@ class FabricBootstrap:
             inspection_status=snapshot.status.value,
             versions=self.versions,
         )
+        if reporting is not None:
+            reporting.append_event(
+                RunEvent(
+                    run_id=f"bootstrap-{fingerprint[:16]}",
+                    event_type=RunEventType.BOOTSTRAP_COMPLETED,
+                    payload={
+                        "workspace_identity": fingerprint,
+                        "mod_id": mod_id,
+                        "package": package,
+                        "pinned_versions": self.versions.to_dict(),
+                        "seed_identity": seed_identity,
+                        "manifest_ref": "bootstrap-manifest.json",
+                        "inspection_status": snapshot.status.value,
+                    },
+                )
+            )
+        return result
 
     def _project_files(self, mod_id: str, package: str, mod_name: str) -> dict[str, str | bytes]:
         v = self.versions
