@@ -261,6 +261,8 @@ class BenchmarkCollection:
     retrieved_item_ids: tuple[str, ...] = ()
     selected_item_ids: tuple[str, ...] = ()
     injected_item_ids: tuple[str, ...] = ()
+    referenced_item_ids: tuple[str, ...] = ()
+    evidenced_item_ids: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
     knowledge_traces: tuple[KnowledgeTrace, ...] = ()
     environment_identity: Mapping[str, Any] | None = None
@@ -286,6 +288,18 @@ class BenchmarkCollection:
     def injected_count(self) -> int | None:
         if self.knowledge_traces:
             return len(self.injected_item_ids)
+        return 0 if self.brain_enabled is not None else None
+
+    @property
+    def referenced_count(self) -> int | None:
+        if self.knowledge_traces:
+            return len(self.referenced_item_ids)
+        return 0 if self.brain_enabled is not None else None
+
+    @property
+    def evidenced_count(self) -> int | None:
+        if self.knowledge_traces:
+            return len(self.evidenced_item_ids)
         return 0 if self.brain_enabled is not None else None
 
     def to_dict(self) -> dict[str, Any]:
@@ -328,6 +342,8 @@ class BenchmarkCollection:
             "retrieved_item_ids": list(self.retrieved_item_ids),
             "selected_item_ids": list(self.selected_item_ids),
             "injected_item_ids": list(self.injected_item_ids),
+            "referenced_item_ids": list(self.referenced_item_ids),
+            "evidenced_item_ids": list(self.evidenced_item_ids),
             "provenance_refs": list(self.provenance_refs),
             "knowledge_traces": [trace.to_dict() for trace in self.knowledge_traces],
             "environment_identity": (
@@ -383,6 +399,8 @@ class BenchmarkCollection:
             retrieved_item_ids=tuple(str(item) for item in data.get("retrieved_item_ids", [])),
             selected_item_ids=tuple(str(item) for item in data.get("selected_item_ids", [])),
             injected_item_ids=tuple(str(item) for item in data.get("injected_item_ids", [])),
+            referenced_item_ids=tuple(str(item) for item in data.get("referenced_item_ids", [])),
+            evidenced_item_ids=tuple(str(item) for item in data.get("evidenced_item_ids", [])),
             provenance_refs=tuple(str(item) for item in data.get("provenance_refs", [])),
             knowledge_traces=tuple(KnowledgeTrace.from_dict(item) for item in data.get("knowledge_traces", [])),
             environment_identity=dict(data.get("environment_identity", {})) if data.get("environment_identity") is not None else None,
@@ -497,14 +515,18 @@ class BenchmarkCollector:
         retrieved_ids = self._trace_ids(traces, "retrieved_item_ids")
         selected_ids = self._trace_ids(traces, "selected_item_ids")
         injected_ids = self._trace_ids(traces, "context_item_ids")
+        referenced_ids = self._trace_ids(traces, "referenced_item_ids")
+        evidenced_ids = self._trace_ids(traces, "evidenced_item_ids")
         provenance_refs = tuple(ref for trace in traces for ref in _trace_provenance_refs(trace))
 
         if brain_enabled is False and not traces and final_report is not None and not final_report.evidence_refs:
             retrieved_ids = ()
             selected_ids = ()
             injected_ids = ()
+            referenced_ids = ()
+            evidenced_ids = ()
 
-        if brain_enabled is False and (retrieved_ids or selected_ids or injected_ids):
+        if brain_enabled is False and (retrieved_ids or selected_ids or injected_ids or referenced_ids or evidenced_ids):
             inconsistencies.append("brain_off_retrieval_present")
 
         if validation_requirements is not None:
@@ -575,6 +597,8 @@ class BenchmarkCollector:
                 "retrieved_item_count": len(retrieved_ids),
                 "selected_item_count": len(selected_ids),
                 "injected_item_count": len(injected_ids),
+                "referenced_item_count": len(referenced_ids),
+                "evidenced_item_count": len(evidenced_ids),
                 "tool_names": list(tool_names),
             },
         )
@@ -610,6 +634,8 @@ class BenchmarkCollector:
             retrieved_item_ids=retrieved_ids,
             selected_item_ids=selected_ids,
             injected_item_ids=injected_ids,
+            referenced_item_ids=referenced_ids,
+            evidenced_item_ids=evidenced_ids,
             provenance_refs=provenance_refs,
             knowledge_traces=traces,
             environment_identity=environment_identity,

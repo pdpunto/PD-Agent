@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
 from pd_agent.brain.models import (
@@ -168,6 +169,61 @@ class KnowledgeRejection:
         )
 
 
+class KnowledgeTraceState(StrEnum):
+    """Observable stages in the knowledge evidence chain."""
+
+    RETRIEVED = "RETRIEVED"
+    SELECTED = "SELECTED"
+    INJECTED = "INJECTED"
+    REFERENCED = "REFERENCED"
+    EVIDENCED = "EVIDENCED"
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeTraceRecord:
+    """Bounded identity and observable state for one knowledge record."""
+
+    item_id: str
+    states: tuple[KnowledgeTraceState, ...] = ()
+    need_id: str | None = None
+    source_id: str | None = None
+    source_revision: str | None = None
+    checksum: str | None = None
+    context_item_id: str | None = None
+    provider_turn: int | None = None
+    stage: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "states": [state.value for state in self.states],
+            "need_id": self.need_id,
+            "source_id": self.source_id,
+            "source_revision": self.source_revision,
+            "checksum": self.checksum,
+            "context_item_id": self.context_item_id,
+            "provider_turn": self.provider_turn,
+            "stage": self.stage,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "KnowledgeTraceRecord":
+        return cls(
+            item_id=str(data["item_id"]),
+            states=tuple(KnowledgeTraceState(str(state)) for state in data.get("states", [])),
+            need_id=data.get("need_id"),
+            source_id=data.get("source_id"),
+            source_revision=data.get("source_revision"),
+            checksum=data.get("checksum"),
+            context_item_id=data.get("context_item_id"),
+            provider_turn=(int(data["provider_turn"]) if data.get("provider_turn") is not None else None),
+            stage=data.get("stage"),
+            evidence_refs=tuple(str(ref) for ref in data.get("evidence_refs", [])),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeTrace:
     """Machine-readable trace for knowledge flow."""
@@ -181,11 +237,91 @@ class KnowledgeTrace:
     selected_item_ids: tuple[str, ...] = ()
     context_item_ids: tuple[str, ...] = ()
     misses: tuple[str, ...] = ()
+    records: tuple[KnowledgeTraceRecord, ...] = ()
+    stage: str | None = None
+    provider_turn: int | None = None
+    evidence_refs: tuple[str, ...] = ()
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
+    def __post_init__(self) -> None:
+        if self.records:
+            return
+        selected = set(self.selected_item_ids)
+        injected = set(self.context_item_ids)
+        source_by_item: dict[str, KnowledgeSourceAttempt] = {}
+        for attempt in self.source_attempts:
+            for item_id in attempt.retrieved_item_ids:
+                source_by_item.setdefault(item_id, attempt)
+        need_id = self.needs[0].id if self.needs else None
+        records: list[KnowledgeTraceRecord] = []
+        for item_id in self.retrieved_item_ids:
+            attempt = source_by_item.get(item_id)
+            states = [KnowledgeTraceState.RETRIEVED]
+            if item_id in selected:
+                states.append(KnowledgeTraceState.SELECTED)
+            if item_id in injected:
+                states.append(KnowledgeTraceState.INJECTED)
+            records.append(KnowledgeTraceRecord(
+                item_id=item_id,
+                states=tuple(states),
+                need_id=need_id,
+                source_id=attempt.source_id if attempt else None,
+                source_revision=attempt.revision if attempt else None,
+                checksum=attempt.checksum if attempt else None,
+                context_item_id=item_id if item_id in injected else None,
+                stage=self.stage,
+                provider_turn=self.provider_turn,
+            ))
+        object.__setattr__(self, "records", tuple(records))
+
+    @property
+    def referenced_item_ids(self) -> tuple[str, ...]:
+        return tuple(record.item_id for record in self.records if KnowledgeTraceState.REFERENCED in record.states)
+
+    @property
+    def evidenced_item_ids(self) -> tuple[str, ...]:
+        return tuple(record.item_id for record in self.records if KnowledgeTraceState.EVIDENCED in record.states)
+
+    def with_observable_evidence(
+        self,
+        item_id: str,
+        state: KnowledgeTraceState,
+        *,
+        evidence_refs: Sequence[str] = (),
+        provider_turn: int | None = None,
+        stage: str | None = None,
+    ) -> "KnowledgeTrace":
+        """Add only explicitly observed reference/evidence, never infer it."""
+        if state not in {KnowledgeTraceState.REFERENCED, KnowledgeTraceState.EVIDENCED}:
+            raise ValueError("only REFERENCED or EVIDENCED may be added explicitly")
+        records = list(self.records)
+        for index, record in enumerate(records):
+            if record.item_id != item_id:
+                continue
+            states = tuple(dict.fromkeys((*record.states, state)))
+            records[index] = KnowledgeTraceRecord(
+                item_id=record.item_id, states=states, need_id=record.need_id,
+                source_id=record.source_id, source_revision=record.source_revision,
+                checksum=record.checksum, context_item_id=record.context_item_id,
+                provider_turn=provider_turn if provider_turn is not None else record.provider_turn,
+                stage=stage if stage is not None else record.stage,
+                evidence_refs=tuple(dict.fromkeys((*record.evidence_refs, *evidence_refs))),
+            )
+            return KnowledgeTrace(
+                run_id=self.run_id, environment=self.environment, needs=self.needs,
+                source_attempts=self.source_attempts, retrieved_item_ids=self.retrieved_item_ids,
+                rejected_items=self.rejected_items, selected_item_ids=self.selected_item_ids,
+                context_item_ids=self.context_item_ids, misses=self.misses, records=tuple(records),
+                stage=self.stage, provider_turn=self.provider_turn, evidence_refs=tuple(
+                    dict.fromkeys((*self.evidence_refs, *evidence_refs))
+                ), started_at=self.started_at, finished_at=datetime.now(timezone.utc),
+            )
+        raise ValueError(f"unknown knowledge item: {item_id}")
+
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": "0.7",
             "run_id": self.run_id,
             "environment": self.environment.to_dict(),
             "needs": [need.to_dict() for need in self.needs],
@@ -195,6 +331,10 @@ class KnowledgeTrace:
             "selected_item_ids": list(self.selected_item_ids),
             "context_item_ids": list(self.context_item_ids),
             "misses": list(self.misses),
+            "records": [record.to_dict() for record in self.records],
+            "stage": self.stage,
+            "provider_turn": self.provider_turn,
+            "evidence_refs": list(self.evidence_refs),
             "started_at": self.started_at.isoformat(),
             "finished_at": self.finished_at.isoformat(),
         }
@@ -215,6 +355,10 @@ class KnowledgeTrace:
             selected_item_ids=tuple(str(item) for item in data.get("selected_item_ids", [])),
             context_item_ids=tuple(str(item) for item in data.get("context_item_ids", [])),
             misses=tuple(str(item) for item in data.get("misses", [])),
+            records=tuple(KnowledgeTraceRecord.from_dict(item) for item in data.get("records", [])),
+            stage=data.get("stage"),
+            provider_turn=(int(data["provider_turn"]) if data.get("provider_turn") is not None else None),
+            evidence_refs=tuple(str(ref) for ref in data.get("evidence_refs", [])),
             started_at=datetime.fromisoformat(str(data["started_at"])),
             finished_at=datetime.fromisoformat(str(data["finished_at"])),
         )
@@ -460,7 +604,19 @@ class KnowledgeContextSource:
                     run_id=trace.run_id, environment=trace.environment, needs=trace.needs,
                     source_attempts=trace.source_attempts, retrieved_item_ids=trace.retrieved_item_ids,
                     rejected_items=trace.rejected_items, selected_item_ids=trace.selected_item_ids,
-                    context_item_ids=tuple(injected_ids), misses=trace.misses,
+                    context_item_ids=tuple(injected_ids), misses=trace.misses, records=tuple(
+                        KnowledgeTraceRecord(
+                            item_id=record.item_id,
+                            states=tuple(dict.fromkeys((*record.states, KnowledgeTraceState.INJECTED)))
+                            if record.item_id in injected_ids else record.states,
+                            need_id=record.need_id, source_id=record.source_id,
+                            source_revision=record.source_revision, checksum=record.checksum,
+                            context_item_id=record.item_id if record.item_id in injected_ids else record.context_item_id,
+                            provider_turn=record.provider_turn, stage=record.stage,
+                            evidence_refs=record.evidence_refs,
+                        ) for record in trace.records
+                    ), stage=trace.stage, provider_turn=trace.provider_turn,
+                    evidence_refs=trace.evidence_refs,
                     started_at=trace.started_at, finished_at=datetime.now(timezone.utc),
                 )
             traces.append(trace)

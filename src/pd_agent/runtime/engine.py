@@ -11,7 +11,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
-from pd_agent.context import ContextItem, ContextManager
+from pd_agent.context import ContextItem, ContextManager, KnowledgeTraceState
 from pd_agent.brain import KnowledgeService, SemanticRepairKnowledgeNeedDeriver
 from pd_agent.core import (
     AgentMessage,
@@ -591,6 +591,30 @@ class AgentRuntime:
                 sequence=len(refs) + 1,
             )
             refs.append(evidence_path.relative_to(paths.root).as_posix())
+            event_types = {
+                KnowledgeTraceState.RETRIEVED: RunEventType.KNOWLEDGE_RETRIEVED,
+                KnowledgeTraceState.SELECTED: RunEventType.KNOWLEDGE_SELECTED,
+                KnowledgeTraceState.INJECTED: RunEventType.KNOWLEDGE_INJECTED,
+                KnowledgeTraceState.REFERENCED: RunEventType.KNOWLEDGE_REFERENCED,
+                KnowledgeTraceState.EVIDENCED: RunEventType.KNOWLEDGE_EVIDENCED,
+            }
+            for record in trace.records:
+                for state in record.states:
+                    self._emit(
+                        run_id,
+                        event_types[state],
+                        {
+                            "item_id": record.item_id,
+                            "need_id": record.need_id,
+                            "source_id": record.source_id,
+                            "source_revision": record.source_revision,
+                            "checksum": record.checksum,
+                            "context_item_id": record.context_item_id,
+                            "provider_turn": record.provider_turn,
+                            "stage": record.stage,
+                            "evidence_refs": list(record.evidence_refs),
+                        },
+                    )
 
     def _execute_tool_calls(
         self,

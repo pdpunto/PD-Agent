@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .manager import ContextManager
-from .knowledge import KnowledgeContextSource, KnowledgeRejection, KnowledgeSelector, KnowledgeSourceAttempt, KnowledgeTrace, SelectedKnowledge
+from .knowledge import KnowledgeContextSource, KnowledgeRejection, KnowledgeSelector, KnowledgeSourceAttempt, KnowledgeTrace, KnowledgeTraceRecord, KnowledgeTraceState, SelectedKnowledge
 from .models import ContextBundle, ContextItem, ContextRequest
 from .sources import ExternalContextSource, ProjectContextSource, RunContextSource
 
@@ -17,6 +17,8 @@ __all__ = [
     "KnowledgeSelector",
     "KnowledgeSourceAttempt",
     "KnowledgeTrace",
+    "KnowledgeTraceRecord",
+    "KnowledgeTraceState",
     "SelectedKnowledge",
     "ExternalContextSource",
     "ProjectContextSource",
