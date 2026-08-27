@@ -16,7 +16,18 @@ from .models import (
     KnowledgeType,
     SourceAuthority,
 )
-from .retrieval import FileKnowledgeCache, KnowledgeService, KnowledgeSource, MinecraftBrain
+from .retrieval import (
+    FileKnowledgeCache,
+    KnowledgeRetrievalCandidate,
+    KnowledgeRetrievalConflict,
+    KnowledgeRetrievalEngine,
+    KnowledgeService,
+    KnowledgeSource,
+    RankedKnowledgeRetrievalResult,
+    RetrievalConflictStatus,
+    RetrievalMatchClass,
+    MinecraftBrain,
+)
 from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
 from .fabric_api import FabricApiKnowledgeSource
@@ -48,6 +59,12 @@ __all__ = [
     "KnowledgeRetrievalStatus",
     "KnowledgeSource",
     "KnowledgeService",
+    "KnowledgeRetrievalCandidate",
+    "KnowledgeRetrievalConflict",
+    "KnowledgeRetrievalEngine",
+    "RankedKnowledgeRetrievalResult",
+    "RetrievalConflictStatus",
+    "RetrievalMatchClass",
     "KnowledgeSourceResult",
     "KnowledgeType",
     "MinecraftBrain",

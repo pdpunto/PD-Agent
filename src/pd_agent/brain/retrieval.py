@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence, runtime_checkable
 
@@ -20,6 +22,109 @@ from .models import (
     KnowledgeType,
     SourceAuthority,
 )
+from .canonical import KnowledgeRecord
+
+
+class RetrievalMatchClass(StrEnum):
+    """Deterministic retrieval tier, ordered from strongest to weakest."""
+
+    EXACT = "exact"
+    STRUCTURED = "structured"
+    LEXICAL = "lexical"
+
+
+class RetrievalConflictStatus(StrEnum):
+    """Conflict state attached to a bounded retrieval result."""
+
+    NONE = "none"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeRetrievalCandidate:
+    """An eligible, explainable candidate produced by the I9 pipeline."""
+
+    item: KnowledgeItem
+    match_class: RetrievalMatchClass
+    compatibility: CompatibilityStatus
+    authority_score: int
+    specificity_score: int
+    relevance_score: int
+    rank_reason: str
+    conflict_ids: tuple[str, ...] = ()
+
+    @property
+    def record_id(self) -> str:
+        return self.item.id
+
+    @property
+    def provenance(self) -> KnowledgeProvenance:
+        return self.item.provenance
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeRetrievalConflict:
+    """Material contradiction retained without silently merging records."""
+
+    key: str
+    candidate_ids: tuple[str, ...]
+    provenance: tuple[KnowledgeProvenance, ...]
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class RankedKnowledgeRetrievalResult:
+    """Bounded I9 result; selection and injection remain later stages."""
+
+    status: KnowledgeRetrievalStatus
+    need: KnowledgeNeed
+    candidates: tuple[KnowledgeRetrievalCandidate, ...] = ()
+    rejected: tuple[tuple[str, str], ...] = ()
+    conflicts: tuple[KnowledgeRetrievalConflict, ...] = ()
+    source_results: tuple[KnowledgeSourceResult, ...] = ()
+    degraded: bool = False
+    offline: bool = False
+
+    @property
+    def items(self) -> tuple[KnowledgeItem, ...]:
+        """Compatibility view for consumers that only need retrieved items."""
+        return tuple(candidate.item for candidate in self.candidates)
+
+    @property
+    def conflict_status(self) -> RetrievalConflictStatus:
+        return (RetrievalConflictStatus.UNRESOLVED if self.conflicts
+                else RetrievalConflictStatus.NONE)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "need": self.need.to_dict(),
+            "candidates": [
+                {
+                    "item": candidate.item.to_dict(),
+                    "match_class": candidate.match_class.value,
+                    "compatibility": candidate.compatibility.value,
+                    "authority_score": candidate.authority_score,
+                    "specificity_score": candidate.specificity_score,
+                    "relevance_score": candidate.relevance_score,
+                    "rank_reason": candidate.rank_reason,
+                    "conflict_ids": list(candidate.conflict_ids),
+                }
+                for candidate in self.candidates
+            ],
+            "rejected": [list(entry) for entry in self.rejected],
+            "conflicts": [
+                {
+                    "key": conflict.key,
+                    "candidate_ids": list(conflict.candidate_ids),
+                    "provenance": [item.to_dict() for item in conflict.provenance],
+                    "reason": conflict.reason,
+                }
+                for conflict in self.conflicts
+            ],
+            "degraded": self.degraded,
+            "offline": self.offline,
+        }
 
 
 @runtime_checkable
@@ -337,6 +442,14 @@ class KnowledgeService:
         """Alias matching the historical MinecraftBrain API."""
         return self.resolve(need, offline=offline)
 
+    def retrieve_ranked(self, need: KnowledgeNeed, *, indexes: Sequence[Any] = (),
+                        packs: Sequence[Any] = (), offline: bool = False,
+                        max_candidates: int = 10) -> RankedKnowledgeRetrievalResult:
+        """Run the I9 bounded pipeline without changing legacy retrieval semantics."""
+        return KnowledgeRetrievalEngine(self, max_candidates=max_candidates).retrieve(
+            need, indexes=indexes, packs=packs, offline=offline
+        )
+
     @staticmethod
     def _attempt(source: KnowledgeSource, need: KnowledgeNeed, status: KnowledgeRetrievalStatus,
                  *, compatibility: CompatibilityStatus | None = None, supported: bool | None = None,
@@ -367,3 +480,187 @@ class KnowledgeService:
             seen.add(identity)
             result.append(item)
         return tuple(result)
+
+
+_AUTHORITY_SCORE = {
+    SourceAuthority.AUTHORITATIVE_ARTIFACT: 4,
+    SourceAuthority.AUTHORITATIVE_SOURCE: 3,
+    SourceAuthority.OFFICIAL_DOCUMENTATION: 2,
+    SourceAuthority.SECONDARY: 1,
+}
+_VERSION_FIELDS = ("minecraft_version", "loader_version", "mappings_namespace",
+                   "mappings_version", "fabric_api_version")
+_LEXICAL_TOKEN = re.compile(r"[A-Za-z0-9_:.+-]+")
+
+
+def _record_as_item(record: KnowledgeRecord) -> KnowledgeItem:
+    """Adapt canonical data to the legacy retrieval item without losing identity."""
+    metadata = {
+        "record_identity": record.identity(),
+        "record_kind": record.kind.value,
+        "capability": record.capability,
+        "source_revision": record.source_revision,
+    }
+    return KnowledgeItem(record.record_id, record.content, record.environment,
+                         record.authority, record.provenance, metadata,
+                         record.version_sensitive)
+
+
+def _environment_compatibility(item: KnowledgeItem, need: KnowledgeNeed) -> CompatibilityStatus:
+    missing = False
+    for field_name in _VERSION_FIELDS:
+        requested = getattr(need.environment, field_name)
+        available = getattr(item.environment, field_name)
+        if requested is not None and available is not None and requested != available:
+            return CompatibilityStatus.INCOMPATIBLE
+        if requested is not None and available is None:
+            missing = True
+    if (need.version_sensitive or item.version_sensitive) and missing:
+        return CompatibilityStatus.UNKNOWN
+    return CompatibilityStatus.COMPATIBLE
+
+
+def _content_text(item: KnowledgeItem) -> str:
+    def flatten(value: Any) -> list[str]:
+        if isinstance(value, Mapping):
+            return [str(key) for key in value] + [part for child in value.values() for part in flatten(child)]
+        if isinstance(value, (list, tuple)):
+            return [part for child in value for part in flatten(child)]
+        return [str(value)]
+    return " ".join(flatten(item.content)).casefold()
+
+
+@dataclass(slots=True)
+class KnowledgeRetrievalEngine:
+    """I9 exact/structured/lexical retrieval over sources and canonical indexes."""
+
+    service: KnowledgeService = field(default_factory=KnowledgeService)
+    max_candidates: int = 10
+
+    def __post_init__(self) -> None:
+        if self.max_candidates <= 0:
+            raise ValueError("max_candidates must be positive")
+
+    def retrieve(self, need: KnowledgeNeed, *, indexes: Sequence[Any] = (),
+                 packs: Sequence[Any] = (), offline: bool = False) -> RankedKnowledgeRetrievalResult:
+        legacy = self.service.resolve(need, offline=offline)
+        records: list[KnowledgeRecord] = []
+        for index in indexes:
+            if not index.verify():
+                continue
+            records.extend(self._indexed_records(index, need))
+        for pack in packs:
+            if bool(getattr(pack, "can_serve", False)):
+                records.extend(pack.records)
+
+        raw: list[KnowledgeItem] = list(legacy.items)
+        raw.extend(_record_as_item(record) for record in records)
+        dedup: dict[str, KnowledgeItem] = {}
+        rejected: list[tuple[str, str]] = []
+        ranked: list[KnowledgeRetrievalCandidate] = []
+        query = need.query.strip().casefold()
+        query_tokens = set(_LEXICAL_TOKEN.findall(query))
+        for item in raw:
+            identity = str(item.metadata.get("record_identity", item.id))
+            compatibility = _environment_compatibility(item, need)
+            if compatibility != CompatibilityStatus.COMPATIBLE:
+                rejected.append((item.id, compatibility.value))
+                continue
+            if identity in dedup:
+                continue
+            dedup[identity] = item
+            match_class, relevance = self._match(item, need, query, query_tokens)
+            if match_class is None:
+                continue
+            authority = _AUTHORITY_SCORE[item.authority]
+            specificity = int(item.metadata.get("specificity", 0))
+            ranked.append(KnowledgeRetrievalCandidate(
+                item=item, match_class=match_class, compatibility=compatibility,
+                authority_score=authority, specificity_score=specificity,
+                relevance_score=relevance,
+                rank_reason=f"{match_class.value}:authority={authority};specificity={specificity};relevance={relevance}",
+            ))
+
+        conflicts = self._find_conflicts(ranked)
+        conflict_map = {candidate_id for conflict in conflicts for candidate_id in conflict.candidate_ids}
+        if conflict_map:
+            ranked = [replace(candidate, conflict_ids=next(
+                (conflict.candidate_ids for conflict in conflicts
+                 if candidate.record_id in conflict.candidate_ids), ()
+            )) if candidate.record_id in conflict_map else candidate for candidate in ranked]
+        ranked.sort(key=lambda candidate: (
+            -self._match_priority(candidate.match_class),
+            -candidate.authority_score,
+            -candidate.specificity_score,
+            -candidate.relevance_score,
+            candidate.record_id,
+        ))
+        candidates = tuple(ranked[:self.max_candidates])
+        status = KnowledgeRetrievalStatus.SUCCESS if candidates else legacy.status
+        return RankedKnowledgeRetrievalResult(status=status, need=need,
+            candidates=candidates, rejected=tuple(rejected), conflicts=tuple(conflicts),
+            source_results=legacy.source_results,
+            degraded=bool(rejected or any(result.status != KnowledgeRetrievalStatus.SUCCESS
+                                          for result in legacy.source_results)), offline=offline)
+
+    @staticmethod
+    def _indexed_records(index: Any, need: KnowledgeNeed) -> tuple[KnowledgeRecord, ...]:
+        """Use I8 query paths; index results remain canonical-record backed."""
+        found: dict[str, KnowledgeRecord] = {}
+        query = need.query.strip()
+        exact = index.lookup_record(query)
+        if exact is not None:
+            found[exact.record_id] = exact
+        for record in index.lookup_by_type(need.type):
+            found[record.record_id] = record
+        for record in index.lookup_by_capability(query):
+            found[record.record_id] = record
+        for record in index.lookup_by_symbol(query):
+            found[record.record_id] = record
+        for record in index.lookup_by_api(query):
+            found[record.record_id] = record
+        for record in index.lexical_search(query):
+            found[record.record_id] = record
+        return tuple(found.values())
+
+    @staticmethod
+    def _match(item: KnowledgeItem, need: KnowledgeNeed, query: str,
+               query_tokens: set[str]) -> tuple[RetrievalMatchClass | None, int]:
+        metadata = item.metadata
+        structured_values = {str(metadata.get("capability", "")).casefold(),
+                             str(metadata.get("record_kind", "")).casefold(),
+                             item.provenance.source_id.casefold()}
+        if query in {item.id.casefold(), str(metadata.get("record_id", "")).casefold(),
+                     str(metadata.get("capability", "")).casefold()}:
+            return RetrievalMatchClass.EXACT, 3
+        if query in structured_values or need.type.value.casefold() == str(metadata.get("record_kind", "")).casefold():
+            return RetrievalMatchClass.STRUCTURED, 2
+        content_tokens = set(_LEXICAL_TOKEN.findall(_content_text(item)))
+        overlap = len(query_tokens & content_tokens)
+        return (RetrievalMatchClass.LEXICAL, overlap) if overlap else (None, 0)
+
+    @staticmethod
+    def _match_priority(match_class: RetrievalMatchClass) -> int:
+        return {RetrievalMatchClass.EXACT: 3, RetrievalMatchClass.STRUCTURED: 2,
+                RetrievalMatchClass.LEXICAL: 1}[match_class]
+
+    @staticmethod
+    def _find_conflicts(candidates: Sequence[KnowledgeRetrievalCandidate]) -> tuple[KnowledgeRetrievalConflict, ...]:
+        groups: dict[str, list[KnowledgeRetrievalCandidate]] = {}
+        for candidate in candidates:
+            content = candidate.item.content
+            key = str(candidate.item.metadata.get("capability") or "")
+            if not key and isinstance(content, Mapping):
+                key = str(content.get("qualified_name") or content.get("symbol") or "")
+            if key:
+                groups.setdefault(key.casefold(), []).append(candidate)
+        conflicts: list[KnowledgeRetrievalConflict] = []
+        for key, group in groups.items():
+            fingerprints = {_stable_json(candidate.item.content) for candidate in group}
+            if len(fingerprints) > 1:
+                conflicts.append(KnowledgeRetrievalConflict(
+                    key=key, candidate_ids=tuple(sorted(candidate.record_id for candidate in group)),
+                    provenance=tuple(candidate.provenance for candidate in group),
+                    reason="materially contradictory compatible records; no merge",
+                ))
+        return tuple(conflicts)
