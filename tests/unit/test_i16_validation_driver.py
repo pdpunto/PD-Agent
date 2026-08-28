@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -65,3 +66,51 @@ def test_live_source_connects_shared_budget_guard_before_provider() -> None:
     source = (ROOT / "scripts" / "validation" / "run_i16.py").read_text(encoding="utf-8")
     assert "budget_session.guard(consumer_id=run_id)" in source
     assert "budget_guard=budget_guard" in source
+
+
+def _f6_t3() -> dict[str, object]:
+    return json.loads((ROOT / "benchmarks/tasks/F6-T3-v5.json").read_text(encoding="utf-8"))
+
+
+def test_i16_resolves_f6_t3_resource_targets_to_workspace_paths() -> None:
+    task = _f6_t3()
+    info = driver.validate_task(task, ROOT / "benchmarks/projects/v0_5_fabric_base")
+
+    assert info["targets"] == (
+        "role:source",
+        "src/main/resources/assets/examplemod/lang/en_us.json",
+        "src/main/resources/data/examplemod/recipe/server_core.json",
+    )
+    contract = driver.build_contract(task, ROOT / "benchmarks/projects/v0_5_fabric_base")
+    assert [item.path for item in contract.mutation_expectations] == [
+        "src/main/java",
+        "src/main/resources/assets/examplemod/lang/en_us.json",
+        "src/main/resources/data/examplemod/recipe/server_core.json",
+    ]
+
+
+def test_i16_prebuild_rejects_incomplete_lang_and_accepts_complete_lang(tmp_path: Path) -> None:
+    from pd_agent.core import ValidationStatus
+    from pd_agent.validation import PreBuildWorkspaceValidator
+
+    root = tmp_path / "workspace"
+    resource_root = root / "src/main/resources"
+    lang = resource_root / "assets/examplemod/lang/en_us.json"
+    recipe = resource_root / "data/examplemod/recipe/server_core.json"
+    lang.parent.mkdir(parents=True)
+    recipe.parent.mkdir(parents=True)
+    lang.write_text('{"block.examplemod.server_core": "Server Core"}\n', encoding="utf-8")
+    recipe.write_text('{"result": {"id": "examplemod:server_core", "count": 1}}\n', encoding="utf-8")
+
+    spec = _f6_t3()["acceptance"]["spec"]
+    validator = PreBuildWorkspaceValidator(resource_roots=(resource_root,))
+    incomplete = validator.validate(root, spec)
+    assert incomplete.status is ValidationStatus.REPAIRABLE_FAIL
+    assert any(item.requirement.endswith("/item.examplemod.server_core") for item in incomplete.violations)
+
+    lang.write_text(
+        '{"block.examplemod.server_core": "Server Core", "item.examplemod.server_core": "Server Core"}\n',
+        encoding="utf-8",
+    )
+    complete = validator.validate(root, spec)
+    assert complete.status is ValidationStatus.PASS

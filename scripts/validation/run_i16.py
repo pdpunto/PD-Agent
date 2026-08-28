@@ -18,6 +18,8 @@ import sys
 from typing import Any, Mapping
 from uuid import uuid4
 
+from pd_agent.project import ProjectInspectionStatus, ProjectInspector, resolve_logical_resource_path
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_FIXTURE = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 EXPECTED_SEED = "eb211b00633cbbc909d2494c777c1070ad0db668aa0e64896e9691d2f3bfba83"
@@ -104,10 +106,17 @@ def validate_task(task: Mapping[str, Any], fixture_root: Path) -> dict[str, Any]
     actual = _fixture_identity(fixture_root)
     if actual != EXPECTED_FIXTURE:
         raise PrecheckError(f"fixture identity mismatch: {actual}")
+    snapshot = ProjectInspector().inspect(fixture_root)
+    if snapshot.status is not ProjectInspectionStatus.READY:
+        raise PrecheckError(f"fixture project inspection blocked: {snapshot.issues}")
     spec = task["acceptance"]["spec"]
     targets = ["role:source"]
-    targets.extend(item["path"] for item in spec.get("required_resources", []))
-    return {"targets": tuple(targets), "spec": spec}
+    for item in spec.get("required_resources", []):
+        try:
+            targets.append(resolve_logical_resource_path(snapshot, item["path"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PrecheckError(f"resource target cannot be resolved: {item!r}") from exc
+    return {"targets": tuple(dict.fromkeys(targets)), "spec": spec, "resource_roots": tuple(snapshot.resource_roots)}
 
 
 def validate_seed(seed_root: Path, manifest_path: Path) -> None:
@@ -141,7 +150,7 @@ def validate_budget(path: Path) -> dict[str, Any]:
     return {"session_id": session.session_id, "remaining_usd": str(session.state.global_remaining_usd)}
 
 
-def build_contract(task: Mapping[str, Any]) -> Any:
+def build_contract(task: Mapping[str, Any], fixture_root: Path) -> Any:
     from pd_agent.core import FabricEnvironmentConstraints, FabricKnowledgeSignal, FabricMutationExpectation, FabricRequirement, FabricTaskContract, FabricValidationRequirement
 
     spec = task["acceptance"]["spec"]
@@ -150,7 +159,14 @@ def build_contract(task: Mapping[str, Any]) -> Any:
     observations.extend({"observation_id": item["test_id"], "observation_type": item["observation_type"], "observation_params": item["observation_params"], "required": True, "profile": {}} for item in spec["required_minecraft_observations"])
     requirements = tuple(FabricRequirement(requirement_id=key, description=value) for key, value in {"source": task["prompt"], "build": "Build the changed Fabric project.", "artifact": "Produce a current valid artifact.", "runtime": "Validate the required Minecraft observations."}.items())
     validation = FabricValidationRequirement(validation_requirement_id="minecraft-runtime", requirement_ids=("runtime",), kind="minecraft", spec={"target_mod_id": "examplemod", "minecraft_version": environment["minecraft_version"], "loader_version": environment["loader_version"], "test_id": "F6-T3", "observations": observations})
-    mutations = tuple(FabricMutationExpectation(expectation_id=f"F6-T3:{path}", role="source", path=path) for path in ["src/main/java", *[item["path"] for item in spec["required_resources"]]])
+    snapshot = ProjectInspector().inspect(fixture_root)
+    mutations = tuple(
+        FabricMutationExpectation(expectation_id=f"F6-T3:{path}", role="source", path=path)
+        for path in [
+            "src/main/java",
+            *[resolve_logical_resource_path(snapshot, item["path"]) for item in spec["required_resources"]],
+        ]
+    )
     return FabricTaskContract(task_id="F6-T3@5", revision="5", goal=task["prompt"], requirements=requirements, required_capabilities=("Fabric 1.21.11", "craftable utility block"), validation_requirements=(validation,), knowledge_signals=tuple(FabricKnowledgeSignal(signal_id=item["id"], query=item["query"], category=item["type"]) for item in spec["knowledge_needs"]), mutation_expectations=mutations, environment_constraints=FabricEnvironmentConstraints(minecraft_version=environment["minecraft_version"], loader_version=environment["loader_version"], fabric_api_version=environment["fabric_api_version"], yarn_version=environment["yarn_version"], java_version=environment["java_version"], extra={"loom_version": environment["loom_version"]}))
 
 
@@ -191,6 +207,7 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
     from pd_agent.providers.openai_provider import OpenAIProvider
     from pd_agent.reporting import RunStorage
     from pd_agent.core import ExecutionLimits
+    from pd_agent.validation import PreBuildWorkspaceValidator
     from pd_agent.experimental.luna_budget import LunaSharedBudgetSession
 
     launch = Path(checks["launch_root"])
@@ -210,8 +227,9 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
     budget_guard = budget_session.guard(consumer_id=run_id)
     provider = OpenAIProvider(model=config["model"], api_key=os.environ["OPENAI_API_KEY"], provider_retry_limit=2, service_tier="default", budget_guard=budget_guard)
     environment = KnowledgeEnvironment.from_dict(task["acceptance"]["spec"]["knowledge_needs"][0]["environment"])
-    orchestrator = FabricNormalOrchestrator(provider=provider, build_runner=GradleBuildRunner(reporting=storage, environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}), artifact_validator=ArtifactValidator(reporting=storage), context_manager=ContextManager(), limits=ExecutionLimits.from_dict(config["execution_limits"]), model_config=config["model_config"], reporting=storage, knowledge_service=KnowledgeService((FrozenKnowledgePackSource(pack),)), knowledge_environment=environment, minecraft_runner=MinecraftTestRunner(project_root=workspace, evidence_root=execution_root / "minecraft", harness_root=REPO_ROOT / "tests" / "fixtures" / "l11_minecraft_harness", environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}))
-    contract = build_contract(task)
+    snapshot = ProjectInspector().inspect(workspace)
+    orchestrator = FabricNormalOrchestrator(provider=provider, build_runner=GradleBuildRunner(reporting=storage, environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}), artifact_validator=ArtifactValidator(reporting=storage), context_manager=ContextManager(), limits=ExecutionLimits.from_dict(config["execution_limits"]), model_config=config["model_config"], reporting=storage, knowledge_service=KnowledgeService((FrozenKnowledgePackSource(pack),)), knowledge_environment=environment, pre_build_validator=PreBuildWorkspaceValidator(resource_roots=tuple(snapshot.resource_roots)), validation_contract=task["acceptance"]["spec"], minecraft_runner=MinecraftTestRunner(project_root=workspace, evidence_root=execution_root / "minecraft", harness_root=REPO_ROOT / "tests" / "fixtures" / "l11_minecraft_harness", environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}))
+    contract = build_contract(task, workspace)
     result = orchestrator.run(contract, workspace, brain_enabled=True, pending_mutation_targets=tuple(checks["mutation_targets"]))
     _redacted_manifest(launch / "i16-manifest.json", args, config, task)
     return {"execution_id": run_id, "result": result.to_dict(), "manifest": str(launch / "i16-manifest.json")}
