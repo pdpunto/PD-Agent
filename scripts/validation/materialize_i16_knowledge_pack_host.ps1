@@ -1,11 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = 'C:\dev\proyectos\PD-Agent'
+    [string]$RepoRoot = 'C:\dev\proyectos\PD-Agent',
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9a-fA-F]{40}$')]
+    [string]$PdAgentCommit
 )
 
 $ErrorActionPreference = 'Stop'
 
-$ExpectedCommit = '2d2f4bde5eda7fdd813257a3fc6f568e68d7dfb4'
 $ExpectedPackId = '9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1'
 $ExpectedRecords = 104978
 $ExpectedYarnSha = 'e8112359716235dc4fd7f0bd4a6162fd728e0d1067d9fa02f289edaaccd37718'
@@ -54,8 +56,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git'))) {
 
 $head = Invoke-GitValue -Arguments @('rev-parse', 'HEAD')
 $originMain = Invoke-GitValue -Arguments @('rev-parse', 'origin/main')
-if ($head -ne $ExpectedCommit -or $originMain -ne $ExpectedCommit) {
-    throw "baseline mismatch: HEAD=$head origin/main=$originMain expected=$ExpectedCommit"
+if ($head.ToLowerInvariant() -ne $PdAgentCommit.ToLowerInvariant()) {
+    throw "baseline mismatch: HEAD=$head expected=$PdAgentCommit"
+}
+if ($originMain.ToLowerInvariant() -ne $PdAgentCommit.ToLowerInvariant()) {
+    throw "baseline mismatch: origin/main=$originMain expected=$PdAgentCommit"
 }
 
 $statusLines = @(
@@ -114,6 +119,7 @@ $meta = [ordered]@{
     repo_root = $RepoRoot
     head = $head
     origin_main = $originMain
+    pd_agent_commit = $PdAgentCommit.ToLowerInvariant()
     yarn_artifact = $yarn
     yarn_sha256 = $yarnSha
     fabric_api_artifact = $fabricApi
