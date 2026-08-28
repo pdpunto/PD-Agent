@@ -63,6 +63,7 @@ from .currentness import (
     validation_contract_revision,
 )
 from .state import ExecutionLimits, RunState, RunStatus, generate_run_id
+from .seed_identity import portable_seed_identity
 
 __all__ = [
     "AgentMessage",
@@ -120,4 +121,5 @@ __all__ = [
     "FabricTaskContract",
     "FabricValidationRequirement",
     "generate_run_id",
+    "portable_seed_identity",
 ]

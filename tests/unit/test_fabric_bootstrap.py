@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pd_agent.bootstrap import FabricBootstrap, FabricBootstrapError
+from pd_agent.core import portable_seed_identity
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
 
 
@@ -131,3 +132,59 @@ def test_generated_paths_are_confined_to_workspace(tmp_path: Path) -> None:
     result = _create(tmp_path / "project")
     root = result.workspace
     assert all(root in path.resolve().parents or path.resolve() == root for path in root.rglob("*"))
+
+
+def test_bootstrap_accepts_canonical_portable_seed_identity(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    (seed / "caches").mkdir(parents=True)
+    (seed / "caches" / "stable.bin").write_bytes(b"stable")
+    (seed / "caches" / "gc.properties").write_text("volatile", encoding="utf-8")
+    expected = portable_seed_identity(seed)
+    result = _create(tmp_path / "project", seed_root=seed, expected_seed_identity=expected)
+    assert result.seed_identity == expected
+
+
+def test_old_raw_tree_identity_was_not_canonical(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    (seed / "caches").mkdir(parents=True)
+    (seed / "caches" / "stable.bin").write_bytes(b"stable")
+    (seed / "caches" / "gc.properties").write_text("volatile", encoding="utf-8")
+    raw = __import__("hashlib").sha256()
+    for path in sorted(seed.rglob("*"), key=lambda item: item.relative_to(seed).as_posix()):
+        if path.is_file():
+            raw.update(path.relative_to(seed).as_posix().encode("utf-8"))
+            raw.update(b"\0" + path.read_bytes() + b"\0")
+    assert raw.hexdigest() != portable_seed_identity(seed)
+
+
+def test_seed_identity_ignores_only_declared_nonportable_files(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    stable = seed / "stable.bin"
+    stable.write_bytes(b"stable")
+    first = portable_seed_identity(seed)
+    (seed / "gc.properties").write_text("one", encoding="utf-8")
+    (seed / "sample.lock").write_text("lock", encoding="utf-8")
+    assert portable_seed_identity(seed) == first
+    stable.write_bytes(b"changed")
+    assert portable_seed_identity(seed) != first
+
+
+def test_seed_identity_ignores_mtime_and_absolute_location(tmp_path: Path) -> None:
+    first_root = tmp_path / "one"
+    first_root.mkdir()
+    (first_root / "stable.bin").write_bytes(b"stable")
+    first = portable_seed_identity(first_root)
+    second_root = tmp_path / "nested" / "two"
+    second_root.mkdir(parents=True)
+    (second_root / "stable.bin").write_bytes(b"stable")
+    (first_root / "stable.bin").touch()
+    assert portable_seed_identity(first_root) == portable_seed_identity(second_root) == first
+
+
+def test_generated_kotlin_dsl_uses_valid_property_interpolation(tmp_path: Path) -> None:
+    result = _create(tmp_path / "project")
+    build = (result.workspace / "build.gradle.kts").read_text(encoding="utf-8")
+    assert r"$\{" not in build
+    for name in ("minecraft_version", "mappings_version", "loader_version", "fabric_api_version"):
+        assert f'${{property("{name}")}}' in build

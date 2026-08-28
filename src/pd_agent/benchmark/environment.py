@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from pd_agent.core.seed_identity import is_nonportable_seed_entry, iter_portable_seed_files
+
 
 SCHEMA_VERSION = 1
 DEFAULT_SEED_ID = "gradle-wrapper-caches"
@@ -58,39 +60,14 @@ def _sha256_file(path: Path) -> str:
 
 
 def _iter_seed_files(root: Path) -> tuple[tuple[str, Path], ...]:
-    items: list[tuple[str, Path]] = []
-    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-        current_path = Path(current)
-        dirnames[:] = sorted(dirnames, key=str.casefold)
-        for dirname in dirnames:
-            candidate = current_path / dirname
-            if candidate.is_symlink():
-                raise BenchmarkGradleEnvironmentError(f"symlink not allowed in Gradle seed: {candidate}")
-        for filename in sorted(filenames, key=str.casefold):
-            candidate = current_path / filename
-            if candidate.is_symlink():
-                raise BenchmarkGradleEnvironmentError(f"symlink not allowed in Gradle seed: {candidate}")
-            if not candidate.is_file():
-                continue
-            relative_path = candidate.relative_to(root).as_posix()
-            if _is_nonportable_seed_entry(relative_path, current_path=current_path):
-                continue
-            items.append((candidate.relative_to(root).as_posix(), candidate))
-    return tuple(items)
+    try:
+        return iter_portable_seed_files(root)
+    except ValueError as exc:
+        raise BenchmarkGradleEnvironmentError(str(exc)) from exc
 
 
 def _is_nonportable_seed_entry(relative_path: str, *, current_path: Path | None = None) -> bool:
-    normalized = relative_path.replace("\\", "/")
-    filename = normalized.rsplit("/", 1)[-1].casefold()
-    if filename == "gc.properties":
-        return True
-    if filename.endswith(".lock") or filename.endswith(".lck"):
-        return True
-    if normalized.startswith("caches/journal-1/") and filename in _NONPORTABLE_SEED_FILE_NAMES:
-        return True
-    if current_path is not None and current_path.name.casefold() == "journal-1" and filename in _NONPORTABLE_SEED_FILE_NAMES:
-        return True
-    return False
+    return is_nonportable_seed_entry(relative_path, current_path=current_path)
 
 
 def _portable_seed_manifest(manifest: "BenchmarkGradleSeedManifest") -> "BenchmarkGradleSeedManifest":

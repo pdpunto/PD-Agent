@@ -14,6 +14,7 @@ from pd_agent.build import GradleBuildRunner
 from pd_agent.config import AppConfig
 from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
+from pd_agent.core import portable_seed_identity
 from pd_agent.providers import GeminiProvider, OpenAIProvider
 from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 from pd_agent.reporting.redaction import Redactor
@@ -105,18 +106,10 @@ def _validate_package(value: object) -> str:
 
 
 def _tree_identity(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
-        relative = path.relative_to(root).as_posix()
-        if path.is_symlink():
-            raise FabricBootstrapError("seed contains unsupported filesystem entry")
-        if not path.is_file():
-            continue
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
+    try:
+        return portable_seed_identity(root)
+    except ValueError as exc:
+        raise FabricBootstrapError(str(exc)) from exc
 
 
 def _fingerprint_value(value: str | bytes) -> str:
@@ -284,10 +277,10 @@ version = "1.0.0"
 repositories {{ mavenCentral(); maven("https://maven.fabricmc.net/") }}
 
 dependencies {{
-    minecraft("com.mojang:minecraft:$\\{{property("minecraft_version")\\}}")
-    mappings("net.fabricmc:yarn:$\\{{property("mappings_version")\\}}:v2")
-    modImplementation("net.fabricmc:fabric-loader:$\\{{property("loader_version")\\}}")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:$\\{{property("fabric_api_version")\\}}")
+    minecraft("com.mojang:minecraft:${{property("minecraft_version")}}")
+    mappings("net.fabricmc:yarn:${{property("mappings_version")}}:v2")
+    modImplementation("net.fabricmc:fabric-loader:${{property("loader_version")}}")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${{property("fabric_api_version")}}")
 }}
 
 java {{ toolchain {{ languageVersion.set(JavaLanguageVersion.of({v.java})) }} }}
