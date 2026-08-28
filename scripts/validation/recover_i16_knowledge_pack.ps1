@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Candidate,
     [Parameter(Mandatory = $true)][string]$Destination,
+    [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
     [string]$ExpectedPackId = "9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1",
     [int]$ExpectedRecords = 104978
 )
@@ -27,6 +28,14 @@ $copiedData = Get-Content -LiteralPath $copiedManifest.FullName -Raw | ConvertFr
 if ($copiedData.pack_id -ne $ExpectedPackId -or @($copiedData.record_inventory).Count -ne $ExpectedRecords) {
     throw "Copied Knowledge Pack verification failed"
 }
+$python = Join-Path $RepoRoot ".venv-l0fix\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "Repository Python environment not found: $python" }
+$env:PYTHONPATH = Join-Path $RepoRoot "src"
+$env:PD_I16_PACK_PATH = $destinationPath
+$env:PD_I16_PACK_ID = $ExpectedPackId
+$verifyCode = "import os; from pathlib import Path; from pd_agent.brain.frozen import load_frozen_knowledge_pack; pack=load_frozen_knowledge_pack(Path(os.environ['PD_I16_PACK_PATH']), expected_pack_id=os.environ['PD_I16_PACK_ID']); assert len(pack.records) == $ExpectedRecords"
+& $python -c $verifyCode
+if ($LASTEXITCODE -ne 0) { throw "Copied Knowledge Pack failed the real loader" }
 Write-Output "KNOWLEDGE_PACK_HOST_RECOVERY_PASS"
 Write-Output "PACK_PATH=$destinationPath"
 Write-Output "PACK_ID=$($copiedData.pack_id)"
