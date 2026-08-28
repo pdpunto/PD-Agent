@@ -99,11 +99,14 @@ class FabricNormalOrchestrator:
         *,
         brain_enabled: bool = True,
         external_context: tuple[Any, ...] = (),
+        pending_mutation_targets: tuple[str, ...] = (),
     ) -> FabricOrchestrationResult:
         contract = self._contract(requirement)
         plan = self._plan(contract)
         ledger = TaskProgressLedger(contract_identity=contract.identity())
         state = RunState(project_root=Path(project_root), task=contract.task_id, task_contract=contract, execution_plan=plan, progress_ledger=ledger)
+        if pending_mutation_targets:
+            state.set_pending_mutation_targets(tuple(pending_mutation_targets))
         self._emit(state.run_id, RunEventType.CONTRACT_CREATED, {
             "contract_identity": list(contract.identity()),
             "requirement_ids": [item.requirement_id for item in contract.requirements],
