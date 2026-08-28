@@ -293,7 +293,11 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
         args.budget_state,
         expected_global_ceiling=args.global_budget_ceiling,
     )
-    budget_guard = budget_session.guard(consumer_id=run_id)
+    budget_guard = budget_session.guard(
+        consumer_id=run_id,
+        experimental=bool(args.experimental),
+        non_official=bool(args.non_official),
+    )
     budget_guard.begin_attempt(run_id)
     provider = OpenAIProvider(model=config["model"], api_key=os.environ["OPENAI_API_KEY"], provider_retry_limit=2, service_tier="default", budget_guard=budget_guard)
     environment = KnowledgeEnvironment.from_dict(task["acceptance"]["spec"]["knowledge_needs"][0]["environment"])

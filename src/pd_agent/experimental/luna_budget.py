@@ -539,7 +539,13 @@ class LunaSharedBudgetSession:
             raise
         return {"previous": _money(current), "current": _money(target), "changed": "true"}
 
-    def guard(self, *, consumer_id: str) -> "LunaBudgetGuard":
+    def guard(
+        self,
+        *,
+        consumer_id: str,
+        experimental: bool = False,
+        non_official: bool = False,
+    ) -> "LunaBudgetGuard":
         consumer_id = str(consumer_id).strip()
         if not consumer_id:
             raise ValueError("consumer_id must not be empty")
@@ -547,8 +553,8 @@ class LunaSharedBudgetSession:
             hard_budget_usd=self.ceiling_usd,
             state=self.state,
             state_store=self.store,
-            experimental=False,
-            non_official=False,
+            experimental=experimental,
+            non_official=non_official,
             shared_session_id=self.session_id,
             shared_consumer_id=consumer_id,
         )

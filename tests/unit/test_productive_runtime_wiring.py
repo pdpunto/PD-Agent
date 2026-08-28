@@ -120,6 +120,28 @@ def test_productive_boundary_records_runtime_failure(tmp_path: Path) -> None:
     assert state.progress_ledger is not None and state.progress_ledger.failures
 
 
+def test_invalid_observation_mapping_has_structured_violation_message(tmp_path: Path) -> None:
+    contract = _contract()
+    artifact = _artifact(tmp_path)
+    runner = _Runner(MinecraftObservationStatus.PASS)
+    state = _state(contract, artifact)
+    validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=runner)
+    validator.bind_run_state(state)
+
+    original = runner.run
+
+    def mismatched_run(spec, **kwargs):  # noqa: ANN001
+        result = original(spec, **kwargs)
+        return SimpleNamespace(status=MinecraftTestStatus.PASS, observations=())
+
+    runner.run = mismatched_run
+    result = validator.validate(tmp_path, artifact, contract, state.run_id)
+
+    assert result.status is ValidationStatus.INVALID
+    assert result.violations[0].code == "RUNTIME_OBSERVATION_MAPPING_INVALID"
+    assert result.violations[0].message
+
+
 def test_repair_reconciles_new_validated_artifact_before_second_runtime(tmp_path: Path) -> None:
     contract = _contract()
     artifact_a = _artifact(tmp_path)

@@ -91,10 +91,17 @@ def test_driver_does_not_own_benchmark_scheduler() -> None:
 
 def test_live_source_connects_shared_budget_guard_before_provider() -> None:
     source = (ROOT / "scripts" / "validation" / "run_i16.py").read_text(encoding="utf-8")
-    assert "budget_session.guard(consumer_id=run_id)" in source
+    assert "budget_session.guard(" in source
+    assert "consumer_id=run_id" in source
     assert "budget_guard=budget_guard" in source
     assert "budget_guard.begin_attempt(run_id)" in source
     assert "budget_guard.end_attempt()" in source
+
+
+def test_live_source_propagates_execution_flags_to_provider_metadata() -> None:
+    source = (ROOT / "scripts" / "validation" / "run_i16.py").read_text(encoding="utf-8")
+    assert "experimental=bool(args.experimental)" in source
+    assert "non_official=bool(args.non_official)" in source
 
 
 def test_budget_precheck_rejects_consumed_active_attempt(tmp_path: Path) -> None:

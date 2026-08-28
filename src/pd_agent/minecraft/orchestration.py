@@ -222,7 +222,7 @@ class FabricRuntimeOrchestrator:
         expected_ids = set(plan.observation_requirements)
         actual_ids = {item.observation_id for item in observations}
         if actual_ids - expected_ids or expected_ids - actual_ids:
-            violation = ValidationViolation(code="RUNTIME_OBSERVATION_MAPPING_INVALID", requirement=plan.validation_requirement_id, observed={"observation_ids": sorted(actual_ids)}, expected=sorted(expected_ids), actual=sorted(actual_ids), evidence_refs=tuple(ref.ref for item in observations for ref in item.evidence_refs), phase="RUNTIME")
+            violation = ValidationViolation(code="RUNTIME_OBSERVATION_MAPPING_INVALID", requirement=plan.validation_requirement_id, observed={"observation_ids": sorted(actual_ids)}, expected=sorted(expected_ids), actual=sorted(actual_ids), message="runtime observation mapping does not match the validation contract", evidence_refs=tuple(ref.ref for item in observations for ref in item.evidence_refs), phase="RUNTIME")
             return ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.INVALID, summary="runtime observation mapping invalid", violations=(violation,), evidence_refs=violation.evidence_refs), None
         violations: list[ValidationViolation] = []
         observation_evidence_refs = tuple(
