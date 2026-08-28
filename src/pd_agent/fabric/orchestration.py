@@ -24,7 +24,7 @@ from pd_agent.project import ProjectInspectionStatus, ProjectInspector
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.runtime import AgentRuntime
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
-from pd_agent.validation import CompletionGate, CompletionResult
+from pd_agent.validation import CompletionGate, CompletionResult, ProductiveMinecraftFunctionalValidator
 
 
 class FabricOrchestrationStatus(StrEnum):
@@ -89,6 +89,8 @@ class FabricNormalOrchestrator:
     validation_contract: Any | None = None
     repair_knowledge_source: Any | None = None
     repair_knowledge_environment: Any | None = None
+    minecraft_runner: Any | None = None
+    runtime_root_factory: Any | None = None
 
     def run(
         self,
@@ -129,7 +131,11 @@ class FabricNormalOrchestrator:
         executor = self.tool_executor or ToolExecutor(tools=create_filesystem_tools())
         if self.reporting is not None:
             executor.event_sink = self.reporting.event_writer(state.run_id)
-        runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=self.functional_validator, validation_contract=self.validation_contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
+        functional_validator = self.functional_validator
+        if functional_validator is None and self.minecraft_runner is not None:
+            functional_validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=self.minecraft_runner, runtime_root_factory=self.runtime_root_factory)
+            functional_validator.bind_run_state(state)
+        runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)
         completion = CompletionGate().evaluate(contract, state.progress_ledger, state)
         self._emit_state_observations(state, contract, completion)
