@@ -140,14 +140,34 @@ def validate_pack(pack_path: Path) -> None:
 
 
 def validate_budget(path: Path) -> dict[str, Any]:
-    from pd_agent.experimental.luna_budget import LunaSharedBudgetSession
+    from pd_agent.experimental.luna_budget import LunaPricingSnapshot, LunaSharedBudgetSession
 
     session = LunaSharedBudgetSession.load(path)
     if str(session.ceiling_usd) != SHARED_CEILING or session.state.global_remaining_usd < 0:
         raise PrecheckError("shared I16 budget is not valid")
     if session.state.reconciliation_state == "UNCERTAIN_CONSUMED":
         raise PrecheckError("shared I16 budget is uncertain")
-    return {"session_id": session.session_id, "remaining_usd": str(session.state.global_remaining_usd)}
+    if session.state.active_attempt_id is not None and (
+        session.state.attempt_accumulated_usd
+        or session.state.attempt_reserved_usd
+        or session.state.attempt_uncertain_consumed_usd
+    ):
+        raise PrecheckError("shared I16 budget has an active consumed attempt")
+    guard = session.guard(consumer_id="precheck")
+    guard.pricing = LunaPricingSnapshot(max_output_tokens=16384)
+    probe = guard.preview_budget(input_tokens=0, output_limit=16384)
+    if probe["decision"] != "ALLOW":
+        raise PrecheckError(
+            "shared I16 budget blocks the next request: "
+            f"required={probe['reservation_usd']} "
+            f"attempt_remaining={probe['attempt_remaining_usd']} "
+            f"global_remaining={probe['global_remaining_usd']}"
+        )
+    return {
+        "session_id": session.session_id,
+        "remaining_usd": str(session.state.global_remaining_usd),
+        "next_request_probe": probe,
+    }
 
 
 def build_contract(task: Mapping[str, Any], fixture_root: Path) -> Any:
@@ -225,12 +245,14 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
     storage = RunStorage(execution_root / "evidence", secrets=(os.environ["OPENAI_API_KEY"],))
     budget_session = LunaSharedBudgetSession.load(args.budget_state)
     budget_guard = budget_session.guard(consumer_id=run_id)
+    budget_guard.begin_attempt(run_id)
     provider = OpenAIProvider(model=config["model"], api_key=os.environ["OPENAI_API_KEY"], provider_retry_limit=2, service_tier="default", budget_guard=budget_guard)
     environment = KnowledgeEnvironment.from_dict(task["acceptance"]["spec"]["knowledge_needs"][0]["environment"])
     snapshot = ProjectInspector().inspect(workspace)
     orchestrator = FabricNormalOrchestrator(provider=provider, build_runner=GradleBuildRunner(reporting=storage, environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}), artifact_validator=ArtifactValidator(reporting=storage), context_manager=ContextManager(), limits=ExecutionLimits.from_dict(config["execution_limits"]), model_config=config["model_config"], reporting=storage, knowledge_service=KnowledgeService((FrozenKnowledgePackSource(pack),)), knowledge_environment=environment, pre_build_validator=PreBuildWorkspaceValidator(resource_roots=tuple(snapshot.resource_roots)), validation_contract=task["acceptance"]["spec"], minecraft_runner=MinecraftTestRunner(project_root=workspace, evidence_root=execution_root / "minecraft", harness_root=REPO_ROOT / "tests" / "fixtures" / "l11_minecraft_harness", environment_overrides={"GRADLE_USER_HOME": str(gradle_home)}))
     contract = build_contract(task, workspace)
     result = orchestrator.run(contract, workspace, brain_enabled=True, pending_mutation_targets=tuple(checks["mutation_targets"]))
+    budget_guard.end_attempt()
     _redacted_manifest(launch / "i16-manifest.json", args, config, task)
     return {"execution_id": run_id, "result": result.to_dict(), "manifest": str(launch / "i16-manifest.json")}
 

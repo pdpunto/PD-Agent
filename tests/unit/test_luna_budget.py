@@ -165,6 +165,43 @@ def test_reservation_equal_remaining_allows_and_greater_blocks() -> None:
     assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
 
 
+def test_preview_budget_matches_dispatch_decision_without_mutation() -> None:
+    payload = {"input": "x" * 70_000, "max_output_tokens": 16_384}
+    guard = _guard(hard_budget_usd=Decimal("0.10"), pricing=LunaPricingSnapshot(max_output_tokens=16_384))
+    before = guard.state.to_dict()
+
+    preview = guard.preview_budget(
+        input_tokens=guard._conservative_input_tokens(payload),
+        output_limit=payload["max_output_tokens"],
+        retry_count=0,
+    )
+    decision = guard.before_request(payload, retry_count=0)
+
+    assert preview["decision"] == decision["decision"] == "ALLOW"
+    assert preview["reservation_usd"] == decision["projected_worst_case_cost_usd"]
+    assert guard.state.to_dict() != before
+
+
+def test_preview_budget_blocks_real_second_live_ledger_before_dispatch() -> None:
+    guard = LunaBudgetGuard(
+        hard_budget_usd=Decimal("0.25"),
+        pricing=LunaPricingSnapshot(max_output_tokens=16_384),
+        state=LunaEconomicState(
+            execution_id="second-live",
+            global_ceiling_usd=Decimal("0.25"),
+            global_accumulated_usd=Decimal("0.1869635500"),
+            attempt_accumulated_usd=Decimal("0.0629950500"),
+        ),
+    )
+
+    preview = guard.preview_budget(input_tokens=70_000, output_limit=16_384)
+
+    assert preview["decision"] == "BLOCK"
+    assert preview["abort_reason"] == "BUDGET_BLOCKED"
+    assert Decimal(preview["attempt_remaining_usd"]) == Decimal("0.0370049500")
+
+
+
 def test_dual_ceiling_boundaries_are_checked_independently() -> None:
     payload = {"input": []}
     reference = _guard()

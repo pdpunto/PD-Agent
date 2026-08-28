@@ -197,6 +197,10 @@ dataset, fixture, runtime limits, Semantic Repair, Fabric behavior or
 scheduler identity rules. A future OpenAI candidate needs its own frozen
 config/manifest and must pass offline drift checks before any API call.
 
+`reconciliation_state=CLEAR` only means that no reservation or uncertainty is
+pending. It is not a guarantee that the next request fits the remaining
+ceilings; preflight must reuse the guard's preventive reservation projection.
+
 ## Acceptance Boundary
 
 Implementation is not complete until the dual-budget, lifecycle, persistence,

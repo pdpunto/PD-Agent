@@ -199,6 +199,8 @@ execute, the future candidate.
 - Freeze, config, manifest, state, evidence and redaction checks pass.
 - API calls remain zero.
 - Fresh LaunchRoot and ExecutionRoot are verified without launching.
+- Preflight reuses the guard's preventive reservation projection and does not
+  equate `reconciliation_state=CLEAR` with sufficient budget for a new request.
 
 ### Boundary and rollback
 

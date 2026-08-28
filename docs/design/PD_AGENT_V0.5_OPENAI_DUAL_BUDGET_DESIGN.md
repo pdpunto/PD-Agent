@@ -168,6 +168,11 @@ from unique ledger settlements or unambiguous final per-request/per-run costs.
 The global total is an execution-level value, not the sum of repeated metadata
 snapshots.
 
+`reconciliation_state=CLEAR` means that no reservation or economic uncertainty
+is pending. It does not guarantee that another request fits the remaining
+global or active-attempt ceiling. Preflight must use the guard's preventive
+reservation projection before reporting a dispatch as economically permitted.
+
 ## Out of Scope
 
 - Model Router.

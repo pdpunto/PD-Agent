@@ -619,17 +619,18 @@ class LunaBudgetGuard:
                 retry_count=retry_count,
             )
         self._validate_dispatch_record(dispatch_record)
-        self._validate_state(retry_count=retry_count)
         input_tokens = self._conservative_input_tokens(payload)
-        if input_tokens > self.pricing.max_context_tokens:
-            raise self._abort("CONTEXT_BOUND_UNDETERMINED")
-        reserve = self._worst_case_cost(input_tokens, payload)
-        attempt_remaining = self.state.attempt_remaining_usd
-        global_remaining = self.state.global_remaining_usd
+        projection = self.preview_budget(
+            input_tokens=input_tokens,
+            output_limit=(payload.get("max_output_tokens") if isinstance(payload.get("max_output_tokens"), int) and not isinstance(payload.get("max_output_tokens"), bool) else None),
+            retry_count=retry_count,
+        )
+        reserve = Decimal(projection["reservation_usd"])
+        attempt_remaining = Decimal(projection["attempt_remaining_usd"])
+        global_remaining = Decimal(projection["global_remaining_usd"])
         self.last_reserve = reserve
-        allowed = reserve <= attempt_remaining and reserve <= global_remaining
-        self.last_decision = "ALLOW" if allowed else "BLOCK"
-        if not allowed:
+        self.last_decision = str(projection["decision"])
+        if self.last_decision != "ALLOW":
             raise self._abort("BUDGET_BLOCKED")
         request_id = self._request_id(retry_count)
         self.state.ledger[request_id] = {
@@ -666,6 +667,36 @@ class LunaBudgetGuard:
             "decision": self.last_decision,
             "shared_session_id": self.shared_session_id,
             "shared_consumer_id": self.shared_consumer_id,
+        }
+
+    def preview_budget(
+        self,
+        *,
+        input_tokens: int,
+        output_limit: int | None = None,
+        retry_count: int = 0,
+    ) -> dict[str, Any]:
+        """Project the exact preventive decision without mutating the ledger."""
+
+        self._validate_state(retry_count=retry_count)
+        if not isinstance(input_tokens, int) or isinstance(input_tokens, bool) or input_tokens < 0:
+            raise self._abort("UNKNOWN_INPUT_LIMIT")
+        if input_tokens > self.pricing.max_context_tokens:
+            raise self._abort("CONTEXT_BOUND_UNDETERMINED")
+        if output_limit is not None and (not isinstance(output_limit, int) or isinstance(output_limit, bool)):
+            raise self._abort("UNKNOWN_OUTPUT_LIMIT")
+        payload = {"max_output_tokens": output_limit} if output_limit is not None else None
+        reserve = self._worst_case_cost(input_tokens, payload)
+        attempt_remaining = self.state.attempt_remaining_usd
+        global_remaining = self.state.global_remaining_usd
+        return {
+            "decision": "ALLOW" if reserve <= attempt_remaining and reserve <= global_remaining else "BLOCK",
+            "abort_reason": None if reserve <= attempt_remaining and reserve <= global_remaining else "BUDGET_BLOCKED",
+            "input_tokens_estimate": input_tokens,
+            "output_tokens_limit": output_limit if output_limit is not None else self.pricing.max_output_tokens,
+            "reservation_usd": str(reserve),
+            "attempt_remaining_usd": str(attempt_remaining),
+            "global_remaining_usd": str(global_remaining),
         }
 
     def mark_dispatch_started(self, dispatch_record: DispatchRecord) -> None:
