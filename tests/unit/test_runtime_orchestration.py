@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from pd_agent.core import ArtifactIdentity, BuildAttemptIdentity, FabricRequirement, FabricTaskContract, FabricValidationRequirement, RunState, TaskProgressLedger
+from pd_agent.core import ArtifactIdentity, BuildAttemptIdentity, FabricRequirement, FabricTaskContract, FabricValidationRequirement, RunState, TaskProgressLedger, ValidationStatus
 from pd_agent.minecraft import (
     FabricRuntimeOrchestrator,
     MinecraftEvidenceKind,
@@ -133,3 +133,30 @@ def test_harness_crash_is_blocked_not_target_repair(tmp_path: Path) -> None:
     outcome = FabricRuntimeOrchestrator(runner).validate(contract=contract, run_state=state, artifact=artifact, source_revision=SHA, minecraft_spec=_spec(tmp_path))
     assert outcome.validation_result is not None and outcome.validation_result.status.value == "BLOCKED"
     assert outcome.validation_result.violations[0].code == "RUNTIME_HARNESS_BLOCKED"
+
+
+def test_target_startup_crash_is_repairable_with_failure_evidence(tmp_path: Path) -> None:
+    contract = _contract(requirement=_requirement())
+    log_path = tmp_path / "latest.log"
+    log_path.write_text("Block id not set", encoding="utf-8")
+    runner = FakeRunner(SimpleNamespace(
+        status=MinecraftTestStatus.CRASH,
+        reason="target mod failed during Minecraft startup",
+        target_failure_reason="Block id not set",
+        metadata={"target_startup_failure": True},
+        runtime_evidence=SimpleNamespace(
+            latest_log_path=log_path,
+            harness_result_path=tmp_path / "harness-result.json",
+            metadata={},
+        ),
+        observations=(),
+    ))
+    state, artifact = _state(contract)
+    outcome = FabricRuntimeOrchestrator(runner).validate(contract=contract, run_state=state, artifact=artifact, source_revision=SHA, minecraft_spec=_spec(tmp_path))
+    assert outcome.validation_result is not None
+    assert outcome.validation_result.status is ValidationStatus.REPAIRABLE_FAIL
+    assert outcome.validation_result.violations[0].code == "RUNTIME_TARGET_STARTUP_FAILURE"
+    assert outcome.validation_result.violations[0].actual == "Block id not set"
+    assert str(log_path) in outcome.validation_result.evidence_refs
+    assert outcome.failure_fact is not None
+    assert outcome.failure_fact.code == "RUNTIME_TARGET_STARTUP_FAILURE"

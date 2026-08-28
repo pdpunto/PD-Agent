@@ -168,10 +168,57 @@ class FabricRuntimeOrchestrator:
     def _validate_observations(self, plan: RuntimeValidationSpec, observations: tuple[ObservationResult, ...], runtime_result: Any, artifact: ArtifactIdentity, run_id: str) -> tuple[ValidationResult, FailureFact | None]:
         harness_status = getattr(runtime_result, "status", None)
         if harness_status in {MinecraftTestStatus.CRASH, MinecraftTestStatus.TIMEOUT, MinecraftTestStatus.INFRA_ERROR}:
-            violation = ValidationViolation(code="RUNTIME_HARNESS_BLOCKED", requirement=plan.validation_requirement_id, observed={"harness_status": str(harness_status)}, expected="PASS", actual=str(harness_status), message="Minecraft harness did not provide a target result", phase="RUNTIME")
-            result = ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.BLOCKED, summary="runtime harness blocked", violations=(violation,), evidence_refs=())
+            result_metadata = getattr(runtime_result, "metadata", {}) or {}
+            runtime_evidence = getattr(runtime_result, "runtime_evidence", None)
+            evidence_metadata = getattr(runtime_evidence, "metadata", {}) or {}
+            target_failure = (
+                harness_status is MinecraftTestStatus.CRASH
+                and (
+                    result_metadata.get("target_startup_failure") is True
+                    or evidence_metadata.get("target_startup_failure") is True
+                )
+            )
+            evidence_refs = tuple(
+                dict.fromkeys(
+                    str(path)
+                    for path in (
+                        getattr(runtime_evidence, "latest_log_path", None),
+                        getattr(runtime_evidence, "harness_result_path", None),
+                    )
+                    if path is not None
+                )
+            )
+            if target_failure:
+                reason = (
+                    getattr(runtime_result, "target_failure_reason", None)
+                    or result_metadata.get("target_failure_reason")
+                    or evidence_metadata.get("target_failure_reason")
+                    or getattr(runtime_result, "reason", None)
+                    or str(harness_status)
+                )
+                violation = ValidationViolation(
+                    code="RUNTIME_TARGET_STARTUP_FAILURE",
+                    requirement=plan.validation_requirement_id,
+                    observed={
+                        "harness_status": str(harness_status),
+                        "target_startup_failure": True,
+                        "target_failure_reason": str(reason),
+                    },
+                    expected="target mod starts and runtime obligation passes",
+                    actual=str(reason),
+                    message=f"target mod failed during Minecraft startup: {reason}",
+                    evidence_refs=evidence_refs,
+                    phase="RUNTIME",
+                )
+                status = ValidationStatus.REPAIRABLE_FAIL
+                summary = "target runtime startup failure"
+            else:
+                violation = ValidationViolation(code="RUNTIME_HARNESS_BLOCKED", requirement=plan.validation_requirement_id, observed={"harness_status": str(harness_status)}, expected="PASS", actual=str(harness_status), message="Minecraft harness did not provide a target result", phase="RUNTIME")
+                status = ValidationStatus.BLOCKED
+                summary = "runtime harness blocked"
+            result = ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary=summary, violations=(violation,), evidence_refs=evidence_refs)
             requirement_ids = tuple(dict.fromkeys(item for values in plan.observation_requirements.values() for item in values))
-            return result, FailureFact(failure_id=f"runtime-failure-{run_id}", status=FailureFactStatus.ACTIVE, requirement_ids=requirement_ids, code=violation.code, category="RUNTIME", evidence_refs=())
+            return result, FailureFact(failure_id=f"runtime-failure-{run_id}", status=FailureFactStatus.ACTIVE, requirement_ids=requirement_ids, code=violation.code, category="RUNTIME", evidence_refs=evidence_refs)
         expected_ids = set(plan.observation_requirements)
         actual_ids = {item.observation_id for item in observations}
         if actual_ids - expected_ids or expected_ids - actual_ids:
