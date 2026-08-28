@@ -29,7 +29,9 @@ baseline stale.
 The driver is pinned to `F6-T3@5`, OpenAI `gpt-5.6-luna`, Brain ON, reasoning
 `medium`, `service_tier=default`, `store=false`, `max_output_tokens=16384`,
 25 agent steps, 50 tools, 5 builds, and provider retry limit 2. The shared
-economic ceiling is `$0.25`; uncertain or paused ledgers block LIVE.
+economic ceiling is `$0.30`, migrated upward from the historical `$0.25`
+ledger through the product API; uncertain or paused ledgers block LIVE. The
+per-attempt ceiling remains `$0.10`.
 
 ## Live Authorization
 

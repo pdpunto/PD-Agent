@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_FIXTURE = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 EXPECTED_SEED = "eb211b00633cbbc909d2494c777c1070ad0db668aa0e64896e9691d2f3bfba83"
 EXPECTED_PACK = "9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5"
-SHARED_CEILING = "0.25"
+SHARED_CEILING = "0.30"
 EXPECTED_CONFIG_ID = "openai-official-gpt-5.6-luna-brain-on"
 EXPECTED_TASK_ID = "F6-T3"
 
@@ -142,7 +142,7 @@ def validate_pack(pack_path: Path) -> None:
 def validate_budget(path: Path) -> dict[str, Any]:
     from pd_agent.experimental.luna_budget import LunaPricingSnapshot, LunaSharedBudgetSession
 
-    session = LunaSharedBudgetSession.load(path)
+    session = LunaSharedBudgetSession.load(path, expected_global_ceiling=SHARED_CEILING)
     if str(session.ceiling_usd) != SHARED_CEILING or session.state.global_remaining_usd < 0:
         raise PrecheckError("shared I16 budget is not valid")
     if session.state.reconciliation_state == "UNCERTAIN_CONSUMED":

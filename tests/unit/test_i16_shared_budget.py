@@ -54,6 +54,57 @@ def test_shared_session_uses_fixed_global_ceiling_and_separate_consumers(tmp_pat
     assert metadata["shared_consumption_by_consumer"]["brain-on"] != "0"
 
 
+def test_shared_session_accepts_configurable_global_ceiling_and_expected_load(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    session = LunaSharedBudgetSession.create(path, global_ceiling=Decimal("0.30"))
+    reopened = LunaSharedBudgetSession.load(path, expected_global_ceiling=Decimal("0.30"))
+    assert reopened.ceiling_usd == Decimal("0.30")
+    assert reopened.state.attempt_ceiling_usd == Decimal("0.10")
+
+
+def test_shared_session_rejects_expected_ceiling_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    LunaSharedBudgetSession.create(path, global_ceiling=Decimal("0.30"))
+    with pytest.raises(ValueError, match="shared economic ceiling mismatch"):
+        LunaSharedBudgetSession.load(path, expected_global_ceiling=Decimal("0.25"))
+
+
+def test_global_ceiling_migration_is_upward_only_and_preserves_history(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    session = LunaSharedBudgetSession.create(path)
+    _account(session.guard(consumer_id="brain-on"), "attempt")
+    before = session.state.to_dict()
+    result = session.migrate_global_ceiling(Decimal("0.30"))
+    reopened = LunaSharedBudgetSession.load(path, expected_global_ceiling=Decimal("0.30"))
+    assert result == {"previous": "0.25", "current": "0.30", "changed": "true"}
+    assert reopened.state.global_accumulated_usd == Decimal(before["global_accumulated_usd"])
+    assert reopened.state.physical_request_count == before["physical_request_count"]
+    assert reopened.state.logical_provider_turn_count == before["logical_provider_turn_count"]
+    assert reopened.state.attempt_ceiling_usd == Decimal("0.10")
+    with pytest.raises(ValueError, match="upward-only"):
+        reopened.migrate_global_ceiling(Decimal("0.20"))
+
+
+def test_global_ceiling_migration_rejects_reservation_and_uncertainty(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    session = LunaSharedBudgetSession.create(path)
+    guard = session.guard(consumer_id="brain-on")
+    guard.begin_attempt("attempt")
+    payload = _payload()
+    record = guard.prepare_dispatch(payload, provider="openai", model="gpt-5.6-luna", retry_count=0)
+    guard.before_request(payload, retry_count=0, dispatch_record=record)
+    with pytest.raises(ValueError, match="reservation or uncertainty"):
+        session.migrate_global_ceiling(Decimal("0.30"))
+
+
+def test_global_ceiling_rejects_non_positive_values(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="positive"):
+        LunaSharedBudgetSession.create(tmp_path / "zero.json", global_ceiling=Decimal("0"))
+    session = LunaSharedBudgetSession.create(tmp_path / "economic.json")
+    with pytest.raises(ValueError, match="upward-only"):
+        session.migrate_global_ceiling(Decimal("0"))
+
+
 def test_shared_session_never_allows_global_ceiling_overrun(tmp_path: Path) -> None:
     session = LunaSharedBudgetSession.create(tmp_path / "economic.json")
     session.state.global_accumulated_usd = Decimal("0.24999")
@@ -140,4 +191,4 @@ def test_shared_state_rejects_wrong_ceiling(tmp_path: Path) -> None:
     state = LunaEconomicState(execution_id="session", global_ceiling_usd=Decimal("0.30"))
     LunaEconomicStateStore(state, path=path).persist()
     with pytest.raises(ValueError, match="shared economic ceiling mismatch"):
-        LunaSharedBudgetSession.load(path)
+        LunaSharedBudgetSession.load(path, expected_global_ceiling=Decimal("0.25"))

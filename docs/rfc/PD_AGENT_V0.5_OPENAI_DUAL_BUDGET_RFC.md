@@ -66,6 +66,14 @@ ledger_version
 reconciliation_state
 ```
 
+`global_ceiling` is persisted configuration, not a fixed loader constant. New
+ledgers default to the historical `Decimal("0.25")`, and existing ledgers can
+be migrated only upward through an atomic product operation. Migration
+preserves confirmed spend, reservations, uncertainty, counters, dispatch
+history and active-attempt state, and fails closed when reserved or uncertain
+money exists. `load(..., expected_global_ceiling=...)` rejects drift. The
+per-attempt ceiling remains `Decimal("0.10")`.
+
 `begin_attempt(attempt_id)` verifies the scheduled identity, resets only
 attempt accumulated/reserved cost, and preserves the global values. The same
 attempt identity is retained across retries. Replacements receive a new

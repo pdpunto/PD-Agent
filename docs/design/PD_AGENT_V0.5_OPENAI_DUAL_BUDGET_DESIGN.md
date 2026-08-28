@@ -102,6 +102,15 @@ before and after every billable transition. At minimum it contains:
 - request-ledger version and reconciliation state;
 - budget pause/block reason.
 
+The shared global ceiling is persisted configuration rather than a fixed
+loader constant. New sessions default to the historical `Decimal("0.25")`,
+while callers may provide another positive ceiling. Existing ledgers may be
+migrated only upward through the product API. Migration is atomic, preserves
+spend, reservations, uncertainty, counters, dispatch history and attempt
+state, and is rejected while reserved or uncertain money exists. A loader may
+require `expected_global_ceiling` to fail closed on configuration drift. The
+per-attempt ceiling remains `Decimal("0.10")`.
+
 Resume must reconstruct the same global state and active attempt state. It may
 not reset either budget, duplicate a settlement, or resend a request whose
 economic result is uncertain.

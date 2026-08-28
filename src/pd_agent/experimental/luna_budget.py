@@ -443,8 +443,8 @@ class LunaSharedBudgetSession:
 
     def __post_init__(self) -> None:
         self.ceiling_usd = _decimal(self.ceiling_usd, field_name="ceiling_usd")
-        if self.ceiling_usd != I16_SHARED_GLOBAL_CEILING_USD:
-            raise ValueError("I16 shared ceiling must be exactly 0.25 USD")
+        if self.ceiling_usd <= 0:
+            raise ValueError("shared economic ceiling must be positive")
         if self.state.execution_id != self.session_id:
             raise ValueError("shared economic session identity mismatch")
         if self.state.global_ceiling_usd != self.ceiling_usd:
@@ -457,28 +457,87 @@ class LunaSharedBudgetSession:
         return self.store.path
 
     @classmethod
-    def create(cls, path: Path, *, session_id: str | None = None) -> "LunaSharedBudgetSession":
+    def create(
+        cls,
+        path: Path,
+        *,
+        session_id: str | None = None,
+        global_ceiling: Decimal | str | None = None,
+    ) -> "LunaSharedBudgetSession":
         if Path(path).exists():
             raise FileExistsError(f"shared economic state already exists: {path}")
         identifier = str(session_id or f"shared-{uuid4()}").strip()
+        ceiling = _decimal(
+            I16_SHARED_GLOBAL_CEILING_USD if global_ceiling is None else global_ceiling,
+            field_name="global_ceiling",
+        )
         state = LunaEconomicState(
             execution_id=identifier,
-            global_ceiling_usd=I16_SHARED_GLOBAL_CEILING_USD,
+            global_ceiling_usd=ceiling,
         )
         store = LunaEconomicStateStore(state, path=Path(path))
-        session = cls(identifier, state, store)
+        session = cls(identifier, state, store, ceiling_usd=ceiling)
         store.persist()
         return session
 
     @classmethod
-    def load(cls, path: Path) -> "LunaSharedBudgetSession":
+    def load(
+        cls,
+        path: Path,
+        *,
+        expected_global_ceiling: Decimal | str | None = None,
+    ) -> "LunaSharedBudgetSession":
         store = LunaEconomicStateStore.load(Path(path))
         state = store.state
-        return cls(state.execution_id, state, store)
+        if expected_global_ceiling is not None:
+            expected = _decimal(expected_global_ceiling, field_name="expected_global_ceiling")
+            if state.global_ceiling_usd != expected:
+                raise ValueError("shared economic ceiling mismatch")
+        return cls(state.execution_id, state, store, ceiling_usd=state.global_ceiling_usd)
 
     @classmethod
-    def open_or_create(cls, path: Path) -> "LunaSharedBudgetSession":
-        return cls.load(path) if Path(path).exists() else cls.create(path)
+    def open_or_create(
+        cls,
+        path: Path,
+        *,
+        global_ceiling: Decimal | str | None = None,
+        expected_global_ceiling: Decimal | str | None = None,
+    ) -> "LunaSharedBudgetSession":
+        return (
+            cls.load(path, expected_global_ceiling=expected_global_ceiling)
+            if Path(path).exists()
+            else cls.create(path, global_ceiling=global_ceiling)
+        )
+
+    def migrate_global_ceiling(self, new_ceiling: Decimal | str) -> dict[str, str]:
+        """Atomically raise the global ceiling without changing ledger history."""
+
+        target = _decimal(new_ceiling, field_name="new_global_ceiling")
+        current = self.state.global_ceiling_usd
+        if target < current:
+            raise ValueError("global ceiling migration must be upward-only")
+        if target == current:
+            return {"previous": _money(current), "current": _money(current), "changed": "false"}
+        if (
+            self.state.global_reserved_usd != 0
+            or self.state.attempt_reserved_usd != 0
+            or self.state.global_uncertain_consumed_usd != 0
+            or self.state.attempt_uncertain_consumed_usd != 0
+        ):
+            raise ValueError("cannot migrate global ceiling with reservation or uncertainty")
+        committed = self.state.global_accumulated_usd
+        if target < committed:
+            raise ValueError("global ceiling migration is below committed spend")
+
+        self.state.global_ceiling_usd = target
+        self.ceiling_usd = target
+        try:
+            self.store.persist()
+        except Exception:
+            self.state.global_ceiling_usd = current
+            self.ceiling_usd = current
+            raise
+        return {"previous": _money(current), "current": _money(target), "changed": "true"}
 
     def guard(self, *, consumer_id: str) -> "LunaBudgetGuard":
         consumer_id = str(consumer_id).strip()

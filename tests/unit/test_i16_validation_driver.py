@@ -78,7 +78,7 @@ def test_budget_precheck_rejects_consumed_active_attempt(tmp_path: Path) -> None
     path = tmp_path / "economic.json"
     state = LunaEconomicState(
         execution_id="precheck",
-        global_ceiling_usd=Decimal("0.25"),
+        global_ceiling_usd=Decimal("0.30"),
         active_attempt_id="previous",
         attempt_accumulated_usd=Decimal("0.0629950500"),
     )

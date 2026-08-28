@@ -54,6 +54,9 @@ budget component. Support both `Decimal("1.00")` global and
 - Reservations and settlements are represented independently.
 - Request ledger states include `RESERVED`, `ACCOUNTED` and uncertain
   fail-closed handling.
+- The shared global ceiling is configurable at session creation and can be
+  migrated upward only through an atomic API that preserves ledger history;
+  migration rejects reservations, uncertainty and ceiling drift.
 
 ### Boundary and rollback
 
