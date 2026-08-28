@@ -27,6 +27,17 @@ def test_config_validation_rejects_provider_or_model_drift() -> None:
         raise AssertionError("model drift must fail closed")
 
 
+def test_current_explicit_baseline_passes_and_wrong_one_fails() -> None:
+    state = {"head": "current", "origin_main": "current"}
+    driver.validate_baseline("current", state)
+    try:
+        driver.validate_baseline("stale", state)
+    except driver.PrecheckError:
+        pass
+    else:
+        raise AssertionError("stale baseline must fail closed")
+
+
 def test_redacted_manifest_never_persists_secret(tmp_path: Path, monkeypatch) -> None:
     secret = "secret-not-to-persist"
     monkeypatch.setenv("OPENAI_API_KEY", secret)

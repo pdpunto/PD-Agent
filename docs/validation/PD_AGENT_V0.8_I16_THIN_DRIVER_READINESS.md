@@ -8,7 +8,8 @@ It composes the normal Fabric orchestrator and persists a redacted manifest.
 
 ## Gates
 
-`PRECHECK` and `DRY-RUN` validate the frozen task, config, fixture, Gradle
+`PRECHECK` and `DRY-RUN` validate the explicitly supplied commit against both
+local `HEAD` and `origin/main`, then validate the frozen task, config, fixture, Gradle
 seed, frozen Knowledge Pack, repository baseline, credential presence, and
 shared economic ledger without creating an `ExecutionRoot` or contacting a
 provider. `LIVE` requires both `--live` and `--authorize-i16` and repeats all
@@ -17,6 +18,11 @@ prechecks before creating a fresh root.
 The live path is fail-closed for baseline, fixture, seed, pack, budget,
 credential, and fresh-root mismatches. Secrets are used only to configure the
 provider redactor and are never written to the manifest.
+
+The commit is intentionally not hardcoded: callers must pass
+`--pd-agent-commit <SHA>`, and a mismatch against either side of `main` blocks
+the run. This prevents the driver commit itself from making its own default
+baseline stale.
 
 ## Frozen I16 Contract
 
@@ -29,3 +35,17 @@ economic ceiling is `$0.25`; uncertain or paused ledgers block LIVE.
 
 No live execution is authorized by this document. Direction must provide an
 explicit authorization outside the driver before a live invocation.
+
+## Final Preflight Blocker
+
+The original driver release used the preceding commit as a hardcoded baseline,
+which made its own preparation commit fail closed. The driver now requires
+`--pd-agent-commit` explicitly and compares it with both local `HEAD` and
+`origin/main`.
+
+The recovered Gradle seed is readable and verifies against the frozen identity.
+The frozen Knowledge Pack candidates found in the local temporary area exist,
+but their roots are ACL-inaccessible from this context. No ACL, source pack,
+or historical execution was changed. The required next step is a host-owned
+control recovery using `scripts/validation/recover_i16_knowledge_pack.ps1`;
+the I16 live gate remains blocked until that copied pack passes the real loader.

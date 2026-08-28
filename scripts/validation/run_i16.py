@@ -19,7 +19,6 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BASELINE = "9d9d2f4a880a032dd26d4ef8d6795f4935c07e00"
 EXPECTED_FIXTURE = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 EXPECTED_SEED = "eb211b00633cbbc909d2494c777c1070ad0db668aa0e64896e9691d2f3bfba83"
 EXPECTED_PACK = "9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1"
@@ -30,6 +29,15 @@ EXPECTED_TASK_ID = "F6-T3"
 
 class PrecheckError(ValueError):
     """A fail-closed preflight violation."""
+
+
+def validate_baseline(expected: str | None, state: Mapping[str, Any]) -> None:
+    """Require an explicit commit that matches both local and remote main."""
+
+    if not expected:
+        raise PrecheckError("pd-agent commit must be supplied explicitly")
+    if expected != state.get("head") or expected != state.get("origin_main"):
+        raise PrecheckError("repository baseline or cleanliness mismatch")
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -156,7 +164,8 @@ def precheck(args: argparse.Namespace) -> dict[str, Any]:
     config = _load_json(Path(args.config_json))
     task = _load_json(Path(args.task_json))
     state = _git_state(repo)
-    if state["head"] != BASELINE or state["origin_main"] != BASELINE or not state["tracked_clean"]:
+    validate_baseline(args.pd_agent_commit, state)
+    if not state["tracked_clean"]:
         raise PrecheckError("repository baseline or cleanliness mismatch")
     validate_config(config)
     task_info = validate_task(task, Path(args.fixture_root).resolve())
@@ -221,7 +230,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--budget-state", type=Path, required=True)
     parser.add_argument("--gradle-home", type=Path, required=True, help="reserved fresh Gradle-home path; LIVE uses ExecutionRoot/environment/gradle-user-home")
     parser.add_argument("--launch-root", type=Path, required=True)
-    parser.add_argument("--pd-agent-commit", default=BASELINE)
+    parser.add_argument("--pd-agent-commit", default=None)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--authorize-i16", action="store_true")
     return parser.parse_args(argv)
@@ -234,8 +243,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode == "live" and not args.authorize_i16:
         raise SystemExit("LIVE requires --authorize-i16")
     try:
-        if args.pd_agent_commit != BASELINE:
-            raise PrecheckError("pd-agent commit mismatch")
         checks = precheck(args)
         if args.mode != "live":
             print(json.dumps({"status": "PRECHECK_PASS", **checks}, indent=2, sort_keys=True))
