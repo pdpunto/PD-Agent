@@ -225,6 +225,9 @@ class FabricRuntimeOrchestrator:
             violation = ValidationViolation(code="RUNTIME_OBSERVATION_MAPPING_INVALID", requirement=plan.validation_requirement_id, observed={"observation_ids": sorted(actual_ids)}, expected=sorted(expected_ids), actual=sorted(actual_ids), evidence_refs=tuple(ref.ref for item in observations for ref in item.evidence_refs), phase="RUNTIME")
             return ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.INVALID, summary="runtime observation mapping invalid", violations=(violation,), evidence_refs=violation.evidence_refs), None
         violations: list[ValidationViolation] = []
+        observation_evidence_refs = tuple(
+            dict.fromkeys(ref.ref for item in observations for ref in item.evidence_refs)
+        )
         for observation in observations:
             if observation.status is MinecraftObservationStatus.FAIL:
                 violations.append(ValidationViolation(code="RUNTIME_OBSERVATION_MISMATCH", requirement=",".join(plan.observation_requirements[observation.observation_id]), observed={"observation_id": observation.observation_id}, expected=observation.expected, actual=observation.actual, message="runtime observation does not match expected value", evidence_refs=tuple(ref.ref for ref in observation.evidence_refs), phase="RUNTIME", observation_id=observation.observation_id))
@@ -233,7 +236,7 @@ class FabricRuntimeOrchestrator:
             elif observation.status is MinecraftObservationStatus.INVALID:
                 violations.append(ValidationViolation(code="RUNTIME_INVALID_RESULT", requirement=",".join(plan.observation_requirements[observation.observation_id]), observed={"observation_id": observation.observation_id}, expected=observation.expected, actual=observation.actual, message="runtime observation is invalid", evidence_refs=tuple(ref.ref for ref in observation.evidence_refs), phase="RUNTIME", observation_id=observation.observation_id))
         status = ValidationStatus.PASS if not violations else (ValidationStatus.INVALID if any(item.code == "RUNTIME_INVALID_RESULT" for item in violations) else ValidationStatus.BLOCKED if any(item.code.startswith("RUNTIME_BLOCKED") or item.code == "RUNTIME_HARNESS_BLOCKED" for item in violations) else ValidationStatus.REPAIRABLE_FAIL)
-        result = ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary="runtime validation passed" if status is ValidationStatus.PASS else "runtime validation failed", violations=tuple(violations), evidence_refs=tuple(dict.fromkeys(ref for item in violations for ref in item.evidence_refs)))
+        result = ValidationResult(stage=ValidationStage.RUNTIME, status=status, summary="runtime validation passed" if status is ValidationStatus.PASS else "runtime validation failed", violations=tuple(violations), evidence_refs=tuple(dict.fromkeys((*observation_evidence_refs, *(ref for item in violations for ref in item.evidence_refs)))))
         requirement_ids = tuple(dict.fromkeys(item for values in plan.observation_requirements.values() for item in values))
         failure = None if status is ValidationStatus.PASS else FailureFact(failure_id=f"runtime-failure-{run_id}", status=FailureFactStatus.ACTIVE, requirement_ids=requirement_ids, code=violations[0].code, category="RUNTIME", evidence_refs=result.evidence_refs)
         return result, failure

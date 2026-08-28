@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,14 +9,18 @@ import pytest
 
 from pd_agent.core import (
     ArtifactResult,
+    BuildAttemptIdentity,
+    FailureFactStatus,
     FabricRequirement,
     FabricTaskContract,
     FabricValidationRequirement,
     RunState,
     TaskProgressLedger,
     ValidationStatus,
+    compute_source_revision,
 )
-from pd_agent.minecraft import MinecraftObservationStatus, MinecraftObservationType, ObservationResult, MinecraftTestStatus
+from pd_agent.minecraft import MinecraftEvidenceKind, MinecraftEvidenceReference, MinecraftObservationStatus, MinecraftObservationType, ObservationResult, MinecraftTestStatus
+from pd_agent.validation import CompletionGate
 from pd_agent.validation import ProductiveMinecraftFunctionalValidator
 from pd_agent.validation.runtime import _artifact_reference
 from pd_agent.core import SecurityViolation
@@ -73,6 +78,7 @@ class _Runner:
             status=self.status,
             expected={"present": True},
             actual={"present": self.status is MinecraftObservationStatus.PASS},
+            evidence_refs=(MinecraftEvidenceReference(kind=MinecraftEvidenceKind.OBSERVATION, ref="runtime/observation.json"),),
         )
         return SimpleNamespace(status=MinecraftTestStatus.PASS, observations=(observation,))
 
@@ -112,6 +118,51 @@ def test_productive_boundary_records_runtime_failure(tmp_path: Path) -> None:
     assert result.status is ValidationStatus.REPAIRABLE_FAIL
     assert runner.calls == 1
     assert state.progress_ledger is not None and state.progress_ledger.failures
+
+
+def test_repair_reconciles_new_validated_artifact_before_second_runtime(tmp_path: Path) -> None:
+    contract = _contract()
+    artifact_a = _artifact(tmp_path)
+    runner = _Runner(MinecraftObservationStatus.FAIL)
+    state = _state(contract, artifact_a)
+    validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=runner)
+    validator.bind_run_state(state)
+
+    first = validator.validate(tmp_path, artifact_a, contract, state.run_id)
+    assert first.status is ValidationStatus.REPAIRABLE_FAIL
+    identity_a = state.artifact_identity
+
+    source = tmp_path / "src" / "ExampleMod.java"
+    source.parent.mkdir()
+    source.write_text("fixed", encoding="utf-8")
+    artifact_a.path.write_bytes(b"repaired-artifact")
+    artifact_b = ArtifactResult(path=artifact_a.path, size=artifact_a.path.stat().st_size, timestamp=datetime.now(timezone.utc), classification="VALID")
+    build_b = BuildAttemptIdentity(
+        build_attempt_id="build-2",
+        source_revision="b" * 64,
+        contract_identity=contract.identity(),
+        result_ref="builds/2",
+        success=True,
+    )
+    state.build_results = (SimpleNamespace(attempt=1, success=True), SimpleNamespace(attempt=2, success=True))
+    state.build_identities = (*state.build_identities, build_b)
+    validator.runner = _Runner(MinecraftObservationStatus.PASS)
+
+    # The validator computes the current source revision from the workspace;
+    # bind the new build identity to that same revision.
+    build_b = replace(build_b, source_revision=compute_source_revision(tmp_path).revision)
+    state.build_identities = (state.build_identities[0], build_b)
+    second = validator.validate(tmp_path, artifact_b, contract, state.run_id)
+
+    assert second.status is ValidationStatus.PASS
+    assert identity_a is not None and state.artifact_identity is not None
+    assert state.artifact_identity.artifact_identity != identity_a.artifact_identity
+    assert runner.calls == 1
+    assert len(state.runtime_identities) == 2
+    assert state.runtime_identities[0].artifact_identity == identity_a.artifact_identity
+    assert state.runtime_identities[1].artifact_identity == state.artifact_identity.artifact_identity
+    assert [item.status for item in state.progress_ledger.failures] == [FailureFactStatus.ACTIVE, FailureFactStatus.RESOLVED]
+    assert CompletionGate().evaluate(contract, state.progress_ledger, state).complete is True
 
 
 def test_invalid_artifact_never_reaches_runner(tmp_path: Path) -> None:

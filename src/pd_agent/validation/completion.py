@@ -72,7 +72,8 @@ class CompletionGate:
         evidence = set(ledger.evidence_by_requirement)
         satisfied = set(ledger.satisfied_requirement_ids)
         pending = tuple(item for item in required_ids if item not in satisfied or item not in evidence or not ledger.evidence_by_requirement.get(item))
-        active = tuple(item.failure_id for item in ledger.failures if item.status is FailureFactStatus.ACTIVE and (not item.requirement_ids or set(item.requirement_ids).intersection(required_ids)))
+        latest_failures = {item.failure_id: item for item in ledger.failures}
+        active = tuple(item.failure_id for item in latest_failures.values() if item.status is FailureFactStatus.ACTIVE and (not item.requirement_ids or set(item.requirement_ids).intersection(required_ids)))
         source = run_state.source_revision.revision if run_state.source_revision is not None else self._read_source_revision(run_state)
 
         missing: list[str] = []

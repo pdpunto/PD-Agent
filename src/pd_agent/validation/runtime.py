@@ -145,10 +145,8 @@ class ProductiveMinecraftFunctionalValidator:
             contract_identity=contract_identity,
         )
         self._run_state.source_revision = SourceRevision(source)
-        if self._run_state.artifact_identity is not None and self._run_state.artifact_identity != artifact_identity:
-            result = ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.BLOCKED, summary="runtime artifact identity is stale")
-            self.last_results = (result,)
-            return result
+        # A successful repair produces a new validated artifact. Publish it as
+        # current before runtime validation while retaining prior runtime facts.
         self._run_state.artifact_identity = artifact_identity
         spec = _minecraft_spec(project_root, self.contract, requirement, artifact)
         runtime_root = self.runtime_root_factory(run_id) if self.runtime_root_factory is not None else None
@@ -167,6 +165,23 @@ class ProductiveMinecraftFunctionalValidator:
             ledger = self._run_state.progress_ledger
             satisfied = tuple(dict.fromkeys((*ledger.satisfied_requirement_ids, *requirement_ids)))
             self._run_state.progress_ledger = replace(ledger, satisfied_requirement_ids=satisfied)
+            if outcome.runtime_identity is not None:
+                from pd_agent.runtime.repair import FailureReconciler
+
+                reconciler = FailureReconciler()
+                for failure in tuple(self._run_state.progress_ledger.failures):
+                    if failure.status.value != "ACTIVE":
+                        continue
+                    if not set(failure.requirement_ids).intersection(requirement_ids):
+                        continue
+                    reconciler.reconcile_runtime(
+                        self._run_state,
+                        failure,
+                        runtime=outcome,
+                        artifact=artifact_identity,
+                        requirement_ids=requirement_ids,
+                        validation_revision=outcome.runtime_identity.validation_revision,
+                    )
         self.last_results = (result,)
         return result
 
