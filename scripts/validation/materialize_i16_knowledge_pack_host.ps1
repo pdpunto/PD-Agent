@@ -63,13 +63,22 @@ if ($originMain.ToLowerInvariant() -ne $PdAgentCommit.ToLowerInvariant()) {
     throw "baseline mismatch: origin/main=$originMain expected=$PdAgentCommit"
 }
 
-$statusLines = @(
-    (Invoke-GitValue -Arguments @('status', '--short', '--untracked-files=all')) -split "`r?`n" |
-        Where-Object { $_.Trim().Length -gt 0 }
-)
+$statusLines = @(& git -C $RepoRoot status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) {
+    throw "git status failed for RepoRoot: $RepoRoot"
+}
 $unexpectedStatus = @(
-    $statusLines | Where-Object {
-        $_ -notmatch '^\?\?\s+scripts/benchmark/diagnostics(?:[\\/])?$'
+    foreach ($statusLine in $statusLines) {
+        $line = [string]$statusLine
+        if ($line.Length -lt 4) {
+            $line
+            continue
+        }
+        $xy = $line.Substring(0, 2)
+        $path = $line.Substring(3).Replace('\', '/')
+        if ($xy -ne '??' -or $path -notmatch '^scripts/benchmark/diagnostics/.+') {
+            $line
+        }
     }
 )
 if ($unexpectedStatus.Count -gt 0) {
