@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from decimal import Decimal
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +53,7 @@ def test_redacted_manifest_never_persists_secret(tmp_path: Path, monkeypatch) ->
 
 
 def test_live_requires_both_live_switch_and_authorization() -> None:
-    args = driver.parse_args(["--mode", "live", "--seed-root", "s", "--seed-manifest", "m", "--knowledge-pack", "p", "--budget-state", "b", "--gradle-home", "g", "--launch-root", "l"])
+    args = driver.parse_args(["--mode", "live", "--seed-root", "s", "--seed-manifest", "m", "--knowledge-pack", "p", "--budget-state", "b", "--gradle-home", "g", "--launch-root", "l", "--global-budget-ceiling", "0.30"])
     assert args.live is False
     assert args.authorize_i16 is False
 
@@ -85,11 +88,75 @@ def test_budget_precheck_rejects_consumed_active_attempt(tmp_path: Path) -> None
     LunaEconomicStateStore(state, path=path).persist()
 
     try:
-        driver.validate_budget(path)
+        driver.validate_budget(path, "0.30")
     except driver.PrecheckError as error:
         assert str(error) == "shared I16 budget has an active consumed attempt"
     else:
         raise AssertionError("precheck must reject a consumed active attempt")
+
+
+@pytest.mark.parametrize("ceiling", ["0.30", "0.35"])
+def test_budget_precheck_accepts_explicit_supported_ceiling(tmp_path: Path, ceiling: str) -> None:
+    from pd_agent.experimental import LunaEconomicState, LunaEconomicStateStore
+
+    path = tmp_path / "economic.json"
+    state = LunaEconomicState(execution_id="precheck", global_ceiling_usd=Decimal(ceiling))
+    LunaEconomicStateStore(state, path=path).persist()
+
+    result = driver.validate_budget(path, ceiling)
+
+    assert result["global_ceiling_usd"] == ceiling
+
+
+@pytest.mark.parametrize(
+    ("ledger_ceiling", "expected_ceiling"),
+    [("0.35", "0.30"), ("0.30", "0.35")],
+)
+def test_budget_precheck_rejects_ceiling_mismatch(
+    tmp_path: Path, ledger_ceiling: str, expected_ceiling: str
+) -> None:
+    from pd_agent.experimental import LunaEconomicState, LunaEconomicStateStore
+
+    path = tmp_path / "economic.json"
+    state = LunaEconomicState(execution_id="precheck", global_ceiling_usd=Decimal(ledger_ceiling))
+    LunaEconomicStateStore(state, path=path).persist()
+
+    with pytest.raises(ValueError, match="shared economic ceiling mismatch"):
+        driver.validate_budget(path, expected_ceiling)
+
+
+@pytest.mark.parametrize("value", ["not-a-decimal", "0", "-0.01", "NaN"])
+def test_global_budget_ceiling_parser_fails_closed(value: str) -> None:
+    with pytest.raises(Exception):
+        driver._parse_global_budget_ceiling(value)
+
+
+def test_precheck_and_live_parse_the_same_explicit_ceiling() -> None:
+    args = driver.parse_args(
+        [
+            "--mode",
+            "precheck",
+            "--seed-root",
+            "s",
+            "--seed-manifest",
+            "m",
+            "--knowledge-pack",
+            "p",
+            "--budget-state",
+            "b",
+            "--gradle-home",
+            "g",
+            "--launch-root",
+            "l",
+            "--global-budget-ceiling",
+            "0.35",
+        ]
+    )
+    source = (ROOT / "scripts" / "validation" / "run_i16.py").read_text(encoding="utf-8")
+
+    assert args.global_budget_ceiling == Decimal("0.35")
+    assert "validate_budget(Path(args.budget_state).resolve(), args.global_budget_ceiling)" in source
+    assert "expected_global_ceiling=args.global_budget_ceiling" in source
 
 
 def _f6_t3() -> dict[str, object]:

@@ -8,6 +8,7 @@ Minecraft; LIVE requires both explicit mode and authorization flags.
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -24,13 +25,22 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_FIXTURE = "3c27fd809429bc57637b3d930733d5cc7c1891073e9307325d30d25058161396"
 EXPECTED_SEED = "eb211b00633cbbc909d2494c777c1070ad0db668aa0e64896e9691d2f3bfba83"
 EXPECTED_PACK = "9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5"
-SHARED_CEILING = "0.30"
 EXPECTED_CONFIG_ID = "openai-official-gpt-5.6-luna-brain-on"
 EXPECTED_TASK_ID = "F6-T3"
 
 
 class PrecheckError(ValueError):
     """A fail-closed preflight violation."""
+
+
+def _parse_global_budget_ceiling(value: str) -> Decimal:
+    try:
+        ceiling = Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise argparse.ArgumentTypeError("global budget ceiling must be a decimal") from exc
+    if not ceiling.is_finite() or ceiling <= 0:
+        raise argparse.ArgumentTypeError("global budget ceiling must be positive and finite")
+    return ceiling
 
 
 def _runtime_observation(
@@ -170,11 +180,12 @@ def validate_pack(pack_path: Path) -> None:
     load_frozen_knowledge_pack(pack_path, expected_pack_id=EXPECTED_PACK)
 
 
-def validate_budget(path: Path) -> dict[str, Any]:
+def validate_budget(path: Path, expected_global_ceiling: Decimal | str) -> dict[str, Any]:
     from pd_agent.experimental.luna_budget import LunaPricingSnapshot, LunaSharedBudgetSession
 
-    session = LunaSharedBudgetSession.load(path, expected_global_ceiling=SHARED_CEILING)
-    if str(session.ceiling_usd) != SHARED_CEILING or session.state.global_remaining_usd < 0:
+    expected_ceiling = Decimal(str(expected_global_ceiling))
+    session = LunaSharedBudgetSession.load(path, expected_global_ceiling=expected_ceiling)
+    if session.ceiling_usd != expected_ceiling or session.state.global_remaining_usd < 0:
         raise PrecheckError("shared I16 budget is not valid")
     if session.state.reconciliation_state == "UNCERTAIN_CONSUMED":
         raise PrecheckError("shared I16 budget is uncertain")
@@ -196,6 +207,7 @@ def validate_budget(path: Path) -> dict[str, Any]:
         )
     return {
         "session_id": session.session_id,
+        "global_ceiling_usd": str(session.ceiling_usd),
         "remaining_usd": str(session.state.global_remaining_usd),
         "next_request_probe": probe,
     }
@@ -241,7 +253,7 @@ def precheck(args: argparse.Namespace) -> dict[str, Any]:
     task_info = validate_task(task, Path(args.fixture_root).resolve())
     validate_seed(Path(args.seed_root).resolve(), Path(args.seed_manifest).resolve())
     validate_pack(Path(args.knowledge_pack).resolve())
-    budget = validate_budget(Path(args.budget_state).resolve())
+    budget = validate_budget(Path(args.budget_state).resolve(), args.global_budget_ceiling)
     if not os.environ.get("OPENAI_API_KEY"):
         raise PrecheckError("OPENAI_API_KEY is not present")
     launch = Path(args.launch_root).resolve()
@@ -277,7 +289,10 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
     task = _load_json(Path(args.task_json))
     pack = load_frozen_knowledge_pack(args.knowledge_pack, expected_pack_id=EXPECTED_PACK)
     storage = RunStorage(execution_root / "evidence", secrets=(os.environ["OPENAI_API_KEY"],))
-    budget_session = LunaSharedBudgetSession.load(args.budget_state)
+    budget_session = LunaSharedBudgetSession.load(
+        args.budget_state,
+        expected_global_ceiling=args.global_budget_ceiling,
+    )
     budget_guard = budget_session.guard(consumer_id=run_id)
     budget_guard.begin_attempt(run_id)
     provider = OpenAIProvider(model=config["model"], api_key=os.environ["OPENAI_API_KEY"], provider_retry_limit=2, service_tier="default", budget_guard=budget_guard)
@@ -302,6 +317,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed-manifest", type=Path, required=True)
     parser.add_argument("--knowledge-pack", type=Path, required=True)
     parser.add_argument("--budget-state", type=Path, required=True)
+    parser.add_argument("--global-budget-ceiling", type=_parse_global_budget_ceiling, required=True)
     parser.add_argument("--gradle-home", type=Path, required=True, help="reserved fresh Gradle-home path; LIVE uses ExecutionRoot/environment/gradle-user-home")
     parser.add_argument("--launch-root", type=Path, required=True)
     parser.add_argument("--pd-agent-commit", default=None)

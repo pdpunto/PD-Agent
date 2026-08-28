@@ -41,3 +41,14 @@ boundary.
 
 The only remaining I16 evidence after this offline fix is a newly authorized
 Minecraft-integrated execution that reaches `CompletionGate PASS`.
+
+## Economic Ceiling Configuration
+
+The I16 driver does not hardcode an operational shared-budget ceiling. Every
+PRECHECK and LIVE invocation must provide `--global-budget-ceiling` explicitly.
+The driver validates that value against the persisted shared ledger before
+constructing a live provider session, and uses the same value for the LIVE
+load. A mismatch, malformed value, non-positive value, or invalid ledger is
+fail-closed; no migration or automatic adoption of the ledger ceiling occurs.
+The previously supported `0.30` ceiling remains valid when explicitly passed,
+and the current I16 ledger is validated with `0.35`.
