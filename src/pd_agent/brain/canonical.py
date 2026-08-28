@@ -126,6 +126,7 @@ class KnowledgeRecord:
     def _payload(self) -> dict[str, Any]:
         provenance = self.provenance.to_dict()
         provenance.pop("locator", None)
+        provenance.pop("retrieved_at", None)
         return {
             "schema_version": "v0.7",
             "record_id": self.record_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import datetime, timezone
 
 import pytest
 
@@ -28,7 +29,11 @@ ENVIRONMENT = KnowledgeEnvironment(
 )
 
 
-def _provenance(locator: str = "file://knowledge.json") -> KnowledgeProvenance:
+def _provenance(
+    locator: str = "file://knowledge.json",
+    *,
+    retrieved_at: datetime | None = None,
+) -> KnowledgeProvenance:
     return KnowledgeProvenance(
         source_id="test-source",
         source_kind="fixture",
@@ -38,6 +43,7 @@ def _provenance(locator: str = "file://knowledge.json") -> KnowledgeProvenance:
         checksum_algorithm="sha256",
         checksum="a" * 64,
         license_id_or_policy="REDISTRIBUTABLE",
+        retrieved_at=retrieved_at,
     )
 
 
@@ -78,6 +84,64 @@ def test_record_identity_is_deterministic_and_excludes_mutable_locator() -> None
 
     assert first.identity() == second.identity()
     assert first.to_dict()["record_identity"] == first.identity()
+
+
+def test_record_identity_excludes_retrieved_at_but_preserves_observable_provenance() -> None:
+    first = _record()
+    second = KnowledgeRecord(
+        record_id=first.record_id,
+        kind=first.kind,
+        content=first.content,
+        environment=first.environment,
+        provenance=_provenance(retrieved_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        authority=first.authority,
+    )
+
+    assert first.identity() == second.identity()
+    assert second.to_dict()["provenance"]["retrieved_at"] == "2026-01-01T00:00:00+00:00"
+
+
+def test_record_identity_changes_for_semantic_content_change() -> None:
+    first = _record()
+    changed = KnowledgeRecord(
+        record_id=first.record_id,
+        kind=first.kind,
+        content={"symbol": "Different"},
+        environment=first.environment,
+        provenance=_provenance(retrieved_at=datetime(2026, 1, 2, tzinfo=timezone.utc)),
+        authority=first.authority,
+    )
+
+    assert first.identity() != changed.identity()
+
+
+def test_pack_identity_ignores_retrieved_at_only_changes() -> None:
+    first_record = KnowledgeRecord(
+        record_id="stable-record",
+        kind=KnowledgeType.SYMBOL,
+        content={"symbol": "Example"},
+        environment=ENVIRONMENT,
+        provenance=_provenance(retrieved_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
+        authority=SourceAuthority.AUTHORITATIVE_SOURCE,
+    )
+    second_record = KnowledgeRecord(
+        record_id=first_record.record_id,
+        kind=first_record.kind,
+        content=first_record.content,
+        environment=first_record.environment,
+        provenance=_provenance(
+            locator="https://other.example/knowledge.json",
+            retrieved_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        ),
+        authority=first_record.authority,
+    )
+    first_inventory = ({"record_id": first_record.record_id, "record_identity": first_record.identity()},)
+    second_inventory = ({"record_id": second_record.record_id, "record_identity": second_record.identity()},)
+    first_manifest = KnowledgePackManifest(ENVIRONMENT, ({"source_id": "test"},), first_inventory)
+    second_manifest = KnowledgePackManifest(ENVIRONMENT, ({"source_id": "test"},), second_inventory)
+
+    assert first_record.to_dict()["provenance"]["retrieved_at"] != second_record.to_dict()["provenance"]["retrieved_at"]
+    assert first_manifest.pack_id == second_manifest.pack_id
 
 
 def test_record_identity_changes_when_content_changes() -> None:
