@@ -33,6 +33,37 @@ class PrecheckError(ValueError):
     """A fail-closed preflight violation."""
 
 
+def _runtime_observation(
+    observation_id: str,
+    observation_type: str,
+    observation_params: Mapping[str, Any],
+    requirement_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    """Map I16 acceptance data to the closed productive observation envelope."""
+
+    if observation_type != "REGISTRY_ENTRY_PRESENT":
+        raise PrecheckError(f"unsupported I16 observation type: {observation_type}")
+    if set(observation_params) != {"registry_kind", "identifier"}:
+        raise PrecheckError("I16 registry observation parameters are incomplete")
+    if not requirement_ids:
+        raise PrecheckError("I16 runtime observation requires requirement IDs")
+    return {
+        "observation_id": observation_id,
+        "observation_type": observation_type,
+        "profile": "registry_entry",
+        "selector": {
+            "kind": "registry",
+            "registry_kind": observation_params["registry_kind"],
+            "identifier": observation_params["identifier"],
+        },
+        "expected": {"present": True},
+        "parameters": {},
+        "phase": "RUNTIME",
+        "metadata": {},
+        "requirement_ids": list(requirement_ids),
+    }
+
+
 def validate_baseline(expected: str | None, state: Mapping[str, Any]) -> None:
     """Require an explicit commit that matches both local and remote main."""
 
@@ -175,10 +206,13 @@ def build_contract(task: Mapping[str, Any], fixture_root: Path) -> Any:
 
     spec = task["acceptance"]["spec"]
     environment = task["environment"]
-    observations = [{"observation_id": "F6-T3:primary", "observation_type": spec["observation_type"], "observation_params": spec["observation_params"], "required": True, "profile": {}}]
-    observations.extend({"observation_id": item["test_id"], "observation_type": item["observation_type"], "observation_params": item["observation_params"], "required": True, "profile": {}} for item in spec["required_minecraft_observations"])
+    observations = [_runtime_observation("F6-T3:primary", spec["observation_type"], spec["observation_params"], ("runtime",))]
+    observations.extend(
+        _runtime_observation(item["test_id"], item["observation_type"], item["observation_params"], ("runtime",))
+        for item in spec["required_minecraft_observations"]
+    )
     requirements = tuple(FabricRequirement(requirement_id=key, description=value) for key, value in {"source": task["prompt"], "build": "Build the changed Fabric project.", "artifact": "Produce a current valid artifact.", "runtime": "Validate the required Minecraft observations."}.items())
-    validation = FabricValidationRequirement(validation_requirement_id="minecraft-runtime", requirement_ids=("runtime",), kind="minecraft", spec={"target_mod_id": "examplemod", "minecraft_version": environment["minecraft_version"], "loader_version": environment["loader_version"], "test_id": "F6-T3", "observations": observations})
+    validation = FabricValidationRequirement(validation_requirement_id="minecraft-runtime", requirement_ids=("runtime",), kind="minecraft", spec={"target_mod_id": "examplemod", "minecraft_version": environment["minecraft_version"], "loader_version": environment["loader_version"], "test_id": "F6-T3", "observation_type": spec["observation_type"], "observation_params": spec["observation_params"], "observations": observations})
     snapshot = ProjectInspector().inspect(fixture_root)
     mutations = tuple(
         FabricMutationExpectation(expectation_id=f"F6-T3:{path}", role="source", path=path)
