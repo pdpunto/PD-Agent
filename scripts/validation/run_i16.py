@@ -237,7 +237,7 @@ def build_contract(task: Mapping[str, Any], fixture_root: Path) -> Any:
 
 
 def _redacted_manifest(path: Path, args: argparse.Namespace, config: Mapping[str, Any], task: Mapping[str, Any]) -> None:
-    payload = {"schema_version": 1, "mode": args.mode.upper(), "experimental": False, "non_official": False, "task_id": task["task_id"], "config_id": config["config_id"], "provider": config["provider"], "model": config["model"], "brain_enabled": config["brain_enabled"], "authorization": bool(args.authorize_i16), "api_key_present": bool(os.environ.get("OPENAI_API_KEY")), "secret_values_persisted": False}
+    payload = {"schema_version": 1, "mode": args.mode.upper(), "experimental": bool(getattr(args, "experimental", False)), "non_official": bool(getattr(args, "non_official", False)), "task_id": task["task_id"], "config_id": config["config_id"], "provider": config["provider"], "model": config["model"], "brain_enabled": config["brain_enabled"], "authorization": bool(args.authorize_i16), "api_key_present": bool(os.environ.get("OPENAI_API_KEY")), "secret_values_persisted": False}
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
 
 
@@ -323,6 +323,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pd-agent-commit", default=None)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--authorize-i16", action="store_true")
+    parser.add_argument("--experimental", action="store_true")
+    parser.add_argument("--non-official", action="store_true")
     return parser.parse_args(argv)
 
 

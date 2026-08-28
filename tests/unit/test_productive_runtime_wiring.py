@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from pd_agent.core import (
     ArtifactResult,
     FabricRequirement,
@@ -15,6 +17,8 @@ from pd_agent.core import (
 )
 from pd_agent.minecraft import MinecraftObservationStatus, MinecraftObservationType, ObservationResult, MinecraftTestStatus
 from pd_agent.validation import ProductiveMinecraftFunctionalValidator
+from pd_agent.validation.runtime import _artifact_reference
+from pd_agent.core import SecurityViolation
 
 
 def _contract(runtime: bool = True) -> FabricTaskContract:
@@ -58,9 +62,11 @@ class _Runner:
     def __init__(self, status: MinecraftObservationStatus) -> None:
         self.status = status
         self.calls = 0
+        self.specs = []
 
     def run(self, spec, **kwargs):  # noqa: ANN001
         self.calls += 1
+        self.specs.append(spec)
         observation = ObservationResult(
             observation_id="obs-1",
             observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
@@ -87,6 +93,7 @@ def test_productive_boundary_validates_without_benchmark_imports(tmp_path: Path)
 
     assert result.status is ValidationStatus.PASS
     assert runner.calls == 1
+    assert runner.specs[0].target_jar == Path("mod.jar")
     assert state.artifact_identity is not None
     assert state.progress_ledger is not None
     assert state.progress_ledger.satisfied_requirement_ids == ("runtime",)
@@ -134,3 +141,22 @@ def test_runtime_not_required_never_reaches_runner(tmp_path: Path) -> None:
 
     assert result.status is ValidationStatus.PASS
     assert runner.calls == 0
+
+
+def test_internal_absolute_artifact_becomes_relative_runtime_reference(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+
+    assert _artifact_reference(tmp_path, artifact.path) == Path("build/libs/mod.jar")
+
+
+def test_external_absolute_artifact_is_rejected_before_runtime(tmp_path: Path) -> None:
+    external = tmp_path.parent / "external.jar"
+    external.write_bytes(b"external")
+
+    with pytest.raises(SecurityViolation, match="artifact path escapes project_root"):
+        _artifact_reference(tmp_path, external)
+
+
+def test_artifact_traversal_is_rejected_before_runtime(tmp_path: Path) -> None:
+    with pytest.raises(SecurityViolation, match="path escapes project_root"):
+        _artifact_reference(tmp_path, Path("..") / "external.jar")

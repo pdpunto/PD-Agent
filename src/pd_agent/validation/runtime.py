@@ -17,6 +17,7 @@ from pd_agent.core import (
     ValidationStage,
     ValidationStatus,
     ValidationViolation,
+    SecurityViolation,
     artifact_identity_from_result,
     compute_source_revision,
 )
@@ -26,6 +27,7 @@ from pd_agent.minecraft import (
     MinecraftTestRunner,
     MinecraftTestSpec,
 )
+from pd_agent.tools import SecurePathResolver
 
 
 def _runtime_requirement(contract: FabricTaskContract) -> Any | None:
@@ -39,14 +41,31 @@ def _runtime_requirement(contract: FabricTaskContract) -> Any | None:
     )
 
 
-def _minecraft_spec(contract: FabricTaskContract, requirement: Any, artifact: ArtifactResult) -> MinecraftTestSpec:
+def _artifact_reference(project_root: Path, artifact_path: Path) -> Path:
+    """Convert an internal physical artifact path to a confined reference."""
+
+    resolver = SecurePathResolver(Path(project_root))
+    raw_path = Path(artifact_path)
+    if raw_path.is_absolute() or raw_path.drive or raw_path.anchor:
+        physical_path = raw_path.resolve(strict=False)
+        try:
+            relative_path = physical_path.relative_to(resolver.project_root)
+        except ValueError as exc:
+            raise SecurityViolation("artifact path escapes project_root") from exc
+    else:
+        relative_path = raw_path
+    resolver.resolve_existing_file(relative_path)
+    return relative_path
+
+
+def _minecraft_spec(project_root: Path, contract: FabricTaskContract, requirement: Any, artifact: ArtifactResult) -> MinecraftTestSpec:
     spec = dict(requirement.spec)
     environment = contract.environment_constraints
     target_mod_id = spec.get("target_mod_id")
     if not isinstance(target_mod_id, str) or not target_mod_id.strip():
         raise ValueError("runtime validation spec requires target_mod_id")
     return MinecraftTestSpec(
-        target_jar=Path(artifact.path) if artifact.path is not None else Path("."),
+        target_jar=_artifact_reference(project_root, Path(artifact.path)) if artifact.path is not None else Path("."),
         runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", ())),
         target_mod_id=target_mod_id,
         minecraft_version=str(spec.get("minecraft_version", environment.minecraft_version)),
@@ -131,7 +150,7 @@ class ProductiveMinecraftFunctionalValidator:
             self.last_results = (result,)
             return result
         self._run_state.artifact_identity = artifact_identity
-        spec = _minecraft_spec(self.contract, requirement, artifact)
+        spec = _minecraft_spec(project_root, self.contract, requirement, artifact)
         runtime_root = self.runtime_root_factory(run_id) if self.runtime_root_factory is not None else None
         outcome = FabricRuntimeOrchestrator(self.runner).validate(
             contract=self.contract,

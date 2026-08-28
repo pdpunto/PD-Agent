@@ -52,6 +52,30 @@ def test_redacted_manifest_never_persists_secret(tmp_path: Path, monkeypatch) ->
     assert secret not in (tmp_path / "manifest.json").read_text(encoding="utf-8")
 
 
+def test_i16_manifest_defaults_to_official_flags(tmp_path: Path) -> None:
+    args = driver.parse_args(["--seed-root", "s", "--seed-manifest", "m", "--knowledge-pack", "p", "--budget-state", "b", "--global-budget-ceiling", "0.35", "--gradle-home", "g", "--launch-root", "l"])
+    config = {"config_id": "cfg", "provider": "openai", "model": "gpt-5.6-luna", "brain_enabled": True}
+    task = {"task_id": "F6-T3"}
+
+    driver._redacted_manifest(tmp_path / "manifest.json", args, config, task)
+    payload = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+
+    assert payload["experimental"] is False
+    assert payload["non_official"] is False
+
+
+def test_i16_manifest_preserves_explicit_non_official_flags(tmp_path: Path) -> None:
+    args = driver.parse_args(["--seed-root", "s", "--seed-manifest", "m", "--knowledge-pack", "p", "--budget-state", "b", "--global-budget-ceiling", "0.35", "--gradle-home", "g", "--launch-root", "l", "--experimental", "--non-official"])
+    config = {"config_id": "cfg", "provider": "openai", "model": "gpt-5.6-luna", "brain_enabled": True}
+    task = {"task_id": "F6-T3"}
+
+    driver._redacted_manifest(tmp_path / "manifest.json", args, config, task)
+    payload = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+
+    assert payload["experimental"] is True
+    assert payload["non_official"] is True
+
+
 def test_live_requires_both_live_switch_and_authorization() -> None:
     args = driver.parse_args(["--mode", "live", "--seed-root", "s", "--seed-manifest", "m", "--knowledge-pack", "p", "--budget-state", "b", "--gradle-home", "g", "--launch-root", "l", "--global-budget-ceiling", "0.30"])
     assert args.live is False
