@@ -7,7 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedPackId = '9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1'
+$ExpectedPackId = '9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5'
+$HistoricalPackId = '9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1'
 $ExpectedRecords = 104978
 $ExpectedYarnSha = 'e8112359716235dc4fd7f0bd4a6162fd728e0d1067d9fa02f289edaaccd37718'
 $ExpectedFabricApiSha = 'bdff7fd7e220085cfad2ff9b1f40dde6534ae0b96cf378f97a374bc54cb9ed0f'
@@ -149,8 +150,8 @@ foreach ($label in @('A', 'B')) {
 }
 
 $deterministic = $runs[0].pack_id -eq $runs[1].pack_id -and $runs[0].records -eq $runs[1].records -and $runs[0].inventory_hash -eq $runs[1].inventory_hash -and $runs[0].record_identity_hash -eq $runs[1].record_identity_hash
-$historicalMatch = $runs[0].pack_id -eq $ExpectedPackId
-$summary = [ordered]@{ status=if($deterministic){'DETERMINISTIC_CURRENT_PACK'}else{'CURRENT_PACK_NONDETERMINISTIC'}; matches_historical_pack=if($historicalMatch){'YES'}else{'NO'}; historical_pack_id=$ExpectedPackId; expected_records=$ExpectedRecords; launch_root=$launchRoot; evidence=$evidence; runs=$runs; network='NOT_USED' }
+$historicalMatch = $runs[0].pack_id -eq $HistoricalPackId
+$summary = [ordered]@{ status=if($deterministic){'DETERMINISTIC_CURRENT_PACK'}else{'CURRENT_PACK_NONDETERMINISTIC'}; matches_historical_pack=if($historicalMatch){'YES'}else{'NO'}; current_pack_id=$ExpectedPackId; historical_pack_id=$HistoricalPackId; expected_records=$ExpectedRecords; launch_root=$launchRoot; evidence=$evidence; runs=$runs; network='NOT_USED' }
 $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $evidence 'summary.json') -Encoding UTF8
 Write-Output "LAUNCH_ROOT=$launchRoot"
 Write-Output "EVIDENCE=$evidence"

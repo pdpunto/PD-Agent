@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Candidate,
     [Parameter(Mandatory = $true)][string]$Destination,
     [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
-    [string]$ExpectedPackId = "9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1",
+    [string]$ExpectedPackId = "9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5",
     [int]$ExpectedRecords = 104978
 )
 

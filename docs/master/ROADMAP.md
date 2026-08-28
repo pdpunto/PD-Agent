@@ -2,6 +2,11 @@
 
 Status: Updated after v0.7 final closure.
 
+The current v0.8 I16 Knowledge Pack identity is
+`9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5` with
+104978 records. The v0.7 identity remains historical; the change reflects
+the canonical identity correction excluding `retrieved_at`.
+
 ## Confirmed Milestones
 
 1. `v0.1` - Fabric Coding Loop - completed

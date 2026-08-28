@@ -44,6 +44,10 @@ which made its own preparation commit fail closed. The driver now requires
 `origin/main`.
 
 The recovered Gradle seed is readable and verifies against the frozen identity.
+The current v0.8 Knowledge Pack identity is
+`9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5` with
+104978 records. The v0.7 identity `9045db86cf29d54f526a918be95c74cc37db87597bcc443cfbdb6f396ca04ef1`
+is retained only as historical evidence and is not the current I16 expectation.
 The frozen Knowledge Pack candidates found in the local temporary area exist,
 but their roots are ACL-inaccessible from this context. No ACL, source pack,
 or historical execution was changed. The required next step is a host-owned

@@ -60,6 +60,17 @@ provider performance. No official benchmark was required. Alpha is not
 declared, v0.8 has not started, and later work remains subject to a separate
 Direction decision.
 
+## v0.8 Knowledge Pack Currentness
+
+The v0.8 canonical Knowledge Pack identity is
+`9f1ef7ac14fa63b79aa8ef3decd1fce232729b4eefee6f2292382db4f3f4f3a5`, with
+104978 records. It supersedes the v0.7 historical pack identity only for
+current v0.8 I16 operation because `retrieved_at` is excluded from canonical
+record identity as required by the v0.8 RFC. The v0.7 pack identity remains
+historical and unchanged. Two independent host materializations produced the
+same current identity, inventory and record identities; loader validation
+passed for both.
+
 ## v0.6 Closure
 
 `PD Agent v0.6 - Fabric Capability Expansion` is closed as:
