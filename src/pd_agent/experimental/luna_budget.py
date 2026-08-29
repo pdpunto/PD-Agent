@@ -559,6 +559,28 @@ class LunaSharedBudgetSession:
             shared_consumer_id=consumer_id,
         )
 
+    def preview_budget(
+        self,
+        *,
+        consumer_id: str,
+        input_tokens: int,
+        output_limit: int | None = None,
+        retry_count: int = 0,
+        experimental: bool = False,
+        non_official: bool = False,
+    ) -> dict[str, Any]:
+        """Preview affordability without opening or persisting an attempt."""
+
+        return self.guard(
+            consumer_id=consumer_id,
+            experimental=experimental,
+            non_official=non_official,
+        ).preview_budget(
+            input_tokens=input_tokens,
+            output_limit=output_limit,
+            retry_count=retry_count,
+        )
+
 
 @dataclass(slots=True)
 class LunaBudgetGuard:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from pathlib import Path
 
@@ -67,6 +68,46 @@ def test_shared_session_rejects_expected_ceiling_mismatch(tmp_path: Path) -> Non
     LunaSharedBudgetSession.create(path, global_ceiling=Decimal("0.30"))
     with pytest.raises(ValueError, match="shared economic ceiling mismatch"):
         LunaSharedBudgetSession.load(path, expected_global_ceiling=Decimal("0.25"))
+
+
+def test_shared_preview_is_persistence_free(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    session = LunaSharedBudgetSession.create(path, global_ceiling=Decimal("0.56"))
+    before_bytes = path.read_bytes()
+    before = json.loads(before_bytes)
+
+    preview = session.preview_budget(
+        consumer_id="precheck",
+        input_tokens=0,
+        output_limit=16_384,
+    )
+
+    assert preview["decision"] == "ALLOW"
+    assert path.read_bytes() == before_bytes
+    assert json.loads(path.read_bytes()) == before
+    assert session.state.active_attempt_id is None
+    assert session.state.physical_request_count == 0
+    assert session.state.logical_provider_turn_count == 0
+    assert session.state.ledger == {}
+    assert session.state.dispatch_records == {}
+
+
+def test_shared_preview_does_not_close_or_replace_real_attempt(tmp_path: Path) -> None:
+    path = tmp_path / "economic.json"
+    session = LunaSharedBudgetSession.create(path)
+    guard = session.guard(consumer_id="live")
+    guard.begin_attempt("real-attempt")
+    before = session.state.to_dict()
+
+    preview = session.preview_budget(
+        consumer_id="precheck",
+        input_tokens=0,
+        output_limit=100,
+    )
+
+    assert preview["decision"] == "ALLOW"
+    assert session.state.to_dict() == before
+    assert session.state.active_attempt_id == "real-attempt"
 
 
 def test_global_ceiling_migration_is_upward_only_and_preserves_history(tmp_path: Path) -> None:

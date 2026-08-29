@@ -181,7 +181,7 @@ def validate_pack(pack_path: Path) -> None:
 
 
 def validate_budget(path: Path, expected_global_ceiling: Decimal | str) -> dict[str, Any]:
-    from pd_agent.experimental.luna_budget import LunaPricingSnapshot, LunaSharedBudgetSession
+    from pd_agent.experimental.luna_budget import LunaSharedBudgetSession
 
     expected_ceiling = Decimal(str(expected_global_ceiling))
     session = LunaSharedBudgetSession.load(path, expected_global_ceiling=expected_ceiling)
@@ -195,9 +195,11 @@ def validate_budget(path: Path, expected_global_ceiling: Decimal | str) -> dict[
         or session.state.attempt_uncertain_consumed_usd
     ):
         raise PrecheckError("shared I16 budget has an active consumed attempt")
-    guard = session.guard(consumer_id="precheck")
-    guard.pricing = LunaPricingSnapshot(max_output_tokens=16384)
-    probe = guard.preview_budget(input_tokens=0, output_limit=16384)
+    probe = session.preview_budget(
+        consumer_id="precheck",
+        input_tokens=0,
+        output_limit=16384,
+    )
     if probe["decision"] != "ALLOW":
         raise PrecheckError(
             "shared I16 budget blocks the next request: "
