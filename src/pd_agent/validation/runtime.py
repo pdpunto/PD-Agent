@@ -26,6 +26,7 @@ from pd_agent.minecraft import (
     MinecraftObservationType,
     MinecraftTestRunner,
     MinecraftTestSpec,
+    runtime_spec_from_requirement,
 )
 from pd_agent.tools import SecurePathResolver
 
@@ -67,6 +68,7 @@ def _minecraft_spec(project_root: Path, contract: FabricTaskContract, requiremen
     return MinecraftTestSpec(
         target_jar=_artifact_reference(project_root, Path(artifact.path)) if artifact.path is not None else Path("."),
         runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", ())),
+        observation_requests=runtime_spec_from_requirement(requirement).observations,
         target_mod_id=target_mod_id,
         minecraft_version=str(spec.get("minecraft_version", environment.minecraft_version)),
         loader_version=str(spec.get("loader_version", environment.loader_version)),

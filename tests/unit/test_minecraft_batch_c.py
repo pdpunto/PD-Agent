@@ -611,6 +611,35 @@ def test_runner_preserves_generic_observation_labels_in_launch_plan(tmp_path: Pa
     assert dict(plan.system_properties)["pd.agent.minecraft.expect_neighbor_update"] == "false"
 
 
+def test_runner_maps_registry_harness_result_to_structured_observation(tmp_path: Path) -> None:
+    runner = _runner(tmp_path)
+    status, reason, metadata = runner._classify_runtime(
+        process={"timed_out": False, "exit_code": 0},
+        harness_result={
+            "test_id": "F6-T3:primary",
+            "observation_type": "REGISTRY_ENTRY_PRESENT",
+            "registry_kind": "block",
+            "observed_identifier": "examplemod:server_core",
+            "target_loaded": True,
+            "target_origin_resolved": True,
+            "target_sha_match": True,
+            "server_started": True,
+            "functional_test_result": "PASS",
+            "shutdown_requested": True,
+            "reason": "target verified",
+        },
+        latest_log="",
+        launch_mode="pass",
+        target=type("Target", (), {"path": Path("target.jar"), "sha256": "a" * 64, "mod_id": "examplemod"})(),
+        timeout_seconds=30,
+    )
+
+    assert status is MinecraftTestStatus.PASS
+    assert reason == "target verified"
+    assert metadata["observation_result"]["observation_id"] == "F6-T3:primary"
+    assert metadata["observation_result"]["actual"]["present"] is True
+
+
 def test_runner_rejects_missing_or_ambiguous_main_entrypoint(tmp_path: Path) -> None:
     runner = _runner(tmp_path)
     _make_manifest_jar(

@@ -4,6 +4,7 @@ import importlib.util
 from pathlib import Path
 
 from pd_agent.minecraft import runtime_spec_from_requirement
+from pd_agent.minecraft import MinecraftObservationType, ObservationRequest
 
 
 REPO_ROOT = Path(__file__).parents[2]
@@ -42,3 +43,37 @@ def test_i16_runtime_mapping_uses_observation_request_contract() -> None:
         "F6-T3:primary": ("runtime",),
         "F6-T3:item": ("runtime",),
     }
+
+
+def test_minecraft_spec_round_trip_preserves_all_observation_requests() -> None:
+    from pd_agent.minecraft import MinecraftTestSpec
+
+    requests = (
+        ObservationRequest(
+            observation_id="obs-primary",
+            observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+            profile="registry_entry",
+            selector={"kind": "registry", "registry_kind": "block", "identifier": "examplemod:server_core"},
+            expected={"present": True},
+        ),
+        ObservationRequest(
+            observation_id="obs-item",
+            observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+            profile="registry_entry",
+            selector={"kind": "registry", "registry_kind": "item", "identifier": "examplemod:server_core"},
+            expected={"present": True},
+        ),
+    )
+    spec = MinecraftTestSpec(
+        target_jar=Path("target.jar"),
+        target_mod_id="examplemod",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="runtime",
+        timeout_seconds=30,
+        observation_requests=requests,
+    )
+
+    restored = MinecraftTestSpec.from_dict(spec.to_dict())
+
+    assert restored.observation_requests == requests

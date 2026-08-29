@@ -837,6 +837,7 @@ class MinecraftTestSpec:
     runtime_mod_jars: tuple[Path, ...] = ()
     command_invocation: CommandInvocation | None = None
     event_profile: str | None = None
+    observation_requests: tuple[ObservationRequest, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
@@ -867,6 +868,13 @@ class MinecraftTestSpec:
             object.__setattr__(self, "command_invocation", CommandInvocation.from_dict(self.command_invocation))
         if self.event_profile is not None and self.event_profile != _I8_EVENT_PROFILE:
             raise ValueError("unsupported event profile")
+        requests = tuple(
+            item if isinstance(item, ObservationRequest) else ObservationRequest.from_dict(item)
+            for item in self.observation_requests
+        )
+        if len({item.observation_id for item in requests}) != len(requests):
+            raise ValueError("observation request IDs must be unique")
+        object.__setattr__(self, "observation_requests", requests)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -886,6 +894,11 @@ class MinecraftTestSpec:
                 else {}
             ),
             **({"event_profile": self.event_profile} if self.event_profile is not None else {}),
+            **(
+                {"observation_requests": [item.to_dict() for item in self.observation_requests]}
+                if self.observation_requests
+                else {}
+            ),
         }
 
     @classmethod
@@ -909,6 +922,10 @@ class MinecraftTestSpec:
                 else None
             ),
             event_profile=data.get("event_profile"),
+            observation_requests=tuple(
+                ObservationRequest.from_dict(item)
+                for item in data.get("observation_requests", [])
+            ),
         )
 
 
@@ -1188,6 +1205,7 @@ class MinecraftTestResult:
     duration_seconds: float | None = None
     target_failure_reason: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    observations: tuple[ObservationResult, ...] = ()
 
     @property
     def passed(self) -> bool:
@@ -1213,6 +1231,7 @@ class MinecraftTestResult:
             "finished_at": self.finished_at.isoformat() if self.finished_at else None,
             "duration_seconds": self.duration_seconds,
             "metadata": _json_ready(dict(self.metadata)),
+            "observations": [item.to_dict() for item in self.observations],
         }
 
     def to_json(self) -> str:
@@ -1263,4 +1282,8 @@ class MinecraftTestResult:
                 else None
             ),
             metadata=dict(data.get("metadata", {})),
+            observations=tuple(
+                ObservationResult.from_dict(item)
+                for item in data.get("observations", [])
+            ),
         )

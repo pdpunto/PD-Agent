@@ -161,8 +161,16 @@ class FabricRuntimeOrchestrator:
 
     def _observations(self, runtime_result: Any) -> tuple[ObservationResult, ...]:
         raw = runtime_result if isinstance(runtime_result, (list, tuple)) else getattr(runtime_result, "observations", None)
+        if raw is None and runtime_result is not None:
+            metadata = getattr(runtime_result, "metadata", {})
+            if isinstance(metadata, Mapping):
+                raw = metadata.get("observation_result", ())
         if raw is None and isinstance(runtime_result, Mapping):
             raw = runtime_result.get("observations", ())
+            if not raw:
+                raw = runtime_result.get("observation_result", ())
+        if isinstance(raw, Mapping):
+            raw = (raw,)
         return tuple(item if isinstance(item, ObservationResult) else ObservationResult.from_dict(item) for item in (raw or ()))
 
     def _validate_observations(self, plan: RuntimeValidationSpec, observations: tuple[ObservationResult, ...], runtime_result: Any, artifact: ArtifactIdentity, run_id: str) -> tuple[ValidationResult, FailureFact | None]:

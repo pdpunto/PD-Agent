@@ -538,6 +538,19 @@ class MinecraftTestRunner:
         persistence_scenario: PersistenceScenario | None = None,
         persistence_evidence_path: Path | None = None,
     ) -> MinecraftTestResult:
+        if len(spec.observation_requests) > 1:
+            return self._run_observation_requests(
+                spec,
+                run_id=run_id,
+                java_version=java_version,
+                launch_mode=launch_mode,
+                expected_sha256=expected_sha256,
+                authorized_runtime_roots=authorized_runtime_roots,
+                runtime_run_dir=runtime_run_dir,
+                persistence_phase=persistence_phase,
+                persistence_scenario=persistence_scenario,
+                persistence_evidence_path=persistence_evidence_path,
+            )
         preflight = self.prepare_run(
             spec,
             run_id=run_id,
@@ -675,6 +688,11 @@ class MinecraftTestRunner:
                 "launch_properties": list(launch_props),
                 "environment_overrides": dict(self.environment_overrides),
             },
+            observations=(
+                (ObservationResult.from_dict(runtime_metadata["observation_result"]),)
+                if runtime_metadata.get("observation_result") is not None
+                else ()
+            ),
         )
         if runtime_dependency_records:
             final_result = MinecraftTestResult(
@@ -698,6 +716,76 @@ class MinecraftTestRunner:
             )
         _write_json(preflight.evidence_paths.result_json, final_result.to_dict())
         return final_result
+
+    def _run_observation_requests(
+        self,
+        spec: MinecraftTestSpec,
+        *,
+        run_id: str | None,
+        java_version: str | None,
+        launch_mode: str,
+        expected_sha256: str | None,
+        authorized_runtime_roots: Sequence[Path] | None,
+        runtime_run_dir: Path | None,
+        persistence_phase: PersistencePhase | None,
+        persistence_scenario: PersistenceScenario | None,
+        persistence_evidence_path: Path | None,
+    ) -> MinecraftTestResult:
+        """Execute and aggregate one harness result for each request."""
+
+        results: list[MinecraftTestResult] = []
+        for index, request in enumerate(spec.observation_requests):
+            if request.observation_type is not MinecraftObservationType.REGISTRY_ENTRY_PRESENT:
+                raise MinecraftTestValidationError(
+                    "multiple observation requests require registry observations"
+                )
+            selector = request.selector
+            if selector.get("kind") != "registry":
+                raise MinecraftTestValidationError("registry observation selector is invalid")
+            child_spec = replace(
+                spec,
+                test_id=request.observation_id,
+                observation_type=request.observation_type,
+                observation_params={
+                    "registry_kind": selector.get("registry_kind"),
+                    "identifier": selector.get("identifier"),
+                },
+                observation_requests=(request,),
+            )
+            child_root = runtime_run_dir / str(index) if runtime_run_dir is not None else None
+            results.append(
+                self.run(
+                    child_spec,
+                    run_id=f"{run_id}-{index}" if run_id is not None else None,
+                    java_version=java_version,
+                    launch_mode=launch_mode,
+                    expected_sha256=expected_sha256,
+                    authorized_runtime_roots=authorized_runtime_roots,
+                    runtime_run_dir=child_root,
+                    persistence_phase=persistence_phase,
+                    persistence_scenario=persistence_scenario,
+                    persistence_evidence_path=persistence_evidence_path,
+                )
+            )
+        status = MinecraftTestStatus.PASS
+        for result in results:
+            if result.status in {MinecraftTestStatus.CRASH, MinecraftTestStatus.TIMEOUT, MinecraftTestStatus.INFRA_ERROR}:
+                status = result.status
+                break
+            if result.status is MinecraftTestStatus.FAIL:
+                status = MinecraftTestStatus.FAIL
+        first = results[0]
+        return replace(
+            first,
+            run_id=run_id or first.run_id,
+            status=status,
+            reason="all runtime observations passed" if status is MinecraftTestStatus.PASS else "runtime observation request failed",
+            observations=tuple(item for result in results for item in result.observations),
+            metadata={
+                "observation_request_count": len(results),
+                "child_results": [item.to_dict() for item in results],
+            },
+        )
 
     def run_persistence(
         self,
@@ -1158,7 +1246,39 @@ class MinecraftTestRunner:
             except (TypeError, ValueError) as exc:
                 metadata["command_result_error"] = str(exc)
         if result_type := harness_result.get("observation_type"):
-            if str(result_type).upper() == MinecraftObservationType.ITEM_COMPONENT_STATE.value:
+            if str(result_type).upper() == MinecraftObservationType.REGISTRY_ENTRY_PRESENT.value:
+                observed_kind = harness_result.get("registry_kind")
+                observed_identifier = harness_result.get("observed_identifier")
+                observation = ObservationResult(
+                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected={"present": True},
+                    actual={
+                        "present": functional_test_result == "PASS",
+                        "registry_kind": observed_kind,
+                        "identifier": observed_identifier,
+                    },
+                    phase=persistence_phase or "RUNTIME",
+                    evidence_refs=(
+                        MinecraftEvidenceReference(
+                            kind=MinecraftEvidenceKind.OBSERVATION,
+                            ref="harness-result.json",
+                            phase=persistence_phase or "RUNTIME",
+                        ),
+                    ),
+                    error=(
+                        None
+                        if functional_test_result == "PASS"
+                        else {"code": "REGISTRY_ENTRY_PRESENT_MISMATCH", "message": reason}
+                    ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() == MinecraftObservationType.ITEM_COMPONENT_STATE.value:
                 observation = ObservationResult(
                     observation_id=str(harness_result.get("test_id", "")),
                     observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,

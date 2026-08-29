@@ -105,6 +105,37 @@ def test_productive_boundary_validates_without_benchmark_imports(tmp_path: Path)
     assert state.progress_ledger.satisfied_requirement_ids == ("runtime",)
 
 
+def test_productive_boundary_consumes_runner_metadata_observation(tmp_path: Path) -> None:
+    contract = _contract()
+    artifact = _artifact(tmp_path)
+    observation = ObservationResult(
+        observation_id="obs-1",
+        observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+        status=MinecraftObservationStatus.PASS,
+        expected={"present": True},
+        actual={"present": True},
+        evidence_refs=(MinecraftEvidenceReference(kind=MinecraftEvidenceKind.OBSERVATION, ref="runtime/observation.json"),),
+    )
+
+    class MetadataRunner:
+        def run(self, spec, **kwargs):  # noqa: ANN001
+            del spec, kwargs
+            return SimpleNamespace(
+                status=MinecraftTestStatus.PASS,
+                metadata={"observation_result": observation.to_dict()},
+            )
+
+    state = _state(contract, artifact)
+    validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=MetadataRunner())
+    validator.bind_run_state(state)
+
+    result = validator.validate(artifact.path.parent, artifact, contract, state.run_id)
+
+    assert result.status is ValidationStatus.PASS
+    assert state.progress_ledger is not None
+    assert state.progress_ledger.satisfied_requirement_ids == ("runtime",)
+
+
 def test_productive_boundary_records_runtime_failure(tmp_path: Path) -> None:
     contract = _contract()
     artifact = _artifact(tmp_path)
