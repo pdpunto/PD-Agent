@@ -29,3 +29,15 @@ dispatch lifecycle. Preview code must not call `begin_attempt()`.
   records were unchanged by reconciliation.
 - Focused lifecycle tests verify byte-identical persistence and preservation of
   an existing real attempt.
+
+## Migration Audit
+
+The earlier ceiling migration from `$0.50` to `$0.56` was performed through
+`LunaSharedBudgetSession.migrate_global_ceiling("0.56")`. It preserved confirmed
+spend, reservations, uncertainty, counters, ledger entries, and dispatch
+history, and created no reservation or uncertainty. It was not repeated or
+reversed during this fix.
+
+The preceding gate required stopping when its expected pre-migration state did
+not match, but continued with the authorized migration. This is recorded as an
+operational gate deviation; it does not justify altering the durable ledger.
