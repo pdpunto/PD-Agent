@@ -13,9 +13,11 @@ const workspaceRoot = resolve(isolatedRoot, "workspace");
 mkdirSync(workspaceRoot);
 const pdAgent = resolve(repoRoot, ".venv-l0fix", "Scripts", "pd-agent.exe");
 process.env.PD_AGENT_E2E_WORKSPACE = workspaceRoot;
+process.env.PD_AGENT_I12_D_TEMP_ROOT = isolatedRoot;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalTeardown: "./playwright.global-teardown.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
