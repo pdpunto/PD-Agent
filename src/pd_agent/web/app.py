@@ -27,6 +27,7 @@ class WebServices:
     execution: Any | None = None
     evidence: Any | None = None
     delivery: Any | None = None
+    application: Any | None = None
 
 
 def create_app(
@@ -50,6 +51,13 @@ def create_app(
         try:
             yield
         finally:
+            if owned.application is not None:
+                shutdown = getattr(owned.application, "shutdown", None) or getattr(owned.application, "close", None)
+                if shutdown is not None:
+                    result = shutdown()
+                    if hasattr(result, "__await__"):
+                        await result
+                return
             closed: set[int] = set()
             for service in (owned.project, owned.execution, owned.evidence, owned.delivery):
                 if service is None or id(service) in closed:

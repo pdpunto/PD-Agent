@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -61,6 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory for run artifacts.",
     )
+    web_parser = subparsers.add_parser("web", help="Serve the local productive Web application.")
+    web_parser.add_argument("--host", default=None, help="Bind host; only 127.0.0.1 is accepted.")
+    web_parser.add_argument("--port", default=None, type=int, help="TCP port (1-65535).")
+    web_parser.add_argument("--provider", default=None, help="Operational provider configuration.")
+    web_parser.add_argument("--model", default=None, help="Operational model configuration.")
+    web_parser.add_argument("--runs-dir", default=None, type=Path, help="Directory for run artifacts.")
+    web_parser.add_argument("--product-data-root", default=None, type=Path, help="Directory for product metadata.")
+    web_parser.add_argument("--frontend-dist", default=None, type=Path, help="Built frontend directory.")
+    web_parser.add_argument("--economic-budget-usd", default=None, help="Optional positive provider budget.")
     return parser
 
 
@@ -68,10 +78,14 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     runtime_factory: Any = build_runtime_bundle,
+    application_factory: Any | None = None,
+    server_runner: Any | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     try:
+        if args.command == "web":
+            return _web_command(args, application_factory=application_factory, server_runner=server_runner)
         if args.command != "run":  # pragma: no cover - defensive guard
             raise CLIError(f"unsupported command: {args.command}")
         return _run_command(args, runtime_factory=runtime_factory)
@@ -106,19 +120,75 @@ def _resolve_config(args: argparse.Namespace) -> AppConfig:
     try:
         config = load_config()
         overrides: dict[str, Any] = {}
-        if args.log_level is not None:
+        if getattr(args, "log_level", None) is not None:
             overrides["log_level"] = args.log_level
-        if args.provider is not None:
+        if getattr(args, "provider", None) is not None:
             overrides["provider"] = args.provider
-        if args.model is not None:
+        if getattr(args, "model", None) is not None:
             overrides["model"] = args.model
-        if args.runs_dir is not None:
+        if getattr(args, "runs_dir", None) is not None:
             overrides["runs_dir"] = args.runs_dir
         if overrides:
             config = replace(config, **overrides)
         return config
     except ValueError as exc:
         raise CLIError(str(exc)) from exc
+
+
+def _web_command(
+    args: argparse.Namespace,
+    *,
+    application_factory: Any | None,
+    server_runner: Any | None,
+) -> int:
+    host = args.host or os.environ.get("PD_AGENT_WEB_HOST", "127.0.0.1")
+    if host != "127.0.0.1":
+        raise CLIError("web host must be 127.0.0.1")
+    port = args.port if args.port is not None else _web_port(os.environ.get("PD_AGENT_WEB_PORT", "8000"))
+    if not 1 <= port <= 65_535:
+        raise CLIError("web port must be between 1 and 65535")
+    config = _resolve_config(args)
+    configure_logging(config.log_level)
+    frontend = Path(args.frontend_dist or os.environ.get("PD_AGENT_FRONTEND_DIST", "frontend/dist")).expanduser().resolve()
+    if not frontend.is_dir():
+        raise CLIError(f"frontend dist does not exist: {frontend}")
+    product_root = args.product_data_root or os.environ.get("PD_AGENT_PRODUCT_DATA_ROOT")
+    budget = args.economic_budget_usd or os.environ.get("PD_AGENT_ECONOMIC_BUDGET_USD")
+    if application_factory is None:
+        from .product import build_product_application
+
+        application_factory = build_product_application
+    if server_runner is None:
+        server_runner = _run_uvicorn
+    application = None
+    try:
+        kwargs: dict[str, Any] = {"economic_budget_usd": budget}
+        if product_root is not None:
+            kwargs["product_data_root"] = Path(product_root).expanduser()
+        application = application_factory(config, **kwargs)
+        from .web import create_app
+
+        app = create_app(services=application.web_services, frontend_dist=frontend)
+        server_runner(app, host=host, port=port)
+        return EXIT_OK
+    finally:
+        if application is not None:
+            shutdown = getattr(application, "shutdown", None) or getattr(application, "close", None)
+            if shutdown is not None:
+                shutdown()
+
+
+def _web_port(value: str) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise CLIError("web port must be an integer") from exc
+
+
+def _run_uvicorn(app: Any, *, host: str, port: int) -> None:
+    import uvicorn
+
+    uvicorn.run(app, host=host, port=port)
 
 
 def _validate_project_root(project_root: Path) -> Path:

@@ -113,7 +113,7 @@ def build_product_application(
         delivery_service=delivery,
     )
     evidence = EvidenceService(runtime.storage, execution)
-    return ProductApplication(
+    application = ProductApplication(
         catalog=catalog,
         project_service=projects,
         execution_service=execution,
@@ -125,6 +125,8 @@ def build_product_application(
         runtime=runtime,
         web_services=WebServices(project=projects, execution=execution, evidence=evidence, delivery=delivery),
     )
+    object.__setattr__(application.web_services, "application", application)
+    return application
 
 
 def _default_provider_factory() -> Callable[[AppConfig], Any]:
