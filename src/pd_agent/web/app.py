@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator, Mapping
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -106,7 +107,7 @@ def create_app(
         dist = Path(frontend_dist).resolve()
         if not dist.is_dir():
             raise ValueError("frontend_dist must be an existing directory")
-        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
+        app.mount("/", _FrontendStaticFiles(directory=dist, html=True), name="frontend")
     return app
 
 
@@ -173,6 +174,18 @@ class _ErrorBoundaryMiddleware:
             await self.app(scope, receive, send)
         except Exception:
             await _send_error(send, 500, "INTERNAL_ERROR", "an internal error occurred", _request_id(scope))
+
+
+class _FrontendStaticFiles(StaticFiles):
+    """Serve the SPA entrypoint for extensionless client-side routes."""
+
+    async def get_response(self, path: str, scope: dict[str, Any]) -> Any:
+        try:
+            return await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404 or Path(path).name.find(".") >= 0:
+                raise
+            return await super().get_response("index.html", scope)
 
 
 def _request_id(scope: Mapping[str, Any]) -> str:
