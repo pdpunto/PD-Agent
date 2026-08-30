@@ -56,6 +56,13 @@ class DeliveryService:
 
     def create(self, execution_id: str) -> DeliveryRecord:
         execution, project_id, task_id = self._ownership(execution_id)
+        existing = next(
+            (item for item in self.catalog.project_history(project_id)["deliveries"] if item.execution_id == execution_id),
+            None,
+        )
+        if existing is not None:
+            self._validated_artifact_for_delivery(existing)
+            return existing
         artifact = self._validated_artifact(execution, project_id, task_id)
         reference = self._reference(artifact.path, self.catalog.get_project(project_id).workspace_ref)
         delivery = DeliveryRecord(

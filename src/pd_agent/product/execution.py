@@ -71,10 +71,17 @@ class ExecutionService:
         catalog: ProductCatalog,
         controller: RunController,
         projects: ProjectService | None = None,
+        product_runner: Any | None = None,
+        delivery_service: Any | None = None,
+        runner: Any | None = None,
     ) -> None:
         self.catalog = catalog
         self.controller = controller
         self.projects = projects or ProjectService(catalog)
+        if product_runner is not None and runner is not None and product_runner is not runner:
+            raise ValueError("product runner was provided more than once")
+        self.product_runner = product_runner or runner
+        self.delivery_service = delivery_service
         self._lock = RLock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pd-agent-execution")
         self._active_execution_id: str | None = None
@@ -97,7 +104,7 @@ class ExecutionService:
             self._snapshots[execution.execution_id] = snapshot
             self._active_execution_id = execution.execution_id
             try:
-                future = self._executor.submit(self._run_worker, execution, task, project.workspace_ref)
+                future = self._executor.submit(self._run_worker, execution, task, project)
             except BaseException as exc:
                 self._active_execution_id = None
                 self._snapshots[execution.execution_id] = ExecutionSnapshot(
@@ -123,14 +130,14 @@ class ExecutionService:
             execution_ids = tuple(self.catalog.snapshot()["executions"])
         return tuple(self.get(execution_id) for execution_id in sorted(execution_ids))
 
-    def shutdown(self) -> None:
+    def shutdown(self, *, wait: bool = True) -> None:
         with self._lock:
             if self._shutdown:
                 return
             self._shutdown = True
             executor = self._executor
         # Waiting is explicit and safe: no fake cancellation is reported.
-        executor.shutdown(wait=True)
+        executor.shutdown(wait=wait)
 
     close = shutdown
 
@@ -144,8 +151,10 @@ class ExecutionService:
         except CatalogError as exc:
             raise ExecutionServiceError(exc.code, str(exc)) from exc
 
-    def _run_worker(self, execution: ExecutionRecord, task: TaskRecord, workspace_ref: str) -> object:
-        return self.controller.run(Path(workspace_ref), task.request, run_id=execution.execution_id)
+    def _run_worker(self, execution: ExecutionRecord, task: TaskRecord, project: Any) -> object:
+        if self.product_runner is not None:
+            return self.product_runner.run(execution, project, task)
+        return self.controller.run(Path(project.workspace_ref), task.request, run_id=execution.execution_id)
 
     def _finished(self, execution_id: str, future: Future[object]) -> None:
         with self._lock:
@@ -157,8 +166,11 @@ class ExecutionService:
                     status = ProductExecutionStatus.FAILED
                     reason = "worker_exception"
                 else:
-                    run_state, report = result
-                    status, reason = self._reconcile(run_state, report)
+                    if self.product_runner is not None:
+                        status, reason = self._reconcile_product_result(result)
+                    else:
+                        run_state, report = result
+                        status, reason = self._reconcile(run_state, report)
                 terminal = ExecutionRecord(
                     execution_id=execution.execution_id,
                     task_id=execution.task_id,
@@ -169,6 +181,13 @@ class ExecutionService:
                     status_reason=reason,
                 )
                 self.catalog.update_execution(terminal)
+                if status is ProductExecutionStatus.SUCCEEDED and self.delivery_service is not None:
+                    try:
+                        self.delivery_service.create(execution_id)
+                    except Exception:
+                        # Runtime success remains authoritative; DeliveryService
+                        # exposes the unavailable delivery through its own errors.
+                        pass
                 self._snapshots[execution_id] = ExecutionSnapshot(terminal, status, reason)
             except BaseException:
                 # A persistence failure must not strand the global capacity slot.
@@ -198,6 +217,22 @@ class ExecutionService:
         if state.state is RunStatus.ABORTED:
             return ProductExecutionStatus.INTERRUPTED, state.termination_reason
         return ProductExecutionStatus.FAILED, state.termination_reason
+
+    def _reconcile_product_result(self, result: Any) -> tuple[ProductExecutionStatus, str | None]:
+        """Reconcile a productive runner only through persisted runtime facts."""
+        if not hasattr(result, "run_id"):
+            return ProductExecutionStatus.FAILED, "invalid_runner_result"
+        if result.run_id is None:
+            return ProductExecutionStatus.FAILED, "invalid_runner_result"
+        storage = getattr(self.controller, "storage", None)
+        if storage is None:
+            return ProductExecutionStatus.FAILED, "runtime_evidence_unavailable"
+        try:
+            state = storage.read_run_state(result.run_id)
+            report = storage.read_final_report(result.run_id)
+        except Exception:
+            return ProductExecutionStatus.FAILED, "runtime_evidence_unavailable"
+        return self._reconcile(state, report)
 
     def _authoritative_success(self, state: RunState, report: FinalReport) -> bool:
         storage = getattr(self.controller, "storage", None)
