@@ -1334,6 +1334,90 @@ If validation exposes defects, corrections require tests and a dedicated reviewe
 
 Do not delete RunStorage/evidence after failed integrated validation; preserve evidence for diagnosis.
 
+# I12-A — Productive Fabric Execution Boundary
+
+**Dependency:** I11 accepted.
+
+Implement `ProductFabricTaskContractResolver`, `ProductExecutionRunner`,
+`FabricProductExecutionRunner`, and optional preallocated `run_id` support in
+`FabricNormalOrchestrator`. Resolve Product Task → valid `FabricTaskContract`,
+preserve `task_id`, produce structured validation requirements, keep Minecraft
+conditional on those requirements, and reject identity collision/reuse.
+Preserve historical behavior without an injected ID and the v0.8 regression.
+No Web entrypoint or ProductApplication wiring belongs here.
+
+**Acceptance:** valid contract, preserved identity, no new lifecycle/state
+machine, and collision/reuse failure closed.
+
+**Validation and rollback:** focused contract/identity/runtime tests plus v0.8
+regression. Dedicated commit/push. Revert only the product execution/contract
+boundary and FabricNormalOrchestrator identity extension.
+
+## I12-B — Productive Composition Root + Delivery Reconciliation
+
+**Dependency:** I12-A.
+
+Implement `ProductApplication`, `build_product_application(...)`, real
+product/runtime wiring, shared economic-budget lifetime, Delivery
+reconciliation after authoritative success, and lifecycle/shutdown ownership.
+
+**Acceptance:** full composition constructible, existing Fabric runtime reused,
+correct service ownership, one shared guard, fail-closed Delivery, clean
+shutdown, no second runtime or state machine.
+
+**Validation and rollback:** composition, ownership, budget, delivery and
+shutdown tests. Dedicated commit/push. Revert composition wiring without
+deleting ProductCatalog or RunStorage.
+
+## I12-C — Productive Web Entrypoint
+
+**Dependency:** I12-B.
+
+Implement `pd-agent web`, configuration/startup, ProductApplication
+construction, FastAPI/Uvicorn startup, loopback binding, frontend/dist serving,
+and clean shutdown.
+
+**Acceptance:** server starts with ProductApplication active, frontend/API are
+served, local security remains enforced, startup does not execute a Task, and
+shutdown is clean.
+
+**Validation and rollback:** server, security, static-serving and lifecycle
+tests. Dedicated commit/push. Revert the Web entrypoint independently.
+
+## I12-D — Browser Validation Infrastructure
+
+**Dependency:** I12-C.
+
+Test-only Playwright/browser setup for the real Browser → frontend/dist →
+FastAPI → ProductApplication boundary. It must not contain product
+architecture, require a paid provider, or require Minecraft live.
+
+**Acceptance:** targeted browser flow and critical accessibility/navigation
+coverage. Dedicated commit/push only when repository files change. Remove this
+test-only infrastructure independently on rollback.
+
+## I12-E — Integrated Productive Validation
+
+**Dependency:** I12-A through I12-D.
+
+Validate Browser → Web/API → Product → FabricTaskContract →
+FabricNormalOrchestrator → provider → mutation → build → Minecraft when
+required → CompletionGate → Delivery → browser JAR download → independent
+SHA-256 verification. Preserve evidence for identities, budget, milestones,
+build, Minecraft, gate, Delivery, download, Details, reconstruction,
+continuity, and security.
+
+Before any billable provider execution, stop and request explicit authorization
+from 00. The previously authorized `$0.50` does not authorize I12-E after this
+architecture correction. No benchmark live is implied.
+
+**Acceptance:** `V0_9_WEB_RUNTIME_INTEGRATION_PASS` with no fake progress,
+success, delivery, or intervention.
+
+**Validation and rollback:** validation-only evidence; if defects appear,
+preserve evidence and use a dedicated reviewed fix before repeating. Never
+delete runtime/evidence automatically.
+
 # I13 — Regression + Security + AC Final Gate
 
 ## Objective

@@ -1056,4 +1056,62 @@ Outside v0.9:
 
 `V0_9_RFC_READY`
 
+## Post-I12 Productive Application Composition
+
+The v0.9 productive composition is owned by a `ProductApplication` container.
+It may connect `ProductCatalog`, `ProjectService`, `ExecutionService`,
+`EvidenceService`, `DeliveryService`, `ProductFabricTaskContractResolver`,
+`FabricProductExecutionRunner`, `FabricNormalOrchestrator`, runtime
+dependencies, `WebServices`, and the FastAPI lifecycle. It is not a state
+machine, runtime, scheduler, queue, DAG, workflow engine, or new general
+orchestrator.
+
+`build_product_application(...)` is the composition factory. The product
+execution port is `ProductExecutionRunner`, implemented for Fabric by
+`FabricProductExecutionRunner`.
+
+The resolver maps Project + TaskRecord + an authorized and inspected Fabric
+workspace to a strictly validated `FabricTaskContract`, preserving the
+product `task_id`, natural-language goal, structured requirements,
+validation requirements, actual environment constraints, and applicable
+knowledge/mutation expectations. It does not use a BenchmarkTask intermediate
+or assume that every task requires Minecraft. Provider assistance, if used,
+does not decide completion.
+
+The productive flow is:
+
+`Browser → FastAPI → ProductApplication → product services → ExecutionService`
+`→ ProductExecutionRunner → FabricProductExecutionRunner`
+`→ ProductFabricTaskContractResolver → FabricNormalOrchestrator → existing productive Fabric runtime`
+
+ExecutionService retains dispatch, background execution, global capacity one,
+product metadata, and terminal reconciliation; it does not decide Fabric
+lifecycle. `execution_id == run_id` remains the v0.9 invariant, with collision
+and reuse failures closed and absent IDs preserving historical behavior.
+
+Fabric validation flows from `FabricTaskContract.validation_requirements` to
+`FabricNormalOrchestrator`, `ProductiveMinecraftFunctionalValidator`, and
+`MinecraftTestRunner`; FastAPI and ExecutionService do not decide whether
+Minecraft runs. Authoritative success remains `RunState + required validation
++ CompletionGate`, after which DeliveryService may create a delivery and must
+revalidate ownership, completion, gate status, artifact validity/currentness,
+source currentness, hash, and path confinement.
+
+The economic budget belongs to the productive application/runtime-bundle
+lifetime. One shared fail-closed guard covers provider calls in that
+composition, including provider-backed contract resolution; there is no
+silent per-Task reset and no frontend or ExecutionService budget authority.
+
+The productive server entrypoint is `pd-agent web`: load configuration, resolve
+the economic budget, build the ProductApplication, create FastAPI, serve
+`frontend/dist`, and run Uvicorn on `127.0.0.1`. Startup does not execute a
+Task. FastAPI lifespan shuts down `ExecutionService` with `wait=True` and
+closes owned resources without fake cancellation or resume.
+
+Playwright is test infrastructure only for proving the real Browser →
+frontend/dist → FastAPI → ProductApplication boundary. It is not product
+architecture. This section is a post-I12 architecture correction discovered
+by real integration audit and does not claim these components existed in the
+original approved RFC.
+
 The approved RFC defines an implementable v0.9 architecture without changing the approved Product Spec or DESIGN, without introducing a second runtime lifecycle, and without overbuilding infrastructure beyond the internal Web/UI integration preview.

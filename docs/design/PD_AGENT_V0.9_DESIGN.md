@@ -481,3 +481,22 @@ These are intentionally unresolved here.
 `V0_9_DESIGN_READY → ACCEPTED BY 00 → PERSISTED`
 
 No RFC decisions are intentionally resolved by this document beyond boundaries already frozen by 00.
+
+## Post-I12 Productive Composition Clarification
+
+The v0.9 product has a **Productive Application Composition Root**. Before
+productive Fabric execution, the application resolves a Project, its
+TaskRecord, and an authorized and inspected Fabric workspace into a Product
+Task contract and then into a `FabricTaskContract`:
+
+`Project + TaskRecord + authorized/inspected Fabric workspace`
+`→ Product Task contract resolution → FabricTaskContract → productive Fabric execution`
+
+This composition consumes the existing productive Fabric runtime. It does not
+create a parallel runtime, second `RunState`, workflow engine, scheduler, DAG,
+or general orchestrator. `RunState` remains the only execution state machine.
+
+This clarification is a post-I12 architecture correction discovered by the
+real integration audit. It does not change product scope, UX, acceptance
+criteria, or deferred capabilities, and does not claim that this composition
+already existed in the original DESIGN baseline.
