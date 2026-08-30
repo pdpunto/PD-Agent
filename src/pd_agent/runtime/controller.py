@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import UUID
 
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.build import GradleBuildRunner
 from pd_agent.context import ContextManager
-from pd_agent.core import ExecutionLimits, FunctionalValidator, PreBuildValidator, RunState, RunStatus
+from pd_agent.core import ExecutionLimits, FunctionalValidator, PreBuildValidator, RunState, RunStateError, RunStatus, generate_run_id
 from pd_agent.project import ProjectInspector, ProjectInspectionStatus, ProjectSnapshot
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
@@ -48,9 +49,13 @@ class RunController:
         model_config: Mapping[str, Any] | None = None,
         pending_mutation_targets: tuple[str, ...] = (),
         validation_contract: Any | None = None,
+        run_id: UUID | str | None = None,
     ) -> tuple[RunState, FinalReport]:
+        normalized_run_id = self._prepare_run_id(run_id)
         snapshot = self.project_inspector.inspect(project_root)
-        run_state = RunState(project_root=project_root, task=task)
+        if normalized_run_id is not None:
+            self._claim_run_storage(normalized_run_id)
+        run_state = RunState(run_id=normalized_run_id or generate_run_id(), project_root=project_root, task=task)
         run_state.set_pending_mutation_targets(pending_mutation_targets)
         run_id = run_state.run_id
         self._emit(run_id, RunEventType.RUN_STARTED, {"task": task, "project_root": str(project_root)})
@@ -90,6 +95,26 @@ class RunController:
 
     def _emit(self, run_id: str, event_type: RunEventType, payload: Mapping[str, Any]) -> None:
         self.storage.append_event(RunEvent(run_id=run_id, event_type=event_type, payload=dict(payload)))
+
+    def _prepare_run_id(self, run_id: UUID | str | None) -> str | None:
+        if run_id is None:
+            return None
+        try:
+            parsed = run_id if isinstance(run_id, UUID) else UUID(str(run_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RunStateError("preallocated run_id must be a UUIDv4") from exc
+        if parsed.version != 4:
+            raise RunStateError("preallocated run_id must be a UUIDv4")
+        return str(parsed)
+
+    def _claim_run_storage(self, run_id: str) -> None:
+        run_root = self.storage.storage_root / run_id
+        if run_root.exists():
+            raise RunStateError(f"preallocated run_id already exists: {run_id}")
+        try:
+            run_root.mkdir(parents=True)
+        except (FileExistsError, OSError) as exc:
+            raise RunStateError(f"preallocated run_id could not be reserved: {run_id}") from exc
 
 
 __all__ = ["RunController"]
