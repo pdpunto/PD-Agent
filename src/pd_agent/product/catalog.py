@@ -128,6 +128,20 @@ class ProductCatalog:
             self._commit_locked(candidate)
             return execution
 
+    def update_execution(self, execution: ExecutionRecord) -> ExecutionRecord:
+        """Replace existing execution metadata without changing ownership indexes."""
+        with self._lock:
+            current = self._data["executions"].get(execution.execution_id)
+            if current is None:
+                raise CatalogError("EXECUTION_NOT_FOUND", f"unknown execution: {execution.execution_id}")
+            current_record = ExecutionRecord.from_dict(current)
+            if current_record.task_id != execution.task_id or current_record.run_id != execution.run_id:
+                raise CatalogError("OWNERSHIP_INVALID", "execution identity or task cannot change")
+            candidate = self._copy_data()
+            candidate["executions"][execution.execution_id] = execution.to_dict()
+            self._commit_locked(candidate)
+            return execution
+
     def add_delivery(self, delivery: DeliveryRecord) -> DeliveryRecord:
         with self._lock:
             task_payload = self._data["tasks"].get(delivery.task_id)

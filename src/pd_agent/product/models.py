@@ -152,6 +152,8 @@ class ExecutionRecord:
     run_id: str = ""
     created_at: datetime = datetime.min.replace(tzinfo=timezone.utc)
     terminal_recorded_at: datetime | None = None
+    status: str = "RUNNING"
+    status_reason: str | None = None
 
     def __post_init__(self) -> None:
         execution_id = _uuid4_text(self.execution_id or _new_id(), "execution_id")
@@ -161,6 +163,10 @@ class ExecutionRecord:
         object.__setattr__(self, "created_at", _timestamp(self.created_at, "created_at"))
         if self.terminal_recorded_at is not None:
             object.__setattr__(self, "terminal_recorded_at", _timestamp(self.terminal_recorded_at, "terminal_recorded_at"))
+        if self.status not in {"RUNNING", "SUCCEEDED", "FAILED", "BLOCKED", "LIMIT_REACHED", "INTERRUPTED"}:
+            raise ValueError("status is not a supported product execution status")
+        if self.status == "RUNNING" and self.terminal_recorded_at is not None:
+            raise ValueError("terminal execution cannot have RUNNING status")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -169,6 +175,8 @@ class ExecutionRecord:
             "run_id": self.run_id,
             "created_at": self.created_at.isoformat(),
             "terminal_recorded_at": self.terminal_recorded_at.isoformat() if self.terminal_recorded_at else None,
+            "status": self.status,
+            "status_reason": self.status_reason,
         }
 
     @classmethod
@@ -179,6 +187,8 @@ class ExecutionRecord:
             run_id=_required(data, "run_id"),
             created_at=_required(data, "created_at"),
             terminal_recorded_at=data.get("terminal_recorded_at"),
+            status=data.get("status", "RUNNING"),
+            status_reason=data.get("status_reason"),
         )
 
     def canonical_json(self) -> str:
