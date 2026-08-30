@@ -4,6 +4,7 @@ from .catalog import CATALOG_FILE_NAME, CATALOG_SCHEMA_VERSION, CatalogError, Pr
 from .delivery import DeliveryArtifact, DeliveryError, DeliveryService, RevealAction
 from .execution import ExecutionService, ExecutionServiceError, ExecutionSnapshot, ProductExecutionStatus
 from .evidence import EvidenceService, HumanEvidenceDTO, ProductExecutionSnapshot, TechnicalEvidenceDTO
+from .fabric import FabricProductExecutionRunner, ProductExecutionRunner, ProductFabricTaskContractError, ProductFabricTaskContractResolver
 from .models import DeliveryRecord, ExecutionRecord, ProjectRecord, TaskRecord
 from .projects import ProjectService, WorkspaceError
 
@@ -30,4 +31,8 @@ __all__ = [
     "TaskRecord",
     "WorkspaceError",
     "TechnicalEvidenceDTO",
+    "FabricProductExecutionRunner",
+    "ProductExecutionRunner",
+    "ProductFabricTaskContractError",
+    "ProductFabricTaskContractResolver",
 ]

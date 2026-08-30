@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import UUID
 
 from pd_agent.artifacts import ArtifactValidator
 from pd_agent.brain import BrainTrigger, FabricBrainOrchestrator, KnowledgeEnvironment
@@ -17,8 +18,10 @@ from pd_agent.core import (
     ExecutionPlanStep,
     FabricTaskContract,
     RunState,
+    RunStateError,
     RunStatus,
     TaskProgressLedger,
+    generate_run_id,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
@@ -100,11 +103,15 @@ class FabricNormalOrchestrator:
         brain_enabled: bool = True,
         external_context: tuple[Any, ...] = (),
         pending_mutation_targets: tuple[str, ...] = (),
+        run_id: UUID | str | None = None,
     ) -> FabricOrchestrationResult:
         contract = self._contract(requirement)
         plan = self._plan(contract)
         ledger = TaskProgressLedger(contract_identity=contract.identity())
-        state = RunState(project_root=Path(project_root), task=contract.task_id, task_contract=contract, execution_plan=plan, progress_ledger=ledger)
+        normalized_run_id = self._prepare_run_id(run_id)
+        if normalized_run_id is not None and self.reporting is not None:
+            self._claim_run_storage(normalized_run_id)
+        state = RunState(run_id=normalized_run_id or generate_run_id(), project_root=Path(project_root), task=contract.task_id, task_contract=contract, execution_plan=plan, progress_ledger=ledger)
         if pending_mutation_targets:
             state.set_pending_mutation_targets(tuple(pending_mutation_targets))
         self._emit(state.run_id, RunEventType.CONTRACT_CREATED, {
@@ -117,6 +124,8 @@ class FabricNormalOrchestrator:
             "plan_revision": plan.revision,
             "requirement_ids": [item.requirement_id for item in contract.requirements],
         })
+        if self.reporting is not None:
+            self.reporting.write_run_state(state)
         snapshot = self.project_inspector.inspect(Path(project_root))
         if snapshot.status != ProjectInspectionStatus.READY:
             state.state = RunStatus.INSPECTING
@@ -140,6 +149,8 @@ class FabricNormalOrchestrator:
             functional_validator.bind_run_state(state)
         runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)
+        if self.reporting is not None:
+            self.reporting.write_run_state(state)
         completion = CompletionGate().evaluate(contract, state.progress_ledger, state)
         self._emit_state_observations(state, contract, completion)
         self._emit(state.run_id, RunEventType.COMPLETION_GATE_EVALUATED, {
@@ -244,6 +255,26 @@ class FabricNormalOrchestrator:
         if isinstance(requirement, Mapping):
             return FabricTaskContract.from_dict(requirement)
         raise TypeError("requirement must be a FabricTaskContract or contract mapping")
+
+    def _prepare_run_id(self, run_id: UUID | str | None) -> str | None:
+        if run_id is None:
+            return None
+        try:
+            parsed = run_id if isinstance(run_id, UUID) else UUID(str(run_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RunStateError("preallocated run_id must be a UUIDv4") from exc
+        if parsed.version != 4:
+            raise RunStateError("preallocated run_id must be a UUIDv4")
+        return str(parsed)
+
+    def _claim_run_storage(self, run_id: str) -> None:
+        run_root = self.reporting.storage_root / run_id
+        if run_root.exists():
+            raise RunStateError(f"preallocated run_id already exists: {run_id}")
+        try:
+            run_root.mkdir(parents=True)
+        except (FileExistsError, OSError) as exc:
+            raise RunStateError(f"preallocated run_id could not be reserved: {run_id}") from exc
 
     def _plan(self, contract: FabricTaskContract) -> ExecutionPlan:
         steps = tuple(ExecutionPlanStep(step_id=f"requirement:{item.requirement_id}", intent=item.description, requirement_ids=(item.requirement_id,)) for item in contract.requirements)
