@@ -44,6 +44,11 @@ class ExecutionSnapshot:
     execution: ExecutionRecord
     status: ProductExecutionStatus
     reason: str | None = None
+    runtime_state: str | None = None
+    current_milestone: str | None = None
+    current_activity: str | None = None
+    terminal: bool = False
+    latest_sequence: int | None = None
 
     @property
     def execution_id(self) -> str:

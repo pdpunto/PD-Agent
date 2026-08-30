@@ -2,6 +2,7 @@
 
 from .catalog import CATALOG_FILE_NAME, CATALOG_SCHEMA_VERSION, CatalogError, ProductCatalog
 from .execution import ExecutionService, ExecutionServiceError, ExecutionSnapshot, ProductExecutionStatus
+from .evidence import EvidenceService, HumanEvidenceDTO, ProductExecutionSnapshot, TechnicalEvidenceDTO
 from .models import DeliveryRecord, ExecutionRecord, ProjectRecord, TaskRecord
 from .projects import ProjectService, WorkspaceError
 
@@ -14,10 +15,14 @@ __all__ = [
     "ExecutionService",
     "ExecutionServiceError",
     "ExecutionSnapshot",
+    "EvidenceService",
+    "HumanEvidenceDTO",
     "ProductCatalog",
     "ProjectRecord",
     "ProjectService",
     "ProductExecutionStatus",
+    "ProductExecutionSnapshot",
     "TaskRecord",
     "WorkspaceError",
+    "TechnicalEvidenceDTO",
 ]
