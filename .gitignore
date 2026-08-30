@@ -62,3 +62,7 @@ cache/
 tests/fixtures/**/bin/
 tests/fixtures/**/run/
 *.zip
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
