@@ -9,8 +9,11 @@ import json
 import secrets
 from typing import Any, AsyncIterator, Mapping
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
+from pd_agent.product import CatalogError, DeliveryError, ExecutionServiceError
 from .security import CSRF_HEADER, LocalWebSecurityPolicy, WebSecurityError, header_value, is_mutation
 
 
@@ -70,8 +73,24 @@ def create_app(
     async def csrf() -> dict[str, str]:
         return {"csrf_token": app.state.csrf_token}
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        del exc
+        return JSONResponse(status_code=422, content={"error": {"code": "INVALID_REQUEST", "message": "request validation failed", "request_id": _request_id(request.scope)}})
+
+    async def product_error(request: Request, exc: Exception) -> JSONResponse:
+        code = getattr(exc, "code", "PRODUCT_ERROR")
+        status = _error_status(code)
+        return JSONResponse(status_code=status, content={"error": {"code": code, "message": _safe_domain_message(code), "request_id": _request_id(request.scope)}})
+
+    for exception_type in (CatalogError, ExecutionServiceError, DeliveryError):
+        app.add_exception_handler(exception_type, product_error)
+
     app.add_middleware(_ErrorBoundaryMiddleware)
     app.add_middleware(_SecurityMiddleware, policy=security, csrf_token=token)
+    from .api import register_routes
+
+    register_routes(app)
     return app
 
 
@@ -143,6 +162,30 @@ class _ErrorBoundaryMiddleware:
 def _request_id(scope: Mapping[str, Any]) -> str:
     value = header_value(scope.get("headers", ()), "x-request-id")
     return value if value and len(value) <= 128 and all(char.isalnum() or char in "-_." for char in value) else secrets.token_hex(16)
+
+
+def _error_status(code: str) -> int:
+    if code.endswith("NOT_FOUND"):
+        return 404
+    if code in {"EXECUTION_CAPACITY_REACHED", "PAYLOAD_TOO_LARGE"}:
+        return 409 if code != "PAYLOAD_TOO_LARGE" else 413
+    if code in {"SECURITY_REJECTED", "CSRF_INVALID", "ORIGIN_NOT_ALLOWED", "ARTIFACT_NOT_CURRENT", "ARTIFACT_UNAVAILABLE", "COMPLETION_REQUIRED"}:
+        return 403 if code in {"CSRF_INVALID", "ORIGIN_NOT_ALLOWED", "SECURITY_REJECTED"} else 409
+    return 400
+
+
+def _safe_domain_message(code: str) -> str:
+    messages = {
+        "PROJECT_NOT_FOUND": "project was not found",
+        "TASK_NOT_FOUND": "task was not found",
+        "EXECUTION_NOT_FOUND": "execution was not found",
+        "DELIVERY_NOT_FOUND": "delivery was not found",
+        "EXECUTION_CAPACITY_REACHED": "execution capacity is currently full",
+        "ARTIFACT_NOT_CURRENT": "artifact is not currently deliverable",
+        "ARTIFACT_UNAVAILABLE": "artifact is unavailable",
+        "SECURITY_REJECTED": "request was rejected by the security boundary",
+    }
+    return messages.get(code, "product operation could not be completed")
 
 
 async def _send_error(send: Any, status: int, code: str, message: str, request_id: str) -> None:

@@ -112,7 +112,9 @@ def test_internal_error_is_safe_and_unknown_route_is_bounded() -> None:
         assert body["code"] == "INTERNAL_ERROR"
         assert "secret" not in response.text and "traceback" not in response.text and "C:\\private" not in response.text
         assert client.get("/not-a-product-route", headers={"host": "localhost"}).status_code == 404
-        assert client.get("/api/v1/projects", headers={"host": "localhost"}).status_code == 404
+        response = client.get("/api/v1/projects", headers={"host": "localhost"})
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "INTERNAL_ERROR"
 
 
 def test_lifespan_closes_each_injected_service_once_without_starting_work() -> None:
