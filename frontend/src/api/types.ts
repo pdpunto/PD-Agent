@@ -1,0 +1,7 @@
+export type Project = { project_id: string; name: string; created_at: string; updated_at: string; task_ids: string[] };
+export type Task = { task_id: string; project_id: string; request: string; created_at: string; execution_ids: string[] };
+export type Execution = { execution_id: string; run_id: string; task_id: string; status: string; reason: string | null; terminal: boolean; current_milestone?: string | null; current_activity?: string | null; latest_sequence?: number | null };
+export type HumanEvidence = { execution_id: string; status: string; current_milestone?: string | null; current_activity?: string | null; changes: string[]; build_summary?: string | null; repair_summary?: string | null; runtime_validation_summary?: string | null; completion_summary?: string | null; artifact_summary?: string | null };
+export type TechnicalEvidence = { execution_id: string; run_id: string; status: string; runtime_state?: string | null; started_at?: string | null; changed_files: string[]; build_attempts: Record<string, unknown>[]; validation_summaries: Record<string, unknown>[]; runtime_observations: Record<string, unknown>[]; failure_classification?: string | null; artifact_sha256?: string | null; evidence_refs: string[] };
+export type Delivery = { delivery_id: string; project_id: string; task_id: string; execution_id: string; artifact_sha256: string; created_at: string };
+export type ApiError = { error: { code: string; message: string; request_id: string } };

@@ -6,12 +6,14 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hmac
 import json
+from pathlib import Path
 import secrets
 from typing import Any, AsyncIterator, Mapping
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from pd_agent.product import CatalogError, DeliveryError, ExecutionServiceError
 from .security import CSRF_HEADER, LocalWebSecurityPolicy, WebSecurityError, header_value, is_mutation
@@ -32,6 +34,7 @@ def create_app(
     services: WebServices | None = None,
     policy: LocalWebSecurityPolicy | None = None,
     csrf_token: str | None = None,
+    frontend_dist: Path | None = None,
 ) -> FastAPI:
     """Create an isolated app without constructing or starting product work."""
 
@@ -91,6 +94,11 @@ def create_app(
     from .api import register_routes
 
     register_routes(app)
+    if frontend_dist is not None:
+        dist = Path(frontend_dist).resolve()
+        if not dist.is_dir():
+            raise ValueError("frontend_dist must be an existing directory")
+        app.mount("/", StaticFiles(directory=dist, html=True), name="frontend")
     return app
 
 
