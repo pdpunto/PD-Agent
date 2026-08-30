@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { api, ProductApiError } from "../api/client";
 import type {
   Delivery,
@@ -36,6 +37,7 @@ const safeError = (error: unknown) =>
 
 export default function App() {
   const [route, setRoute] = useState(() => routeFor(window.location.pathname));
+  const mainRef = useRef<HTMLElement>(null);
   const navigate = (path: string) => {
     window.history.pushState({}, "", path);
     setRoute(routeFor(path));
@@ -45,14 +47,19 @@ export default function App() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  return <Shell route={route} navigate={navigate} />;
+  useEffect(() => {
+    mainRef.current?.focus();
+  }, [route.name, route.id]);
+  return <Shell route={route} navigate={navigate} mainRef={mainRef} />;
 }
 function Shell({
   route,
   navigate,
+  mainRef,
 }: {
   route: Route;
   navigate: (path: string) => void;
+  mainRef: RefObject<HTMLElement | null>;
 }) {
   return (
     <div className="app-shell">
@@ -91,7 +98,7 @@ function Shell({
           </button>
         </nav>
       </header>
-      <main className="content">
+      <main ref={mainRef} className="content" tabIndex={-1}>
         {route.name === "home" && <HomePage navigate={navigate} />}
         {route.name === "projects" && <ProjectsPage navigate={navigate} />}
         {route.name === "project" && (
@@ -189,7 +196,7 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
         </button>
       </div>
       {form && (
-        <form className="inline-form" onSubmit={submit}>
+        <form className="inline-form" onSubmit={submit} aria-busy={busy}>
           <label>
             Name
             <input
@@ -208,7 +215,7 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
             />
           </label>
           {error && <p role="alert">{error}</p>}
-          <button className="primary-action" disabled={busy}>
+          <button className="primary-action" disabled={busy} aria-disabled={busy}>
             {busy ? "Creating..." : "Create project"}
           </button>
         </form>
@@ -231,11 +238,11 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
         </div>
       )}
       {state.status === "ready" && !!state.data?.length && (
-        <div className="project-list">
+        <ul className="project-list">
           {state.data.map((project) => (
-            <button
+            <li key={project.project_id}>
+              <button
               className="project-card"
-              key={project.project_id}
               onClick={() => navigate(`/projects/${project.project_id}`)}
             >
               <span className="project-glyph" aria-hidden="true">
@@ -248,9 +255,10 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
               <span className="card-arrow" aria-hidden="true">
                 &#8594;
               </span>
-            </button>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </section>
   );
@@ -323,7 +331,7 @@ function ProjectPage({
             </div>
           </div>
           <div className="detail-grid">
-            <form className="placeholder-card" onSubmit={submit}>
+            <form className="placeholder-card" onSubmit={submit} aria-busy={busy}>
               <span className="card-label">TASK COMPOSER</span>
               <h2>What do you want to change?</h2>
               <textarea
@@ -334,7 +342,7 @@ function ProjectPage({
                 rows={4}
                 required
               />
-              <button className="primary-action" disabled={busy}>
+              <button className="primary-action" disabled={busy} aria-disabled={busy}>
                 {busy ? "Starting..." : "Start task"}
               </button>
               {error && <p role="alert">{error}</p>}
@@ -492,7 +500,7 @@ function WorkingState({ snapshot }: { snapshot: Execution }) {
       <span className="ring" aria-hidden="true" />
       <strong>PD Agent está trabajando en tu mod</strong>
       <span>{snapshot.current_activity || "Procesando la solicitud"}</span>
-      <span className="milestone">
+      <span className="milestone" role="status" aria-live="polite" aria-atomic="true">
         {snapshot.current_milestone || "Entendiendo"}
       </span>
     </div>

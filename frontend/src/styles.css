@@ -13,3 +13,16 @@ nav { display: flex; gap: 22px; }.nav-link { border: 0; background: none; color:
 .modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(7,5,10,.74); }.modal { position: relative; width: min(500px, 100%); padding: 34px; background: #25202d; border: 1px solid #9a6bb8; box-shadow: 0 30px 90px #09060c; }.modal h2 { font-weight: 400; font-size: 32px; }.modal-close { position: absolute; top: 12px; right: 14px; color: #e8ddef; background: none; border: 0; font-size: 25px; }.statusbar { padding: 15px clamp(24px, 6vw, 92px); border-top: 1px solid rgba(255,255,255,.08); color: #948b99; font: 11px Arial, sans-serif; }.status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #83c39a; }
 @media (max-width: 680px) { .topbar { padding: 0 20px; }.content { width: min(100% - 32px, 1100px); padding-top: 54px; }.page-heading, .composer-actions { align-items: start; flex-direction: column; }.detail-grid { grid-template-columns: 1fr; }.home-page h1 { font-size: 52px; }.quick-links { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Keep keyboard focus and dense backend text visible in every viewport. */
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #d4a9ff; outline-offset: 4px; }
+button:disabled, button[aria-disabled="true"] { cursor: not-allowed; opacity: .62; }
+.content:focus { outline: none; }
+.project-list { list-style: none; padding: 0; }
+.project-list li { min-width: 0; }
+.project-card, .execution-panel, .state-panel, .placeholder-card, .modal { overflow-wrap: anywhere; }
+.modal-backdrop { overflow: auto; }
+.modal { max-height: calc(100vh - 40px); overflow-y: auto; }
+.delivery-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+.delivery-actions a { text-decoration: none; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

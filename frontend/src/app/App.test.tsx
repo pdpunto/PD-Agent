@@ -178,6 +178,22 @@ describe("frontend route and state foundations", () => {
       screen.queryByText(/tokens|billing|endpoint/i),
     ).not.toBeInTheDocument();
   });
+  it("moves focus to the new page landmark after keyboard navigation", () => {
+    render(<App />);
+    const projects = screen.getByRole("button", { name: "Projects" });
+    projects.focus();
+    fireEvent.keyDown(projects, { key: "Enter" });
+    fireEvent.click(projects);
+    expect(screen.getByRole("main")).toHaveFocus();
+  });
+  it("announces meaningful milestone changes without exposing polling controls", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({ ...running, current_milestone: "Compilando" }) } as Response);
+    render(<App />);
+    const milestone = await screen.findByRole("status");
+    expect(milestone).toHaveAttribute("aria-live", "polite");
+    expect(milestone).toHaveTextContent("Compilando");
+  });
   it("renders unknown paths safely as Home", () => {
     window.history.replaceState({}, "", "/unknown");
     render(<App />);
