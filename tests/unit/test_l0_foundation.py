@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 import subprocess
 import sys
 import tempfile
@@ -14,9 +15,37 @@ from pd_agent.core.errors import ConfigurationError
 from pd_agent.reporting import RunStorage
 from pd_agent.cli import build_parser, main
 from pd_agent.providers import GeminiProvider, OpenAIProvider
+from pd_agent.experimental import LunaBudgetGuard
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _luna_config() -> AppConfig:
+    return AppConfig(
+        provider="openai",
+        model="gpt-5.6-luna",
+        openai_api_key="sk-offline-test",
+    )
+
+
+def test_productive_runtime_injects_explicit_luna_budget_guard(tmp_path: Path) -> None:
+    bundle = build_runtime_bundle(_luna_config(), storage=RunStorage(tmp_path), economic_budget_usd="0.50")
+    assert isinstance(bundle.provider, OpenAIProvider)
+    assert isinstance(bundle.provider.budget_guard, LunaBudgetGuard)
+    assert bundle.provider.budget_guard.hard_budget_usd == Decimal("0.50")
+
+
+@pytest.mark.parametrize("budget", ["0", "-0.01", "not-a-budget"])
+def test_productive_budget_rejects_invalid_explicit_ceiling(tmp_path: Path, budget: str) -> None:
+    with pytest.raises(ConfigurationError):
+        build_runtime_bundle(_luna_config(), storage=RunStorage(tmp_path), economic_budget_usd=budget)
+
+
+def test_productive_budget_rejects_unsupported_provider_pricing(tmp_path: Path) -> None:
+    config = AppConfig(provider="gemini", model="gemini-test", gemini_api_key="gm-offline-test")
+    with pytest.raises(ConfigurationError):
+        build_runtime_bundle(config, storage=RunStorage(tmp_path), economic_budget_usd="0.50")
 
 
 def test_package_imports() -> None:

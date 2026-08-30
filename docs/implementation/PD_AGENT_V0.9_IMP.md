@@ -1287,6 +1287,12 @@ Fake backend/runtime alone does not satisfy this gate.
 
 No external API spending is authorized by this IMP.
 
+When an explicitly authorized productive validation uses the OpenAI runtime,
+the composition root must receive its maximum economic budget explicitly and
+inject the existing fail-closed `LunaBudgetGuard` before the first physical
+request. No I12 ceiling is a global product default; callers without an
+economic policy retain the existing behavior.
+
 If productive validation requires paid/external API usage:
 
 ```text

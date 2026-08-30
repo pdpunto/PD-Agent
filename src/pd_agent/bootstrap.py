@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.core import portable_seed_identity
 from pd_agent.providers import GeminiProvider, OpenAIProvider
+from pd_agent.experimental import LunaBudgetGuard
 from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
@@ -343,7 +345,7 @@ class RuntimeBundle:
     provider: Any
 
 
-def create_openai_provider(config: AppConfig) -> OpenAIProvider:
+def create_openai_provider(config: AppConfig, *, budget_guard: LunaBudgetGuard | None = None) -> OpenAIProvider:
     """Create the OpenAI provider adapter."""
 
     if config.provider != "openai":
@@ -356,6 +358,7 @@ def create_openai_provider(config: AppConfig) -> OpenAIProvider:
         model=config.model,
         api_key=config.openai_api_key,
         provider_retry_limit=config.execution_limits.provider_retry_limit,
+        budget_guard=budget_guard,
     )
 
 
@@ -376,11 +379,13 @@ def create_gemini_provider(config: AppConfig) -> GeminiProvider:
     )
 
 
-def create_provider(config: AppConfig) -> Any:
+def create_provider(config: AppConfig, *, budget_guard: LunaBudgetGuard | None = None) -> Any:
     """Create the configured provider adapter."""
 
     if config.provider == "openai":
-        return create_openai_provider(config)
+        return create_openai_provider(config, budget_guard=budget_guard)
+    if budget_guard is not None:
+        raise ConfigurationError("economic budget is only supported for openai")
     if config.provider == "gemini":
         return create_gemini_provider(config)
     raise ConfigurationError(f"unsupported provider: {config.provider}")
@@ -395,6 +400,7 @@ def build_runtime_bundle(
     artifact_validator: ArtifactValidator | None = None,
     context_manager: ContextManager | None = None,
     controller_factory: Callable[..., RunController] = RunController,
+    economic_budget_usd: Decimal | str | None = None,
 ) -> RuntimeBundle:
     """Compose the runtime graph outside the core runtime."""
 
@@ -404,7 +410,15 @@ def build_runtime_bundle(
         config.gemini_api_key,
         config.runs_dir,
     )
-    provider = provider_factory(config)
+    budget_guard = _build_productive_budget_guard(config, economic_budget_usd)
+    if provider_factory is create_provider:
+        provider = provider_factory(config, budget_guard=budget_guard)
+    else:
+        provider = provider_factory(config)
+        if budget_guard is not None:
+            if not isinstance(provider, OpenAIProvider):
+                raise ConfigurationError("explicit economic budget requires an OpenAIProvider")
+            provider.budget_guard = budget_guard
     controller = controller_factory(
         provider=provider,
         storage=storage,
@@ -415,6 +429,25 @@ def build_runtime_bundle(
         model_config={},
     )
     return RuntimeBundle(config=config, storage=storage, controller=controller, provider=provider)
+
+
+def _build_productive_budget_guard(
+    config: AppConfig,
+    economic_budget_usd: Decimal | str | None,
+) -> LunaBudgetGuard | None:
+    """Build the optional productive guard without changing the default runtime."""
+
+    if economic_budget_usd is None:
+        return None
+    try:
+        ceiling = Decimal(str(economic_budget_usd))
+    except (InvalidOperation, ValueError) as exc:
+        raise ConfigurationError("economic budget must be a positive decimal") from exc
+    if not ceiling.is_finite() or ceiling <= 0:
+        raise ConfigurationError("economic budget must be a positive decimal")
+    if config.provider != "openai" or config.model != "gpt-5.6-luna":
+        raise ConfigurationError("economic budget pricing is unavailable for the configured provider/model")
+    return LunaBudgetGuard(hard_budget_usd=ceiling)
 
 
 def _configure_storage(
