@@ -102,7 +102,13 @@ class ProductFabricTaskContractResolver:
     @staticmethod
     def _is_supported_server_core_request(request: str) -> bool:
         normalized = " ".join(request.casefold().split())
-        return "craftable utility block" in normalized and "server core" in normalized
+        if "server core" not in normalized:
+            return False
+        english = all(token in normalized for token in ("craftable", "utility", "block"))
+        spanish = all(token in normalized for token in ("bloque", "utilitario", "craftable"))
+        has_item_wiring = "block item" in normalized or "recursos en_us" in normalized
+        has_recipe = "recipe" in normalized or "recet" in normalized
+        return (english or spanish) and has_item_wiring and has_recipe
 
     @staticmethod
     def _detected(values, key: str) -> str | None:  # noqa: ANN001

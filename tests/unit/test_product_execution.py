@@ -137,6 +137,10 @@ def test_worker_exception_releases_capacity_and_is_failed(tmp_path: Path) -> Non
         result = service.get(snapshot.execution_id)
         assert result.status is ProductExecutionStatus.FAILED
         assert result.reason == "worker_exception"
+        assert result.terminal is True
+        persisted = _catalog.get_execution(snapshot.execution_id)
+        assert persisted.status == "FAILED"
+        assert persisted.terminal_recorded_at is not None
         assert service._active_execution_id is None
     finally:
         service.shutdown()

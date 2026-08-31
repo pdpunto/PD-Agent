@@ -9,14 +9,18 @@ from fastapi.testclient import TestClient
 from pd_agent.core import RunStatus
 from pd_agent.product import (
     DeliveryRecord,
+    EvidenceService,
     ExecutionRecord,
+    ExecutionService,
     HumanEvidenceDTO as ProductHumanEvidenceDTO,
     ProductCatalog,
     ProductExecutionStatus,
     ProjectService,
     TechnicalEvidenceDTO as ProductTechnicalEvidenceDTO,
 )
+from pd_agent.product.fabric import ProductFabricTaskContractError
 from pd_agent.product.execution import ExecutionSnapshot
+from pd_agent.reporting import RunStorage
 from pd_agent.web import CSRF_HEADER, WebServices, create_app
 
 
@@ -146,6 +150,43 @@ def test_execution_and_evidence_are_allowlisted(tmp_path: Path) -> None:
         technical = client.get(f"/api/v1/executions/{execution.execution_id}/evidence/technical", headers=_headers())
         assert human.status_code == technical.status_code == 200
         assert "path" not in human.text and "events" not in technical.text
+
+
+def test_early_worker_failure_is_terminal_and_has_evidence_without_run_state(tmp_path: Path) -> None:
+    catalog = ProductCatalog(tmp_path / "data")
+    projects = ProjectService(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = projects.register_project("Demo", workspace)
+    task = projects.create_task(project.project_id, "unsupported")
+
+    class FailingController:
+        def run(self, *_args, **_kwargs):
+            raise ProductFabricTaskContractError("unsupported task")
+
+    storage = RunStorage(tmp_path / "runs")
+    execution_service = ExecutionService(catalog, FailingController(), projects)
+    evidence = EvidenceService(storage, execution_service)
+    app = create_app(services=WebServices(project=projects, execution=execution_service, evidence=evidence), csrf_token="test-token")
+    try:
+        with TestClient(app) as client:
+            started = client.post(f"/api/v1/tasks/{task.task_id}/executions", headers=_headers(mutation=True))
+            assert started.status_code == 202
+            execution_id = started.json()["execution_id"]
+            for _ in range(100):
+                observed = client.get(f"/api/v1/executions/{execution_id}", headers=_headers())
+                if observed.json()["terminal"]:
+                    break
+            assert observed.json()["status"] == "FAILED"
+            assert observed.json()["terminal"] is True
+            human = client.get(f"/api/v1/executions/{execution_id}/evidence/human", headers=_headers())
+            technical = client.get(f"/api/v1/executions/{execution_id}/evidence/technical", headers=_headers())
+            assert human.status_code == technical.status_code == 200
+            assert human.json()["status"] == technical.json()["status"] == "FAILED"
+            assert technical.json()["runtime_state"] is None
+            assert "traceback" not in technical.text.lower()
+    finally:
+        execution_service.shutdown()
 
 
 def test_history_and_delivery_endpoints_do_not_expose_paths(tmp_path: Path) -> None:

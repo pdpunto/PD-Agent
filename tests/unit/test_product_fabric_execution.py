@@ -84,6 +84,30 @@ def test_resolver_rejects_unsupported_or_wrong_owner(tmp_path: Path) -> None:
         resolver.resolve(wrong_project, task, snapshot)
 
 
+def test_resolver_accepts_canonical_spanish_server_core_request(tmp_path: Path) -> None:
+    project, _task, snapshot = _records(tmp_path)
+    task = TaskRecord(
+        task_id=str(uuid4()),
+        project_id=project.project_id,
+        request=(
+            "Añade un bloque utilitario craftable llamado Server Core, incluyendo su "
+            "block item, recursos en_us y receta, preservando el mod y los entrypoints existentes."
+        ),
+    )
+
+    contract = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+    assert contract.goal == task.request
+
+
+def test_resolver_rejects_partial_server_core_wording(tmp_path: Path) -> None:
+    project, _task, snapshot = _records(tmp_path)
+    task = TaskRecord(task_id=str(uuid4()), project_id=project.project_id, request="Add Server Core")
+
+    with pytest.raises(ProductFabricTaskContractError, match="not supported"):
+        ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+
 def test_product_runner_delegates_contract_workspace_and_identity(tmp_path: Path) -> None:
     project, task, snapshot = _records(tmp_path)
     execution_id = str(uuid4())

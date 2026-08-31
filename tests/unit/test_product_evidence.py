@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from pd_agent.core import RunState, RunStatus
-from pd_agent.product import EvidenceService, HumanEvidenceDTO, ProductExecutionSnapshot, ProductExecutionStatus, TechnicalEvidenceDTO
+from pd_agent.product import EvidenceService, ExecutionRecord, HumanEvidenceDTO, ProductExecutionSnapshot, ProductExecutionStatus, TechnicalEvidenceDTO
 from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 
 
@@ -105,6 +105,34 @@ def test_terminal_projections_are_truthful(tmp_path: Path) -> None:
             RunStatus.ABORTED: ProductExecutionStatus.INTERRUPTED,
         }[status]
         assert projected.status is expected
+
+
+def test_early_product_failure_has_safe_evidence_without_run_state(tmp_path: Path) -> None:
+    storage = RunStorage(tmp_path / "runs")
+    execution = ExecutionRecord(run_id=str(uuid4()), task_id=str(uuid4()))
+
+    class ProductFailureService:
+        def get(self, execution_id: str):
+            assert execution_id == execution.execution_id
+            from pd_agent.product.execution import ExecutionSnapshot
+
+            return ExecutionSnapshot(
+                execution,
+                ProductExecutionStatus.FAILED,
+                "task_contract_resolution_failed",
+                terminal=True,
+            )
+
+    service = EvidenceService(storage, ProductFailureService())
+    snapshot = service.snapshot(execution.execution_id)
+
+    assert snapshot.status is ProductExecutionStatus.FAILED
+    assert snapshot.terminal is True
+    assert snapshot.runtime_state is None
+    assert snapshot.human_evidence.current_activity == "task_contract_resolution_failed"
+    assert snapshot.technical_evidence.failure_classification == "task_contract_resolution_failed"
+    assert snapshot.technical_evidence.build_attempts == ()
+    assert snapshot.technical_evidence.runtime_observations == ()
 
 
 def test_snapshot_has_monotonic_stale_comparison(tmp_path: Path) -> None:

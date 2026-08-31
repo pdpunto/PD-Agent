@@ -256,6 +256,7 @@ describe("frontend route and state foundations", () => {
     expect(
       await screen.findByText("No he podido terminar este mod"),
     ).toBeInTheDocument();
+    expect(screen.getByText(/Detenido/)).toBeInTheDocument();
   });
   it("renders a blocked execution safely", async () => {
     window.history.replaceState({}, "", "/executions/e");

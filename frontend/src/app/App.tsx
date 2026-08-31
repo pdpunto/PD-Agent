@@ -38,6 +38,7 @@ const safeError = (error: unknown) =>
 export default function App() {
   const [route, setRoute] = useState(() => routeFor(window.location.pathname));
   const mainRef = useRef<HTMLElement>(null);
+  const [executionStatus, setExecutionStatus] = useState<string | null>(null);
   const navigate = (path: string) => {
     window.history.pushState({}, "", path);
     setRoute(routeFor(path));
@@ -50,16 +51,31 @@ export default function App() {
   useEffect(() => {
     mainRef.current?.focus();
   }, [route.name, route.id]);
-  return <Shell route={route} navigate={navigate} mainRef={mainRef} />;
+  useEffect(() => {
+    setExecutionStatus(null);
+  }, [route.name, route.id]);
+  return (
+    <Shell
+      route={route}
+      navigate={navigate}
+      mainRef={mainRef}
+      executionStatus={executionStatus}
+      setExecutionStatus={setExecutionStatus}
+    />
+  );
 }
 function Shell({
   route,
   navigate,
   mainRef,
+  executionStatus,
+  setExecutionStatus,
 }: {
   route: Route;
   navigate: (path: string) => void;
   mainRef: RefObject<HTMLElement | null>;
+  executionStatus: string | null;
+  setExecutionStatus: (status: string | null) => void;
 }) {
   return (
     <div className="app-shell">
@@ -105,12 +121,21 @@ function Shell({
           <ProjectPage projectId={route.id!} navigate={navigate} />
         )}
         {route.name === "execution" && (
-          <ExecutionPage executionId={route.id!} navigate={navigate} />
+          <ExecutionPage
+            executionId={route.id!}
+            navigate={navigate}
+            onStatusChange={setExecutionStatus}
+          />
         )}
         {route.name === "settings" && <SettingsPage />}
       </main>
       <footer className="statusbar">
-        <span className="status-dot" aria-hidden="true" /> Listo
+        <span className="status-dot" aria-hidden="true" />{" "}
+        {route.name !== "execution"
+          ? "Listo"
+          : executionStatus === "FAILED"
+            ? "Detenido · No se pudo completar"
+            : "Trabajando · Procesando la solicitud"}
       </footer>
     </div>
   );
@@ -372,9 +397,11 @@ function ProjectPage({
 function ExecutionPage({
   executionId,
   navigate,
+  onStatusChange,
 }: {
   executionId: string;
   navigate: (path: string) => void;
+  onStatusChange: (status: string | null) => void;
 }) {
   const [snapshot, setSnapshot] = useState<Load<Execution>>({
     status: "loading",
@@ -399,6 +426,7 @@ function ExecutionPage({
           latest.current = sequence;
           hasSnapshot.current = true;
           setSnapshot({ status: "ready", data: next });
+          onStatusChange(next.status);
         }
         if (!next.terminal && active)
           timer.current = window.setTimeout(poll, 1000);
@@ -415,7 +443,7 @@ function ExecutionPage({
       active = false;
       if (timer.current !== undefined) window.clearTimeout(timer.current);
     };
-  }, [executionId]);
+  }, [executionId, onStatusChange]);
   useEffect(() => {
     if (!details) return;
     let active = true;

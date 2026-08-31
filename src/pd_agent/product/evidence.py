@@ -128,7 +128,10 @@ class EvidenceService:
         self.execution_service = execution_service
 
     def snapshot(self, execution_id: str) -> ProductExecutionSnapshot:
-        state = self.storage.read_run_state(execution_id)
+        try:
+            state = self.storage.read_run_state(execution_id)
+        except FileNotFoundError:
+            return self._early_failure_snapshot(execution_id)
         events = self.storage.read_events(execution_id)
         report = self._read_report(execution_id)
         product = self._product_snapshot(execution_id, state)
@@ -145,6 +148,37 @@ class EvidenceService:
             current_activity=activity,
             terminal=product.status is not ProductExecutionStatus.RUNNING,
             latest_sequence=latest_sequence,
+            human_evidence=human,
+            technical_evidence=technical,
+        )
+
+    def _early_failure_snapshot(self, execution_id: str) -> ProductExecutionSnapshot:
+        """Project a terminal product failure that predates RunState creation."""
+        if self.execution_service is None:
+            raise FileNotFoundError(f"run state not found: {execution_id}")
+        product = self.execution_service.get(execution_id)
+        reason = product.reason
+        human = HumanEvidenceDTO(
+            execution_id=execution_id,
+            status=product.status.value,
+            current_activity=reason,
+        )
+        technical = TechnicalEvidenceDTO(
+            execution_id=execution_id,
+            run_id=product.execution.run_id,
+            status=product.status.value,
+            started_at=product.execution.created_at.isoformat(),
+            failure_classification=reason,
+        )
+        return ProductExecutionSnapshot(
+            execution_id=execution_id,
+            run_id=product.execution.run_id,
+            status=product.status,
+            runtime_state=None,
+            current_milestone=None,
+            current_activity=reason,
+            terminal=product.terminal,
+            latest_sequence=None,
             human_evidence=human,
             technical_evidence=technical,
         )

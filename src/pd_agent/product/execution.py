@@ -123,7 +123,12 @@ class ExecutionService:
             execution = self.catalog.get_execution(execution_id)
             if execution.terminal_recorded_at is None:
                 return ExecutionSnapshot(execution, ProductExecutionStatus.INTERRUPTED, "UNKNOWN")
-            return ExecutionSnapshot(execution, ProductExecutionStatus(execution.status), execution.status_reason)
+            return ExecutionSnapshot(
+                execution,
+                ProductExecutionStatus(execution.status),
+                execution.status_reason,
+                terminal=True,
+            )
 
     def list(self) -> tuple[ExecutionSnapshot, ...]:
         with self._lock:
@@ -162,9 +167,9 @@ class ExecutionService:
                 execution = self.catalog.get_execution(execution_id)
                 try:
                     result = future.result()
-                except BaseException:
+                except BaseException as exc:
                     status = ProductExecutionStatus.FAILED
-                    reason = "worker_exception"
+                    reason = self._worker_failure_reason(exc)
                 else:
                     if self.product_runner is not None:
                         status, reason = self._reconcile_product_result(result)
@@ -188,7 +193,7 @@ class ExecutionService:
                         # Runtime success remains authoritative; DeliveryService
                         # exposes the unavailable delivery through its own errors.
                         pass
-                self._snapshots[execution_id] = ExecutionSnapshot(terminal, status, reason)
+                self._snapshots[execution_id] = ExecutionSnapshot(terminal, status, reason, terminal=True)
             except BaseException:
                 # A persistence failure must not strand the global capacity slot.
                 if execution_id not in self._snapshots:
@@ -198,7 +203,7 @@ class ExecutionService:
                         execution = None
                     if execution is not None:
                         self._snapshots[execution_id] = ExecutionSnapshot(
-                            execution, ProductExecutionStatus.FAILED, "reconciliation_failed"
+                            execution, ProductExecutionStatus.FAILED, "reconciliation_failed", terminal=True
                         )
             finally:
                 self._futures.pop(execution_id, None)
@@ -233,6 +238,15 @@ class ExecutionService:
         except Exception:
             return ProductExecutionStatus.FAILED, "runtime_evidence_unavailable"
         return self._reconcile(state, report)
+
+    @staticmethod
+    def _worker_failure_reason(error: BaseException) -> str:
+        """Classify early failures without exposing exception internals."""
+        from .fabric import ProductFabricTaskContractError
+
+        if isinstance(error, ProductFabricTaskContractError):
+            return "task_contract_resolution_failed"
+        return "worker_exception"
 
     def _authoritative_success(self, state: RunState, report: FinalReport) -> bool:
         storage = getattr(self.controller, "storage", None)
