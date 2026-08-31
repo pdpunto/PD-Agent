@@ -134,7 +134,7 @@ class FailureReconciler:
         return self._resolve(run_state, failure, identity.result_refs)
 
     def _resolve(self, run_state: RunState, failure: FailureFact, refs: tuple[str, ...]) -> bool:
-        refs = tuple(ref for ref in refs if ref)
+        refs = tuple(dict.fromkeys(ref for ref in refs if ref))
         if not refs or run_state.progress_ledger is None:
             return False
         ledger = run_state.progress_ledger

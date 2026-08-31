@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -131,6 +132,21 @@ def test_runtime_pass_requires_current_artifact_revision_and_requirements() -> N
     reconciler = FailureReconciler()
     assert reconciler.reconcile_runtime(state, failure, runtime=outcome, artifact=artifact, requirement_ids=("r1",), validation_revision="v1")
     assert len(state.progress_ledger.failures) == 1
+
+
+def test_runtime_resolution_deduplicates_evidence_refs_preserving_order() -> None:
+    state = _state()
+    failure = _failure(category="RUNTIME")
+    artifact = _artifact()
+    outcome = _runtime(artifact)
+    identity = replace(outcome.runtime_identity, result_refs=("runtime/pass.json", "runtime/pass.json", "runtime/second.json"))
+    outcome = replace(outcome, runtime_identity=identity)
+
+    assert FailureReconciler().reconcile_runtime(
+        state, failure, runtime=outcome, artifact=artifact, requirement_ids=("r1",), validation_revision="v1"
+    )
+    resolved = state.progress_ledger.failures[0]
+    assert resolved.resolution_evidence_refs == ("runtime/pass.json", "runtime/second.json")
 
 
 def test_runtime_old_artifact_or_wrong_requirement_does_not_resolve() -> None:

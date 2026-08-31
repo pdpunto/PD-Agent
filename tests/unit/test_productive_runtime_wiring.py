@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from pd_agent.core import (
+    ArtifactIdentity,
     ArtifactResult,
     BuildAttemptIdentity,
     FailureFactStatus,
@@ -20,6 +21,7 @@ from pd_agent.core import (
     compute_source_revision,
 )
 from pd_agent.minecraft import MinecraftEvidenceKind, MinecraftEvidenceReference, MinecraftObservationStatus, MinecraftObservationType, ObservationResult, MinecraftTestStatus
+from pd_agent.fabric import FabricNormalOrchestrator
 from pd_agent.validation import CompletionGate
 from pd_agent.validation import ProductiveMinecraftFunctionalValidator
 from pd_agent.validation.runtime import _artifact_reference
@@ -257,6 +259,66 @@ def test_repair_reconciles_new_validated_artifact_before_second_runtime(tmp_path
     assert state.runtime_identities[1].artifact_identity == state.artifact_identity.artifact_identity
     assert [item.status for item in state.progress_ledger.failures] == [FailureFactStatus.ACTIVE, FailureFactStatus.RESOLVED]
     assert CompletionGate().evaluate(contract, state.progress_ledger, state).complete is True
+
+
+def test_requirement_progress_consumes_only_current_source_build_and_valid_artifact(tmp_path: Path) -> None:
+    source_file = tmp_path / "src" / "ExampleMod.java"
+    source_file.parent.mkdir()
+    source_file.write_text("current", encoding="utf-8")
+    contract = FabricTaskContract(
+        task_id="generic-progress",
+        revision="1",
+        goal="reconcile evidence",
+        requirements=(
+            FabricRequirement(requirement_id="source", description="source"),
+            FabricRequirement(requirement_id="build", description="build"),
+            FabricRequirement(requirement_id="artifact", description="artifact"),
+        ),
+    )
+    source = compute_source_revision(tmp_path)
+    build = BuildAttemptIdentity(
+        build_attempt_id="build-1",
+        source_revision=source.revision,
+        contract_identity=contract.identity(),
+        result_ref="builds/1",
+        success=True,
+    )
+    artifact = ArtifactIdentity(
+        artifact_identity="a" * 64,
+        sha256="a" * 64,
+        producing_build_attempt_id=build.build_attempt_id,
+        source_revision=source.revision,
+        contract_identity=contract.identity(),
+    )
+    state = RunState(
+        project_root=tmp_path,
+        task_contract=contract,
+        task=contract.task_id,
+        source_revision=source,
+        changed_files=("src/ExampleMod.java",),
+        build_identities=(build,),
+        artifact_identity=artifact,
+        artifact_result=ArtifactResult(
+            path=tmp_path / "build" / "libs" / "mod.jar",
+            size=1,
+            timestamp=datetime.now(timezone.utc),
+            classification="VALID",
+        ),
+        progress_ledger=TaskProgressLedger(contract_identity=contract.identity()),
+    )
+    orchestrator = FabricNormalOrchestrator(provider=None, build_runner=None, artifact_validator=None, context_manager=None)
+
+    orchestrator._reconcile_requirement_progress(state, contract)
+
+    assert state.progress_ledger.satisfied_requirement_ids == ("source", "build", "artifact")
+    assert state.progress_ledger.evidence_by_requirement["source"] == ("src/ExampleMod.java",)
+    assert state.progress_ledger.evidence_by_requirement["build"] == ("builds/1",)
+    assert state.progress_ledger.evidence_by_requirement["artifact"] == (f"artifacts/{artifact.artifact_identity}",)
+
+    source_file.write_text("changed after build", encoding="utf-8")
+    state.progress_ledger = TaskProgressLedger(contract_identity=contract.identity())
+    orchestrator._reconcile_requirement_progress(state, contract)
+    assert state.progress_ledger.satisfied_requirement_ids == ()
 
 
 def test_invalid_artifact_never_reaches_runner(tmp_path: Path) -> None:

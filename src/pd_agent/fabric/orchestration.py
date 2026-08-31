@@ -211,9 +211,47 @@ class FabricNormalOrchestrator:
         satisfied = set(ledger.satisfied_requirement_ids)
         evidence = dict(ledger.evidence_by_requirement)
         source = state.source_revision.revision if state.source_revision is not None else None
+        current_source = None
+        if state.project_root is not None:
+            try:
+                current_source = compute_source_revision(state.project_root).revision
+            except (OSError, ValueError):
+                current_source = None
+        current_builds = tuple(
+            item for item in state.build_identities
+            if source is not None
+            and source == current_source
+            and item.is_current(source_revision=source, contract_identity=contract.identity())
+        )
+        current_artifact = None
+        if state.artifact_identity is not None and current_builds:
+            producing_build = next(
+                (item for item in reversed(current_builds)
+                 if item.build_attempt_id == state.artifact_identity.producing_build_attempt_id),
+                None,
+            )
+            if (
+                producing_build is not None
+                and state.artifact_result is not None
+                and state.artifact_result.classification == "VALID"
+                and state.artifact_identity.is_current(
+                    producing_build,
+                    source_revision=source,
+                    contract_identity=contract.identity(),
+                )
+            ):
+                current_artifact = state.artifact_identity
         for requirement in contract.requirements:
             refs: tuple[str, ...] = ()
-            if requirement.requirement_id == "source-change":
+            if requirement.requirement_id == "source":
+                if source is not None and source == current_source and state.changed_files:
+                    refs = tuple(state.changed_files)
+            elif requirement.requirement_id == "build":
+                refs = tuple(item.result_ref for item in current_builds if item.result_ref)
+            elif requirement.requirement_id == "artifact":
+                if current_artifact is not None:
+                    refs = (f"artifacts/{current_artifact.artifact_identity}",)
+            elif requirement.requirement_id == "source-change":
                 refs = tuple(state.changed_files)
             elif requirement.requirement_id.startswith("resource-"):
                 validation = next((item for item in contract.validation_requirements if requirement.requirement_id in item.requirement_ids), None)
@@ -222,9 +260,10 @@ class FabricNormalOrchestrator:
                 refs = present
             elif requirement.requirement_id.startswith("validation-"):
                 if requirement.requirement_id == "validation-build":
-                    refs = tuple(item.result_ref for item in state.build_identities if item.success and (source is None or item.source_revision == source))
+                    refs = tuple(item.result_ref for item in current_builds if item.result_ref)
                 elif requirement.requirement_id == "validation-artifact" and state.artifact_identity is not None:
-                    refs = (f"artifacts/{state.artifact_identity.artifact_identity}",)
+                    if current_artifact is not None:
+                        refs = (f"artifacts/{current_artifact.artifact_identity}",)
                 elif requirement.requirement_id == "validation-minecraft":
                     refs = tuple(ref for item in state.runtime_identities if item.status == "PASS" for ref in item.result_refs)
             if refs:
