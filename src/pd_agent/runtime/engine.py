@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -570,7 +570,7 @@ class AgentRuntime:
             run_state.logical_provider_request_count,
             stage=run_state.state.value,
         )
-        self._persist_knowledge_traces(run_state.run_id)
+        self._persist_knowledge_traces(run_state)
         self._persist_state(run_state)
         try:
             return self.provider.execute(request), offered_tool_names
@@ -581,7 +581,8 @@ class AgentRuntime:
             run_state.termination_reason = "provider error"
             raise
 
-    def _persist_knowledge_traces(self, run_id: str) -> None:
+    def _persist_knowledge_traces(self, run_state: RunState) -> None:
+        run_id = run_state.run_id
         traces = getattr(self.context_manager, "last_knowledge_traces", ())
         if not traces or self.reporting is None:
             return
@@ -601,6 +602,13 @@ class AgentRuntime:
                 sequence=len(refs) + 1,
             )
             refs.append(evidence_path.relative_to(paths.root).as_posix())
+            trace_ref = refs[-1]
+            ledger = run_state.progress_ledger
+            if ledger is not None:
+                correlation = dict(ledger.knowledge_correlation)
+                for need in trace.needs:
+                    correlation[need.id] = tuple(dict.fromkeys((*correlation.get(need.id, ()), trace_ref)))
+                run_state.progress_ledger = replace(ledger, knowledge_correlation=correlation)
             event_types = {
                 KnowledgeTraceState.RETRIEVED: RunEventType.KNOWLEDGE_RETRIEVED,
                 KnowledgeTraceState.SELECTED: RunEventType.KNOWLEDGE_SELECTED,
@@ -622,7 +630,7 @@ class AgentRuntime:
                             "context_item_id": record.context_item_id,
                             "provider_turn": record.provider_turn,
                             "stage": record.stage,
-                            "evidence_refs": list(record.evidence_refs),
+                            "evidence_refs": list(dict.fromkeys((*record.evidence_refs, trace_ref))),
                         },
                     )
 

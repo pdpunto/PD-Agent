@@ -143,7 +143,8 @@ class FabricNormalOrchestrator:
         brain_result = brain.prepare(contract=contract, environment=knowledge_environment, ledger=ledger, run_state=state, trigger=BrainTrigger.PRE_CODE, brain_enabled=brain_enabled, offline=True, project_snapshot=snapshot)
         if brain_result.ledger is not None:
             state.progress_ledger = brain_result.ledger
-        knowledge_context = brain_result.provider_messages if brain_enabled else ()
+        # Keep selected knowledge typed until AgentRuntime builds provider messages.
+        knowledge_context = tuple(brain_result.selected) if brain_enabled else ()
         executor = self.tool_executor or ToolExecutor(tools=create_filesystem_tools())
         if self.reporting is not None:
             executor.event_sink = self.reporting.event_writer(state.run_id)

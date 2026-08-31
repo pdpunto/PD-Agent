@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 test("integrated productive success uses Brain, repair, gate and delivery", async ({ page }) => {
   await page.goto("/");
@@ -24,7 +27,25 @@ test("integrated productive success uses Brain, repair, gate and delivery", asyn
   await technical.getByRole("button", { name: "Close", exact: true }).click();
   const download = await page.request.get(await page.getByRole("link", { name: "Descargar JAR" }).getAttribute("href")!);
   expect(download.ok()).toBeTruthy();
-  expect((await download.body()).length).toBeGreaterThan(0);
+  const downloadedBody = await download.body();
+  expect(downloadedBody.length).toBeGreaterThan(0);
+  const runId = page.url().split("/").pop()!;
+  const runRoot = join(process.env.PD_AGENT_R15_R1_ROOT!, "runs", runId);
+  const run = JSON.parse(readFileSync(join(runRoot, "run.json"), "utf8"));
+  const traces = readdirSync(join(runRoot, "evidence"))
+    .filter((name) => name.endsWith("-knowledge-trace.json"))
+    .map((name) => JSON.parse(readFileSync(join(runRoot, "evidence", name), "utf8")));
+  const records = traces.flatMap((trace) => trace.records);
+  expect(traces.length).toBeGreaterThan(0);
+  expect(new Set(records.map((record) => record.need_id)).size).toBeGreaterThan(0);
+  expect(new Set(records.map((record) => record.item_id)).size).toBeGreaterThan(0);
+  expect(records.filter((record) => record.states.includes("INJECTED")).length).toBeGreaterThan(0);
+  expect(records.filter((record) => record.provider_turn !== null).length).toBeGreaterThan(0);
+  expect(Object.keys(run.progress_ledger.knowledge_correlation).length).toBeGreaterThan(0);
+  const catalog = JSON.parse(readFileSync(join(process.env.PD_AGENT_R15_R1_ROOT!, "product-data", "product", "catalog-v1.json"), "utf8"));
+  const delivery = Object.values(catalog.deliveries).find((item: any) => item.execution_id === runId) as any;
+  expect(delivery).toBeDefined();
+  expect(createHash("sha256").update(downloadedBody).digest("hex")).toBe(delivery.artifact_sha256);
   await page.getByRole("button", { name: /Open project/ }).click();
   await page.getByRole("button", { name: /R15-R1 integrated project/ }).click();
   await expect(page.getByText(/Server Core/)).toBeVisible();

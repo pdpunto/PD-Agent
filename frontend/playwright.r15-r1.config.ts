@@ -11,6 +11,7 @@ const testRoot = resolve(tmpdir(), "pd-agent-r15-r1-20260831-f9e6c3");
 mkdirSync(testRoot, { recursive: true });
 const workspace = resolve(testRoot, "workspace");
 process.env.PD_AGENT_E2E_WORKSPACE = workspace;
+process.env.PD_AGENT_R15_R1_ROOT = testRoot;
 
 export default defineConfig({
   testDir: "./tests/e2e",

@@ -51,9 +51,9 @@ ENVIRONMENT = KnowledgeEnvironment(
 def _pack(root: Path) -> Path:
     packs = []
     for source_id, source_kind, kind, query in (
-        ("net.fabricmc:yarn", "yarn-mappings", KnowledgeType.SYMBOL, "net.minecraft.block.Block"),
+        ("net.fabricmc:yarn", "yarn-mappings", KnowledgeType.PATTERN, "net.minecraft.block.Block"),
         ("net.fabricmc.fabric-api:fabric-api", "fabric-api-artifact", KnowledgeType.API, "Registry.register"),
-        ("fabric-docs:concept-pattern", "fabric-official-reference", KnowledgeType.CONCEPT, "craftable utility block recipe"),
+        ("fabric-docs:concept-pattern", "fabric-official-reference", KnowledgeType.CAPABILITY, "craftable utility block recipe"),
     ):
         content = {"source": source_id, "qualified_name": query, "guidance": "preserve entrypoints and register Server Core"}
         checksum = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
