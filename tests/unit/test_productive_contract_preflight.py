@@ -7,6 +7,8 @@ import pytest
 
 from pd_agent.config import load_config
 from pd_agent.minecraft import runtime_spec_from_requirement
+from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, UnsupportedMinecraftEnvironmentError
+from pd_agent.project import DetectedValue
 from pd_agent.product.application import build_product_application
 from pd_agent.product.models import ProjectRecord, TaskRecord
 from pd_agent.project import ProjectInspector
@@ -84,5 +86,79 @@ def test_productive_composition_fixes_output_budget_and_preview(tmp_path: Path) 
         assert preview["decision"] == "ALLOW"
         assert preview["output_tokens_limit"] == 16_384
         assert preview["reservation_usd"] == "0.03716080"
+    finally:
+        application.shutdown()
+
+
+def test_project_inspector_versions_map_to_productive_contract(tmp_path: Path) -> None:
+    application = _application(tmp_path)
+    try:
+        snapshot = ProjectInspector().inspect(FIXTURE.resolve())
+        snapshot = replace(
+            snapshot,
+            detected_versions={
+                **snapshot.detected_versions,
+                "fabric_api": DetectedValue("0.141.6+1.21.11", "test-fabric-api"),
+            },
+        )
+        project = ProjectRecord(name="fixture", workspace_ref=str(FIXTURE.resolve()))
+        task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
+
+        contract = application.fabric_resolver.resolve(project, task, snapshot)
+        environment = contract.environment_constraints
+
+        assert environment.minecraft_version == "1.21.11"
+        assert environment.loader_version == "0.19.3"
+        assert environment.fabric_api_version == "0.141.6+1.21.11"
+        assert environment.yarn_version == "1.21.11+build.6"
+        assert environment.java_version == "21"
+        runtime_spec = runtime_spec_from_requirement(
+            next(item for item in contract.validation_requirements if item.kind == "minecraft")
+        )
+        assert runtime_spec.observations[0].phase == "RUNTIME"
+    finally:
+        application.shutdown()
+
+
+@pytest.mark.parametrize("missing_key", ["minecraft", "loader"])
+def test_project_inspector_missing_required_version_fails_closed(tmp_path: Path, missing_key: str) -> None:
+    application = _application(tmp_path)
+    try:
+        snapshot = ProjectInspector().inspect(FIXTURE.resolve())
+        broken = replace(
+            snapshot,
+            detected_versions={key: value for key, value in snapshot.detected_versions.items() if key != missing_key},
+        )
+        project = ProjectRecord(name="fixture", workspace_ref=str(FIXTURE.resolve()))
+        task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
+
+        with pytest.raises(ValueError, match="missing required Fabric versions"):
+            application.fabric_resolver.resolve(project, task, broken)
+    finally:
+        application.shutdown()
+
+
+def test_unsupported_minecraft_version_remains_fail_closed(tmp_path: Path) -> None:
+    application = _application(tmp_path)
+    try:
+        snapshot = ProjectInspector().inspect(FIXTURE.resolve())
+        project = ProjectRecord(name="fixture", workspace_ref=str(FIXTURE.resolve()))
+        task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
+        contract = application.fabric_resolver.resolve(project, task, snapshot)
+        requirement = next(item for item in contract.validation_requirements if item.kind == "minecraft")
+        runtime_spec = runtime_spec_from_requirement(requirement)
+        unsupported = MinecraftTestSpec(
+            target_jar=FIXTURE / "build" / "libs" / "fixture.jar",
+            target_mod_id=runtime_spec.observations[0].selector["identifier"].split(":", 1)[0],
+            minecraft_version="0.0.0",
+            loader_version="0.19.3",
+            test_id="unsupported",
+            timeout_seconds=30,
+            observation_type="REGISTRY_ENTRY_PRESENT",
+            observation_params={"registry_kind": "block", "identifier": "pdagentl11:server_core"},
+        )
+
+        with pytest.raises(UnsupportedMinecraftEnvironmentError, match="unsupported minecraft_version"):
+            MinecraftTestRunner(FIXTURE.resolve()).validate_spec(unsupported, java_version="21")
     finally:
         application.shutdown()

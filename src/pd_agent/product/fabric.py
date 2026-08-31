@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from pd_agent.bootstrap import PinnedFabricVersions
 from pd_agent.core import (
     FabricEnvironmentConstraints,
     FabricKnowledgeSignal,
@@ -93,6 +94,20 @@ class ProductFabricTaskContractResolver:
             ),
         )
         environment = workspace.detected_versions
+        detected_versions = {
+            "minecraft_version": self._detected(environment, "minecraft", "minecraft_version"),
+            "loader_version": self._detected(environment, "loader", "loader_version"),
+            "fabric_api_version": self._detected(environment, "fabric_api", "fabric_api_version"),
+            "yarn_version": self._detected(environment, "mappings", "yarn_version"),
+        }
+        missing = tuple(
+            name for name in ("minecraft_version", "loader_version")
+            if detected_versions[name] is None
+        )
+        if missing:
+            raise ProductFabricTaskContractError(
+                "workspace is missing required Fabric versions: " + ", ".join(missing)
+            )
         return FabricTaskContract(
             task_id=task.task_id,
             revision="product-1",
@@ -113,11 +128,11 @@ class ProductFabricTaskContractResolver:
                 FabricMutationExpectation(expectation_id="mutation-recipe", role="resource", path="src/main/resources/data/examplemod/recipe/server_core.json"),
             ),
             environment_constraints=FabricEnvironmentConstraints(
-                minecraft_version=self._detected(environment, "minecraft_version"),
-                loader_version=self._detected(environment, "loader_version"),
-                fabric_api_version=self._detected(environment, "fabric_api_version"),
-                yarn_version=self._detected(environment, "yarn_version"),
-                java_version=self._detected(environment, "java_version"),
+                **detected_versions,
+                java_version=str(
+                    self._detected(environment, "java", "java_version")
+                    or PinnedFabricVersions().java
+                ),
                 extra={"project_root": str(workspace.project_root)},
             ),
         )
@@ -134,9 +149,12 @@ class ProductFabricTaskContractResolver:
         return (english or spanish) and has_item_wiring and has_recipe
 
     @staticmethod
-    def _detected(values, key: str) -> str | None:  # noqa: ANN001
-        detected = values.get(key)
-        return detected.value if detected is not None else None
+    def _detected(values, *keys: str) -> str | None:  # noqa: ANN001
+        for key in keys:
+            detected = values.get(key)
+            if detected is not None:
+                return detected.value
+        return None
 
 
 class ProductExecutionRunner(Protocol):
