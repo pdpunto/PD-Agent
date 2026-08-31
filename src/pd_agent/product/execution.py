@@ -14,6 +14,7 @@ from pd_agent.core import RunState, RunStatus
 from pd_agent.pass_policy import evaluate_pass
 from pd_agent.reporting import FinalReport
 from pd_agent.runtime import RunController
+from pd_agent.validation import CompletionGate
 
 from .catalog import CatalogError, ProductCatalog
 from .models import ExecutionRecord, TaskRecord
@@ -251,7 +252,16 @@ class ExecutionService:
     def _authoritative_success(self, state: RunState, report: FinalReport) -> bool:
         storage = getattr(self.controller, "storage", None)
         if storage is not None:
-            return evaluate_pass(storage, state.run_id).passed
+            if not evaluate_pass(storage, state.run_id).passed:
+                return False
+            if state.task_contract is not None:
+                completion = CompletionGate().evaluate(
+                    state.task_contract,
+                    state.progress_ledger,
+                    state,
+                )
+                return completion.complete
+            return True
         return (
             report.final_state is RunStatus.COMPLETED
             and report.completion_status in {"PASS", "SUCCEEDED"}

@@ -6,7 +6,16 @@ from types import SimpleNamespace
 from threading import Event
 
 from pd_agent.config import AppConfig
-from pd_agent.core import ArtifactResult, BuildResult, FabricRequirement, FabricTaskContract, RunState, RunStatus, TaskProgressLedger
+from pd_agent.core import (
+    ArtifactResult,
+    BuildResult,
+    FabricRequirement,
+    FabricTaskContract,
+    FabricValidationRequirement,
+    RunState,
+    RunStatus,
+    TaskProgressLedger,
+)
 from pd_agent.product import (
     ExecutionService,
     ProductCatalog,
@@ -114,6 +123,82 @@ def test_product_runner_result_is_reconciled_from_run_storage(tmp_path: Path) ->
         assert service.get(started.execution_id).status is ProductExecutionStatus.SUCCEEDED
         assert delivery.calls == [started.execution_id]
         assert catalog.get_execution(started.execution_id).run_id == started.execution_id
+    finally:
+        service.shutdown()
+
+
+def test_incomplete_completion_gate_cannot_project_product_success_or_delivery(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    catalog = ProductCatalog(tmp_path / "product-data")
+    projects = ProjectService(catalog)
+    project = projects.register_project("Demo", workspace)
+    task = projects.create_task(project.project_id, REQUEST)
+    storage = RunStorage(tmp_path / "runs")
+    contract = FabricTaskContract(
+        task_id=task.task_id,
+        revision="1",
+        goal=task.request,
+        requirements=(FabricRequirement(requirement_id="source", description="source changed"),),
+        validation_requirements=(FabricValidationRequirement(
+            validation_requirement_id="validate-minecraft",
+            requirement_ids=("source",),
+            kind="minecraft",
+        ),),
+    )
+    now = datetime.now(timezone.utc)
+    build = BuildResult(1, "build", workspace, now, 0.1, 0, "", "")
+    artifact = ArtifactResult(workspace / "build" / "libs" / "mod.jar", 1, now, "VALID")
+
+    class Runner:
+        def run(self, execution, _project, _task):  # noqa: ANN001
+            state = RunState(
+                run_id=execution.run_id,
+                project_root=workspace,
+                task=task.request,
+                state=RunStatus.COMPLETED,
+                task_contract=contract,
+                progress_ledger=TaskProgressLedger(
+                    contract_identity=contract.identity(),
+                    satisfied_requirement_ids=("source",),
+                    evidence_by_requirement={"source": ("evidence/source.json",)},
+                ),
+                build_results=(build,),
+                artifact_result=artifact,
+            )
+            report = FinalReport(
+                run_id=execution.run_id,
+                final_state=RunStatus.COMPLETED,
+                summary="incomplete gate",
+                completion_status="PASS",
+                build_attempts=(build,),
+                final_build=build,
+                artifact=artifact,
+            )
+            storage.write_run_state(state)
+            storage.write_final_report(report)
+            return SimpleNamespace(run_id=execution.run_id)
+
+    class Delivery:
+        def create(self, _execution_id: str) -> None:
+            raise AssertionError("delivery must not be created before CompletionGate PASS")
+
+    service = ExecutionService(
+        catalog,
+        SimpleNamespace(storage=storage),
+        projects,
+        product_runner=Runner(),
+        delivery_service=Delivery(),
+    )
+    try:
+        started = service.start(task.task_id)
+        for _ in range(100):
+            if service.get(started.execution_id).terminal:
+                break
+            Event().wait(0.01)
+        result = service.get(started.execution_id)
+        assert result.status is ProductExecutionStatus.FAILED
+        assert result.reason == "completion_not_authoritative"
     finally:
         service.shutdown()
 
