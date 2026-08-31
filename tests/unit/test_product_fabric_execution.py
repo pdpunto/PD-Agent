@@ -46,6 +46,7 @@ def _snapshot(root: Path) -> ProjectSnapshot:
             "loader_version": DetectedValue("0.19.3", "test"),
             "fabric_api_version": DetectedValue("0.141.6+1.21.11", "test"),
             "yarn_version": DetectedValue("1.21.11+build.6", "test"),
+            "loom": DetectedValue("1.13.3", "test"),
             "java_version": DetectedValue("21", "test"),
         },
     )
@@ -69,6 +70,8 @@ def test_resolver_preserves_product_task_and_builds_conditional_contract(tmp_pat
     assert contract.validation_requirements
     assert {item.kind for item in contract.validation_requirements} == {"build", "artifact", "minecraft"}
     assert contract.environment_constraints.minecraft_version == "1.21.11"
+    assert contract.environment_constraints.extra["loom_version"] == "1.13.3"
+    assert contract.environment_constraints.extra["mappings_namespace"] == "yarn"
     assert contract.mutation_expectations
 
 

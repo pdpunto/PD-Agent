@@ -11,6 +11,7 @@ from pd_agent.config import load_config
 from pd_agent.artifacts import ArtifactClassification
 from pd_agent.benchmark.dependencies import resolve_runtime_mod_dependencies
 from pd_agent.core import ArtifactResult
+from pd_agent.core import TaskProgressLedger
 from pd_agent.minecraft import runtime_spec_from_requirement
 from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, UnsupportedMinecraftEnvironmentError
 from pd_agent.project import DetectedValue
@@ -182,13 +183,27 @@ def test_productive_brain_context_is_injected_and_brain_off_is_isolated(tmp_path
         task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
         contract = application.fabric_resolver.resolve(project, task, ProjectInspector().inspect(FIXTURE.resolve()))
         environment = application.fabric_orchestrator._knowledge_environment(contract)  # noqa: SLF001
-        brain = FabricBrainOrchestrator(knowledge_service=service)
-        on = brain.prepare(contract=contract, environment=environment, trigger=BrainTrigger.PRE_CODE, brain_enabled=True)
+        assert environment.loom_version == "1.13.3"
+        assert environment.mappings_namespace == "yarn"
+        brain = FabricBrainOrchestrator(
+            knowledge_service=application.fabric_orchestrator.knowledge_service,
+            context_manager=application.runtime.controller.context_manager,
+        )
+        ledger = TaskProgressLedger(contract_identity=contract.identity())
+        on = brain.prepare(
+            contract=contract,
+            environment=environment,
+            ledger=ledger,
+            trigger=BrainTrigger.PRE_CODE,
+            brain_enabled=True,
+        )
         assert on.retrieved_count > 0
         assert on.selected_count > 0
         assert on.injected_context_item_ids
         assert set(on.injected_context_item_ids) == {"r8-context-item"}
         assert any("r8-context-item" in message.content for message in on.provider_messages)
+        assert on.ledger is not None
+        assert on.ledger.knowledge_correlation
 
         off = brain.prepare(contract=contract, environment=environment, trigger=BrainTrigger.PRE_CODE, brain_enabled=False)
         assert off.retrieved_count == 0
@@ -221,12 +236,22 @@ def test_project_inspector_versions_map_to_productive_contract(tmp_path: Path) -
         assert environment.fabric_api_version == "0.141.6+1.21.11"
         assert environment.yarn_version == "1.21.11+build.6"
         assert environment.java_version == "21"
+        assert environment.extra["loom_version"] == "1.13.3"
+        assert environment.extra["mappings_namespace"] == "yarn"
         runtime_spec = runtime_spec_from_requirement(
             next(item for item in contract.validation_requirements if item.kind == "minecraft")
         )
         assert runtime_spec.observations[0].phase == "RUNTIME"
     finally:
         application.shutdown()
+
+
+def test_harness_datapack_metadata_declares_current_format_bounds() -> None:
+    harness_build = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "l11_minecraft_harness" / "build.gradle.kts"
+    content = harness_build.read_text(encoding="utf-8")
+    assert '\\"pack_format\\":94' in content
+    assert '\\"min_format\\":94' in content
+    assert '\\"max_format\\":94' in content
 
 
 @pytest.mark.parametrize("missing_key", ["minecraft", "loader"])

@@ -15,6 +15,7 @@ from pd_agent.core import (
     FabricTaskContract,
     FabricValidationRequirement,
 )
+from pd_agent.brain import YarnKnowledgeSource
 from pd_agent.fabric import FabricNormalOrchestrator, FabricOrchestrationResult
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
 
@@ -100,6 +101,9 @@ class ProductFabricTaskContractResolver:
             "fabric_api_version": self._detected(environment, "fabric_api", "fabric_api_version"),
             "yarn_version": self._detected(environment, "mappings", "yarn_version"),
         }
+        loom_version = self._detected(environment, "loom", "loom_version")
+        if loom_version is None:
+            raise ProductFabricTaskContractError("workspace is missing required Fabric version: loom_version")
         missing = tuple(
             name for name in ("minecraft_version", "loader_version")
             if detected_versions[name] is None
@@ -133,7 +137,11 @@ class ProductFabricTaskContractResolver:
                     self._detected(environment, "java", "java_version")
                     or PinnedFabricVersions().java
                 ),
-                extra={"project_root": str(workspace.project_root)},
+                extra={
+                    "project_root": str(workspace.project_root),
+                    "loom_version": loom_version,
+                    "mappings_namespace": YarnKnowledgeSource().mappings_namespace,
+                },
             ),
         )
 

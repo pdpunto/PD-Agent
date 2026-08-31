@@ -68,7 +68,7 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
         val datapackRoot = runDir.resolve("world/datapacks/i4-controlled")
         datapackRoot.resolve("data/pdagentl11_harness/tags/item").mkdirs()
         datapackRoot.resolve("pack.mcmeta").writeText(
-            "{\"pack\":{\"pack_format\":94,\"description\":\"PD Agent I4 controlled tag\"}}",
+            "{\"pack\":{\"pack_format\":94,\"min_format\":94,\"max_format\":94,\"description\":\"PD Agent I4 controlled tag\"}}",
             Charsets.UTF_8,
         )
         datapackRoot.resolve("data/pdagentl11_harness/tags/item/i4_controlled_members.json").writeText(

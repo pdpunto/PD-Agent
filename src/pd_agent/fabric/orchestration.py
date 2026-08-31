@@ -196,6 +196,8 @@ class FabricNormalOrchestrator:
         return KnowledgeEnvironment(
             minecraft_version=constraints.minecraft_version,
             loader_version=constraints.loader_version,
+            loom_version=constraints.extra.get("loom_version"),
+            mappings_namespace=constraints.extra.get("mappings_namespace"),
             mappings_version=constraints.yarn_version,
             fabric_api_version=constraints.fabric_api_version,
             java_version=constraints.java_version,
