@@ -46,6 +46,17 @@ def test_signature_fabric_and_persistence_failures_use_relevant_types() -> None:
     assert KnowledgeType.DIAGNOSTIC in {need.type for need in persistence.needs}
 
 
+def test_runtime_startup_failure_preserves_runtime_diagnostic_signal() -> None:
+    result = SemanticRepairKnowledgeNeedDeriver().derive(
+        _violation("RUNTIME_TARGET_STARTUP_FAILURE", "NullPointerException: Block id not set"), ENV
+    )
+    assert len(result.needs) == 4
+    assert {need.type for need in result.needs} == {
+        KnowledgeType.DIAGNOSTIC, KnowledgeType.PATTERN, KnowledgeType.SYMBOL, KnowledgeType.API,
+    }
+    assert all("persistence" not in need.query.casefold() for need in result.needs)
+
+
 def test_same_failure_is_deterministic_and_noise_is_bounded() -> None:
     violation = _violation("BUILD_DIAGNOSTIC", "cannot find symbol " + "x" * 5000)
     deriver = SemanticRepairKnowledgeNeedDeriver()

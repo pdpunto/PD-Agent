@@ -154,6 +154,8 @@ def _web_command(
         raise CLIError(f"frontend dist does not exist: {frontend}")
     product_root = args.product_data_root or os.environ.get("PD_AGENT_PRODUCT_DATA_ROOT")
     budget = args.economic_budget_usd or os.environ.get("PD_AGENT_ECONOMIC_BUDGET_USD")
+    knowledge_pack = os.environ.get("PD_AGENT_KNOWLEDGE_PACK_PATH")
+    knowledge_pack_id = os.environ.get("PD_AGENT_KNOWLEDGE_PACK_ID")
     if application_factory is None:
         from .product import build_product_application
 
@@ -163,6 +165,10 @@ def _web_command(
     application = None
     try:
         kwargs: dict[str, Any] = {"economic_budget_usd": budget}
+        if knowledge_pack is not None:
+            kwargs["knowledge_pack_path"] = Path(knowledge_pack).expanduser()
+            if knowledge_pack_id is not None:
+                kwargs["knowledge_pack_id"] = knowledge_pack_id
         if product_root is not None:
             kwargs["product_data_root"] = Path(product_root).expanduser()
         application = application_factory(config, **kwargs)

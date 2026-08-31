@@ -10,6 +10,7 @@ from threading import RLock
 from typing import Any, Callable
 
 from pd_agent.bootstrap import RuntimeBundle, build_runtime_bundle
+from pd_agent.brain import FrozenKnowledgePackSource, KnowledgeEnvironment, KnowledgeService, load_frozen_knowledge_pack
 from pd_agent.config import AppConfig, load_config
 from pd_agent.fabric import FabricNormalOrchestrator
 
@@ -71,6 +72,9 @@ def build_product_application(
     minecraft_runner_factory: Callable[[Path], Any] | None = None,
     gradle_user_home: Path | str | None = None,
     minecraft_harness_root: Path | str | None = None,
+    knowledge_service: KnowledgeService | None = None,
+    knowledge_pack_path: Path | str | None = None,
+    knowledge_pack_id: str | None = None,
 ) -> ProductApplication:
     """Construct the real product graph without starting any work."""
     config = config or load_config()
@@ -90,6 +94,12 @@ def build_product_application(
         "reasoning": {"effort": "medium"},
         "service_tier": "default",
     }
+    if knowledge_service is not None and knowledge_pack_path is not None:
+        raise ValueError("knowledge service and knowledge pack cannot both be provided")
+    productive_knowledge = knowledge_service
+    if knowledge_pack_path is not None:
+        pack = load_frozen_knowledge_pack(knowledge_pack_path, expected_pack_id=knowledge_pack_id)
+        productive_knowledge = KnowledgeService((FrozenKnowledgePackSource(pack),))
     catalog = catalog or ProductCatalog(product_data_root or config.runs_dir.parent / "product-data")
     projects = ProjectService(catalog)
     resolver = ProductFabricTaskContractResolver()
@@ -127,9 +137,10 @@ def build_product_application(
         limits=runtime.controller.limits,
         pre_build_validator=runtime.controller.pre_build_validator,
         functional_validator=runtime.controller.functional_validator,
+        knowledge_service=productive_knowledge,
+        repair_knowledge_source=(productive_knowledge.sources[0] if productive_knowledge is not None else None),
+        repair_knowledge_environment=KnowledgeEnvironment(),
         validation_contract=None,
-        repair_knowledge_source=runtime.controller.repair_knowledge_source,
-        repair_knowledge_environment=runtime.controller.repair_knowledge_environment,
         minecraft_runner=minecraft_runner,
         minecraft_runner_factory=effective_minecraft_runner_factory,
         gradle_user_home=effective_gradle_home,

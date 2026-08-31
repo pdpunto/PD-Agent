@@ -37,9 +37,12 @@ class SemanticRepairKnowledgeNeedDeriver:
         lowered = signal.casefold()
         if not signal:
             return SemanticRepairDerivation(())
-        if "persistence" in lowered or "persisted_state" in lowered or "runtime" in lowered:
+        if "persistence" in lowered or "persisted_state" in lowered:
             mapping = (("persistence", (KnowledgeType.PATTERN, KnowledgeType.CONCEPT,
                                          KnowledgeType.DIAGNOSTIC, KnowledgeType.CAPABILITY)),)
+        elif "runtime_target_startup_failure" in lowered or "block id not set" in lowered:
+            mapping = (("runtime", (KnowledgeType.DIAGNOSTIC, KnowledgeType.PATTERN,
+                                     KnowledgeType.SYMBOL, KnowledgeType.API)),)
         elif any(marker in lowered for marker in ("signature", "method", "overload", "fabric api")):
             mapping = (("api", (KnowledgeType.API, KnowledgeType.SYMBOL, KnowledgeType.PATTERN)),)
         elif any(marker in lowered for marker in ("mapping", "changed", "removed")):

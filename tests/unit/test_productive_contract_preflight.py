@@ -18,6 +18,8 @@ from pd_agent.product.application import build_product_application
 from pd_agent.product.fabric import ProductFabricTaskContractResolver
 from pd_agent.product.models import ProjectRecord, TaskRecord
 from pd_agent.project import ProjectInspector
+from pd_agent.brain import KnowledgeService
+from pd_agent.brain import BrainTrigger, FabricBrainOrchestrator
 
 
 FIXTURE = Path("tests/fixtures/l11_fabric_fixture")
@@ -92,6 +94,107 @@ def test_productive_composition_fixes_output_budget_and_preview(tmp_path: Path) 
         assert preview["decision"] == "ALLOW"
         assert preview["output_tokens_limit"] == 16_384
         assert preview["reservation_usd"] == "0.03716080"
+    finally:
+        application.shutdown()
+
+
+def test_productive_composition_accepts_one_explicit_knowledge_service(tmp_path: Path) -> None:
+    class Source:
+        source_id = "r8-test-source"
+        source_kind = "fixture"
+        artifact_version = "r8"
+
+        def supports(self, _need):
+            return True
+
+        def compatibility(self, _environment):
+            from pd_agent.brain import CompatibilityStatus
+            return CompatibilityStatus.COMPATIBLE
+
+        def resolve(self, need, offline=False):
+            from pd_agent.brain import KnowledgeItem, KnowledgeProvenance, KnowledgeRetrievalStatus, KnowledgeSourceResult, SourceAuthority
+            item = KnowledgeItem(
+                "r8-item", {"guidance": "runtime diagnostic"}, need.environment,
+                SourceAuthority.AUTHORITATIVE_SOURCE,
+                KnowledgeProvenance("r8-test-source", "fixture", "fixture://r8"),
+            )
+            return KnowledgeSourceResult(
+                KnowledgeRetrievalStatus.SUCCESS, self.source_id, self.source_kind, need,
+                items=(item,),
+            )
+
+    service = KnowledgeService((Source(),))
+    application = build_product_application(
+        replace(load_config(), provider="openai", model="gpt-5.6-luna", runs_dir=tmp_path / "runs"),
+        economic_budget_usd="0.50",
+        product_data_root=tmp_path / "product-data",
+        knowledge_service=service,
+    )
+    try:
+        assert application.fabric_orchestrator.knowledge_service is service
+        assert application.fabric_orchestrator.repair_knowledge_source is service.sources[0]
+        project = ProjectRecord(name="fixture", workspace_ref=str(FIXTURE.resolve()))
+        assert application.fabric_orchestrator._knowledge_environment(  # noqa: SLF001
+            application.fabric_resolver.resolve(
+                project,
+                TaskRecord(project_id=project.project_id, request=REQUEST_EN),
+                ProjectInspector().inspect(FIXTURE.resolve()),
+            )
+        ).minecraft_version == "1.21.11"
+    finally:
+        application.shutdown()
+
+
+def test_productive_brain_context_is_injected_and_brain_off_is_isolated(tmp_path: Path) -> None:
+    class Source:
+        source_id = "r8-context-source"
+        source_kind = "fixture"
+        artifact_version = "r8"
+
+        def supports(self, _need):
+            return True
+
+        def compatibility(self, _environment):
+            from pd_agent.brain import CompatibilityStatus
+            return CompatibilityStatus.COMPATIBLE
+
+        def resolve(self, need, offline=False):
+            from pd_agent.brain import KnowledgeItem, KnowledgeProvenance, KnowledgeRetrievalStatus, KnowledgeSourceResult, SourceAuthority
+            item = KnowledgeItem(
+                "r8-context-item", {"guidance": "Fabric registry guidance"}, need.environment,
+                SourceAuthority.AUTHORITATIVE_SOURCE,
+                KnowledgeProvenance("r8-context-source", "fixture", "fixture://r8-context"),
+            )
+            return KnowledgeSourceResult(
+                KnowledgeRetrievalStatus.SUCCESS, self.source_id, self.source_kind, need,
+                items=(item,),
+            )
+
+    service = KnowledgeService((Source(),))
+    application = build_product_application(
+        replace(load_config(), provider="openai", model="gpt-5.6-luna", runs_dir=tmp_path / "runs"),
+        economic_budget_usd="0.50",
+        product_data_root=tmp_path / "product-data",
+        knowledge_service=service,
+    )
+    try:
+        project = ProjectRecord(name="fixture", workspace_ref=str(FIXTURE.resolve()))
+        task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
+        contract = application.fabric_resolver.resolve(project, task, ProjectInspector().inspect(FIXTURE.resolve()))
+        environment = application.fabric_orchestrator._knowledge_environment(contract)  # noqa: SLF001
+        brain = FabricBrainOrchestrator(knowledge_service=service)
+        on = brain.prepare(contract=contract, environment=environment, trigger=BrainTrigger.PRE_CODE, brain_enabled=True)
+        assert on.retrieved_count > 0
+        assert on.selected_count > 0
+        assert on.injected_context_item_ids
+        assert set(on.injected_context_item_ids) == {"r8-context-item"}
+        assert any("r8-context-item" in message.content for message in on.provider_messages)
+
+        off = brain.prepare(contract=contract, environment=environment, trigger=BrainTrigger.PRE_CODE, brain_enabled=False)
+        assert off.retrieved_count == 0
+        assert off.selected_count == 0
+        assert off.injected_context_item_ids == ()
+        assert off.provider_messages == ()
     finally:
         application.shutdown()
 

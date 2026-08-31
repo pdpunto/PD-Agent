@@ -138,8 +138,9 @@ class FabricNormalOrchestrator:
             return self._result(state, contract, completion, None)
 
         state.state = RunStatus.INSPECTING
+        knowledge_environment = self._knowledge_environment(contract)
         brain = self.brain_orchestrator or FabricBrainOrchestrator(knowledge_service=self.knowledge_service, context_manager=self.context_manager)
-        brain_result = brain.prepare(contract=contract, environment=self.knowledge_environment, ledger=ledger, run_state=state, trigger=BrainTrigger.PRE_CODE, brain_enabled=brain_enabled, offline=True, project_snapshot=snapshot)
+        brain_result = brain.prepare(contract=contract, environment=knowledge_environment, ledger=ledger, run_state=state, trigger=BrainTrigger.PRE_CODE, brain_enabled=brain_enabled, offline=True, project_snapshot=snapshot)
         if brain_result.ledger is not None:
             state.progress_ledger = brain_result.ledger
         knowledge_context = brain_result.provider_messages if brain_enabled else ()
@@ -158,7 +159,7 @@ class FabricNormalOrchestrator:
                 gradle_user_home=self.gradle_user_home,
             )
             functional_validator.bind_run_state(state)
-        runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
+        runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)
         self._reconcile_requirement_progress(state, contract)
         if self.reporting is not None:
@@ -188,6 +189,17 @@ class FabricNormalOrchestrator:
         if self.reporting is not None:
             self.reporting.write_final_report(report)
         return self._result(state, contract, completion, report)
+
+    @staticmethod
+    def _knowledge_environment(contract: FabricTaskContract) -> KnowledgeEnvironment:
+        constraints = contract.environment_constraints
+        return KnowledgeEnvironment(
+            minecraft_version=constraints.minecraft_version,
+            loader_version=constraints.loader_version,
+            mappings_version=constraints.yarn_version,
+            fabric_api_version=constraints.fabric_api_version,
+            java_version=constraints.java_version,
+        )
 
     def _reconcile_requirement_progress(self, state: RunState, contract: FabricTaskContract) -> None:
         """Bind objective files and validator identities to contract requirements."""
