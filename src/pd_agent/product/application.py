@@ -132,9 +132,7 @@ def build_product_application(
         repair_knowledge_environment=runtime.controller.repair_knowledge_environment,
         minecraft_runner=minecraft_runner,
         minecraft_runner_factory=effective_minecraft_runner_factory,
-        gradle_user_home=(
-            effective_gradle_home,
-        ),
+        gradle_user_home=effective_gradle_home,
     )
     fabric_runner = FabricProductExecutionRunner(
         orchestrator=orchestrator,

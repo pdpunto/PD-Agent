@@ -226,3 +226,12 @@ def test_r5_product_application_exposes_canonical_harness(tmp_path: Path) -> Non
         assert runner.harness_root.exists()
     finally:
         application.shutdown()
+
+
+def test_r6_product_application_passes_gradle_home_as_a_path(tmp_path: Path) -> None:
+    application = _application(tmp_path)
+    try:
+        assert application.fabric_orchestrator.gradle_user_home == (Path.home() / ".gradle")
+        assert isinstance(application.fabric_orchestrator.gradle_user_home, Path)
+    finally:
+        application.shutdown()
