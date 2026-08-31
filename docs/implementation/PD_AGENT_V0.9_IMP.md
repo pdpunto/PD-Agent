@@ -1622,3 +1622,48 @@ Outside v0.9:
 This accepted implementation plan is complete enough for Codex to implement later without redesigning the accepted architecture.
 
 Persistence of this document does not authorize I0 or implementation.
+
+## I12-E-R11-R1 - Economic Attempt Ownership & Abrupt-Termination Recovery
+
+**Dependency:** I12-E, before resuming productive I12-E after the R11 safety
+stop. This lot is not implemented by this document.
+
+**Objective:** close R11_LEDGER_RECONCILIATION_GAP and protect the local
+single-machine runtime from duplicate economic ownership and duplicate
+LaunchRoot ownership without redesigning product scheduling.
+
+**Scope:** minimally extend the existing economic authorities with durable
+attempt ownership, exclusive local OS locks, process-instance tokens, stale
+owner detection, explicit legacy-orphan reconciliation, and offline tests.
+The economic lifecycle is ACTIVE -> COMPLETED or ACTIVE ->
+ABORTED_RECONCILED; it does not add a RunState or product state.
+
+Abrupt termination is fail-closed. It preserves active identity, reservations,
+uncertainty, confirmed cost, request ledger, dispatch history, and counters
+until a canonical, auditable, idempotent reconciliation proves that release is
+safe. Post-dispatch ambiguity and unresolved uncertain usage remain blocked.
+The R11 orphan ce8c053a-2952-4240-a20a-11a67827f6e2 is counterfactually
+SAFE_TO_RECONCILE, but requires explicit reconciliation after this lot is
+implemented and validated; it is not automatically recovered here.
+
+**Offline test matrix:** normal end_attempt; abrupt termination; stale and
+live owner handling; PID reuse; duplicate economic-session and LaunchRoot
+ownership; safe pre-dispatch release; unsafe post-dispatch reservation;
+uncertainty rejection; idempotent reconciliation; orphan counterfactual;
+confirmed-cost, request-history, dispatch-history, retry, and counter
+preservation; blocking before reconciliation; allowing the next attempt only
+after valid reconciliation; and existing shared-budget regressions.
+
+**Acceptance:** a live owner is never reconciled; dead PID is not sufficient;
+duplicate owners are rejected; money and history never decrease or disappear;
+uncertainty is not hidden; abrupt termination has a legitimate recovery path;
+reconciliation is idempotent; and economic recovery leaves RunState unchanged.
+All validation is offline. No external API, Minecraft, benchmark, new
+productive execution, or real orphan reconciliation is authorized by this IMP.
+
+**Implementation gate:** before implementation, audit the RFC/IMP against the
+repository's actual locking, persistence, migration, and wiring authorities.
+Stop on contradiction rather than redesigning silently. Use a dedicated
+commit and independent rollback; rollback must never erase confirmed
+consumption, request/dispatch history, shared budget, or reconcile attempts
+artificially.

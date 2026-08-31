@@ -1115,3 +1115,57 @@ by real integration audit and does not claim these components existed in the
 original approved RFC.
 
 The approved RFC defines an implementable v0.9 architecture without changing the approved Product Spec or DESIGN, without introducing a second runtime lifecycle, and without overbuilding infrastructure beyond the internal Web/UI integration preview.
+
+## Economic Attempt Ownership & Abrupt-Termination Recovery
+
+This is a post-R11 architectural correction for the local economic ledger. It
+does not create a second RunState or a product execution lifecycle.
+
+The economic lifecycle is `ACTIVE -> COMPLETED` or
+`ACTIVE -> ABORTED_RECONCILED`. The latter only means that an abandoned
+economic attempt was safely reconciled. RunState remains the only run state
+machine and is not completed, failed, cancelled, or otherwise changed by
+economic recovery.
+
+An active attempt must durably record attempt_id, economic session/execution
+identity, run_id, canonical LaunchRoot, informational PID, a per-process
+process_instance_token, claimed_at, and ownership schema/version. PID alone is
+never authoritative. Ownership requires exclusive local OS locks for both the
+economic session and canonical LaunchRoot, acquired in deterministic order.
+Distributed locks and services are out of scope.
+
+An attempt is stale only when its persisted identity and ownership metadata
+match, session/run/LaunchRoot match, expected owner locks can be acquired
+non-blockingly, and no valid claimant exists. PID death alone does not prove
+abandonment; PID reuse is neutralized by the OS lock and process token.
+
+If a process terminates before end_attempt(), the system fails closed. It must
+not automatically clear the active attempt, release reservations, alter
+uncertain usage or confirmed cost, or rewrite request/dispatch history.
+Detection may report RECONCILIATION_REQUIRED, but detection is not
+reconciliation.
+
+The canonical reconcile_abandoned_attempt operation must be fail-closed,
+auditable, and idempotent. It requires exact active-attempt identity, matching
+ownership, released owner locks, no concurrent claimant, consistent
+accounting, no unresolved uncertainty or post-dispatch ambiguity, and no
+concurrent ledger mutation. It preserves confirmed cost, request and dispatch
+history, counters, retries, and attempt identity, while recording abort reason,
+previous owner, timestamp, abandonment evidence, and outcome. Only then may the
+active attempt be released as ABORTED_RECONCILED.
+
+Pending reservations may be released only with evidence of
+RESERVATION_COMMITTED and proof that DISPATCH_STARTED did not occur. Any
+post-dispatch ambiguity, unresolved UNKNOWN_BILLABLE_USAGE, or uncertain usage
+rejects reconciliation. Repeating reconciliation on an already reconciled
+attempt must not change money, reservations, counters, or history.
+
+The pre-contract R11 orphan
+ce8c053a-2952-4240-a20a-11a67827f6e2 is documented as counterfactually
+SAFE_TO_RECONCILE from its audited evidence, but remains blocked until the
+corrective implementation is implemented, validated, and explicitly
+reconciled. There is no automatic recovery.
+
+Ownership and reconciliation belong to LunaEconomicState,
+LunaSharedBudgetSession, and LunaBudgetGuard, or their existing equivalents;
+they do not belong to RunState, ProductCatalog, or product scheduling.
