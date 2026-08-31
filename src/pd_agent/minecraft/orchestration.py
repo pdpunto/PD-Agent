@@ -128,6 +128,8 @@ class FabricRuntimeOrchestrator:
         source_revision: str,
         minecraft_spec: MinecraftTestSpec,
         runtime_root: Path | None = None,
+        java_version: str | None = None,
+        authorized_runtime_roots: tuple[Path, ...] = (),
     ) -> RuntimeValidationOutcome:
         requirements = tuple(item for item in contract.validation_requirements if item.required and item.kind in {"runtime", "minecraft", "observation"})
         if not requirements:
@@ -146,6 +148,10 @@ class FabricRuntimeOrchestrator:
             return RuntimeValidationOutcome(status=RuntimeOrchestrationStatus.REUSED, runtime_identity=existing, reused=True)
         run_id = f"{self.runtime_run_id_prefix}-{run_state.run_id}-{uuid4().hex[:8]}"
         kwargs = {"run_id": run_id}
+        if java_version is not None:
+            kwargs["java_version"] = java_version
+        if authorized_runtime_roots:
+            kwargs["authorized_runtime_roots"] = authorized_runtime_roots
         if runtime_root is not None:
             kwargs["runtime_run_dir"] = runtime_root
         runtime_result = self.runner.run(minecraft_spec, **kwargs)

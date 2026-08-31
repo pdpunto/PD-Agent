@@ -96,6 +96,7 @@ class FabricNormalOrchestrator:
     minecraft_runner: Any | None = None
     minecraft_runner_factory: Any | None = None
     runtime_root_factory: Any | None = None
+    gradle_user_home: Path | None = None
 
     def run(
         self,
@@ -150,7 +151,12 @@ class FabricNormalOrchestrator:
         if minecraft_runner is None and self.minecraft_runner_factory is not None:
             minecraft_runner = self.minecraft_runner_factory(Path(project_root))
         if functional_validator is None and minecraft_runner is not None:
-            functional_validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=minecraft_runner, runtime_root_factory=self.runtime_root_factory)
+            functional_validator = ProductiveMinecraftFunctionalValidator(
+                contract=contract,
+                runner=minecraft_runner,
+                runtime_root_factory=self.runtime_root_factory,
+                gradle_user_home=self.gradle_user_home,
+            )
             functional_validator.bind_run_state(state)
         runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)

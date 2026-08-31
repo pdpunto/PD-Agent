@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable
@@ -68,6 +69,8 @@ def build_product_application(
     product_data_root: Path | str | None = None,
     minecraft_runner: Any | None = None,
     minecraft_runner_factory: Callable[[Path], Any] | None = None,
+    gradle_user_home: Path | str | None = None,
+    minecraft_harness_root: Path | str | None = None,
 ) -> ProductApplication:
     """Construct the real product graph without starting any work."""
     config = config or load_config()
@@ -90,11 +93,28 @@ def build_product_application(
     catalog = catalog or ProductCatalog(product_data_root or config.runs_dir.parent / "product-data")
     projects = ProjectService(catalog)
     resolver = ProductFabricTaskContractResolver()
+    effective_gradle_home = (
+        Path(gradle_user_home)
+        if gradle_user_home is not None
+        else Path(os.environ["GRADLE_USER_HOME"])
+        if os.environ.get("GRADLE_USER_HOME")
+        else Path.home() / ".gradle"
+    )
     effective_minecraft_runner_factory = minecraft_runner_factory
     if minecraft_runner is None and effective_minecraft_runner_factory is None:
         from pd_agent.minecraft import MinecraftTestRunner
 
-        effective_minecraft_runner_factory = lambda root: MinecraftTestRunner(project_root=root)
+        effective_harness_root = (
+            Path(minecraft_harness_root)
+            if minecraft_harness_root is not None
+            else Path(os.environ["PD_AGENT_MINECRAFT_HARNESS_ROOT"])
+            if os.environ.get("PD_AGENT_MINECRAFT_HARNESS_ROOT")
+            else Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "l11_minecraft_harness"
+        )
+        effective_minecraft_runner_factory = lambda root: MinecraftTestRunner(
+            project_root=root,
+            harness_root=effective_harness_root,
+        )
     orchestrator = FabricNormalOrchestrator(
         provider=runtime.provider,
         build_runner=runtime.controller.build_runner,
@@ -112,6 +132,9 @@ def build_product_application(
         repair_knowledge_environment=runtime.controller.repair_knowledge_environment,
         minecraft_runner=minecraft_runner,
         minecraft_runner_factory=effective_minecraft_runner_factory,
+        gradle_user_home=(
+            effective_gradle_home,
+        ),
     )
     fabric_runner = FabricProductExecutionRunner(
         orchestrator=orchestrator,

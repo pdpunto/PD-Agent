@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
+import zipfile
 
 import pytest
 
 from pd_agent.config import load_config
+from pd_agent.artifacts import ArtifactClassification
+from pd_agent.benchmark.dependencies import resolve_runtime_mod_dependencies
+from pd_agent.core import ArtifactResult
 from pd_agent.minecraft import runtime_spec_from_requirement
 from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, UnsupportedMinecraftEnvironmentError
 from pd_agent.project import DetectedValue
 from pd_agent.product.application import build_product_application
+from pd_agent.product.fabric import ProductFabricTaskContractResolver
 from pd_agent.product.models import ProjectRecord, TaskRecord
 from pd_agent.project import ProjectInspector
 
@@ -160,5 +166,63 @@ def test_unsupported_minecraft_version_remains_fail_closed(tmp_path: Path) -> No
 
         with pytest.raises(UnsupportedMinecraftEnvironmentError, match="unsupported minecraft_version"):
             MinecraftTestRunner(FIXTURE.resolve()).validate_spec(unsupported, java_version="21")
+    finally:
+        application.shutdown()
+
+
+def test_r5_productive_resources_compose_offline(tmp_path: Path) -> None:
+    project_root = Path("benchmarks/projects/v0_5_fabric_base").resolve()
+    gradle_home = tmp_path / "gradle-home"
+    dependency_dir = (
+        gradle_home / "caches" / "modules-2" / "files-2.1"
+        / "net.fabricmc.fabric-api" / "fabric-api" / "0.141.6+1.21.11" / "test-hash"
+    )
+    dependency_dir.mkdir(parents=True)
+    dependency_path = dependency_dir / "fabric-api-0.141.6+1.21.11.jar"
+    with zipfile.ZipFile(dependency_path, "w") as archive:
+        archive.writestr("fabric.mod.json", '{"id":"fabric-api","version":"test"}')
+
+    snapshot = ProjectInspector().inspect(project_root)
+    dependencies = resolve_runtime_mod_dependencies(
+        project_root,
+        gradle_user_home=gradle_home,
+        project_snapshot=snapshot,
+    )
+    assert len(dependencies) == 1
+    assert dependencies[0].path == dependency_path.resolve()
+    assert dependencies[0].coordinate == "net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11"
+
+    project = ProjectRecord(name="fixture", workspace_ref=str(project_root))
+    task = TaskRecord(project_id=project.project_id, request=REQUEST_EN)
+    contract = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+    requirement = next(item for item in contract.validation_requirements if item.kind == "minecraft")
+    artifact_path = next(project_root.glob("build/loom-cache/**/*.jar"))
+    artifact = ArtifactResult(
+        path=artifact_path,
+        size=artifact_path.stat().st_size,
+        timestamp=datetime.now(timezone.utc),
+        classification=ArtifactClassification.VALID.value,
+    )
+    from pd_agent.validation.runtime import _minecraft_spec
+
+    spec = _minecraft_spec(
+        project_root,
+        contract,
+        requirement,
+        artifact,
+        runtime_mod_jars=tuple(item.path for item in dependencies),
+    )
+    assert spec.target_jar == artifact_path.relative_to(project_root)
+    assert spec.runtime_mod_jars == (dependency_path.resolve(),)
+    assert spec.target_mod_id == "examplemod"
+    assert spec.observation_requests[0].selector["identifier"] == "examplemod:server_core"
+
+
+def test_r5_product_application_exposes_canonical_harness(tmp_path: Path) -> None:
+    application = _application(tmp_path)
+    try:
+        runner = application.fabric_orchestrator.minecraft_runner_factory(FIXTURE.resolve())
+        assert runner.harness_root == (Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "l11_minecraft_harness").resolve()
+        assert runner.harness_root.exists()
     finally:
         application.shutdown()

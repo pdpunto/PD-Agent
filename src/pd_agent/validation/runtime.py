@@ -59,7 +59,14 @@ def _artifact_reference(project_root: Path, artifact_path: Path) -> Path:
     return relative_path
 
 
-def _minecraft_spec(project_root: Path, contract: FabricTaskContract, requirement: Any, artifact: ArtifactResult) -> MinecraftTestSpec:
+def _minecraft_spec(
+    project_root: Path,
+    contract: FabricTaskContract,
+    requirement: Any,
+    artifact: ArtifactResult,
+    *,
+    runtime_mod_jars: tuple[Path, ...] = (),
+) -> MinecraftTestSpec:
     spec = dict(requirement.spec)
     environment = contract.environment_constraints
     target_mod_id = spec.get("target_mod_id")
@@ -67,7 +74,7 @@ def _minecraft_spec(project_root: Path, contract: FabricTaskContract, requiremen
         raise ValueError("runtime validation spec requires target_mod_id")
     return MinecraftTestSpec(
         target_jar=_artifact_reference(project_root, Path(artifact.path)) if artifact.path is not None else Path("."),
-        runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", ())),
+        runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", runtime_mod_jars)),
         observation_requests=runtime_spec_from_requirement(requirement).observations,
         target_mod_id=target_mod_id,
         minecraft_version=str(spec.get("minecraft_version", environment.minecraft_version)),
@@ -90,6 +97,7 @@ class ProductiveMinecraftFunctionalValidator:
     last_results: tuple[ValidationResult, ...] = ()
     last_runtime_result: Any | None = None
     _run_state: RunState | None = None
+    gradle_user_home: Path | None = None
 
     def bind_run_state(self, run_state: RunState) -> None:
         self._run_state = run_state
@@ -150,7 +158,42 @@ class ProductiveMinecraftFunctionalValidator:
         # A successful repair produces a new validated artifact. Publish it as
         # current before runtime validation while retaining prior runtime facts.
         self._run_state.artifact_identity = artifact_identity
-        spec = _minecraft_spec(project_root, self.contract, requirement, artifact)
+        runtime_mod_jars: tuple[Path, ...] = ()
+        if self.gradle_user_home is not None:
+            try:
+                from pd_agent.benchmark.dependencies import (
+                    RuntimeModDependencyResolutionError,
+                    resolve_runtime_mod_dependencies,
+                )
+                dependencies = resolve_runtime_mod_dependencies(
+                    project_root,
+                    gradle_user_home=self.gradle_user_home,
+                )
+            except RuntimeModDependencyResolutionError as exc:
+                result = ValidationResult(
+                    stage=ValidationStage.RUNTIME,
+                    status=ValidationStatus.BLOCKED,
+                    summary="runtime dependencies could not be resolved",
+                    violations=(ValidationViolation(
+                        code="RUNTIME_DEPENDENCY_UNAVAILABLE",
+                        requirement=requirement.validation_requirement_id,
+                        observed={"error": str(exc)},
+                        expected="all declared runtime mod dependencies are available",
+                        actual=str(exc),
+                        message="Minecraft runner was not invoked because a runtime dependency is unavailable",
+                        phase="RUNTIME",
+                    ),),
+                )
+                self.last_results = (result,)
+                return result
+            runtime_mod_jars = tuple(item.path for item in dependencies)
+        spec = _minecraft_spec(
+            project_root,
+            self.contract,
+            requirement,
+            artifact,
+            runtime_mod_jars=runtime_mod_jars,
+        )
         runtime_root = self.runtime_root_factory(run_id) if self.runtime_root_factory is not None else None
         outcome = FabricRuntimeOrchestrator(self.runner).validate(
             contract=self.contract,
@@ -159,6 +202,12 @@ class ProductiveMinecraftFunctionalValidator:
             source_revision=source,
             minecraft_spec=spec,
             runtime_root=runtime_root,
+            java_version=self.contract.environment_constraints.java_version,
+            authorized_runtime_roots=(
+                (Path(project_root), self.gradle_user_home)
+                if self.gradle_user_home is not None
+                else (Path(project_root),)
+            ),
         )
         self.last_runtime_result = outcome.runtime_result
         result = outcome.validation_result or ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.BLOCKED, summary="runtime validation did not produce a result")
