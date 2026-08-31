@@ -15,6 +15,7 @@ from pd_agent.pass_policy import evaluate_pass
 from pd_agent.reporting import FinalReport
 from pd_agent.runtime import RunController
 from pd_agent.validation import CompletionGate
+from pd_agent.experimental import LunaBudgetGuard
 
 from .catalog import CatalogError, ProductCatalog
 from .models import ExecutionRecord, TaskRecord
@@ -158,9 +159,37 @@ class ExecutionService:
             raise ExecutionServiceError(exc.code, str(exc)) from exc
 
     def _run_worker(self, execution: ExecutionRecord, task: TaskRecord, project: Any) -> object:
-        if self.product_runner is not None:
-            return self.product_runner.run(execution, project, task)
-        return self.controller.run(Path(project.workspace_ref), task.request, run_id=execution.execution_id)
+        guard = getattr(getattr(self.controller, "provider", None), "budget_guard", None)
+        owner_started = False
+        if isinstance(guard, LunaBudgetGuard):
+            storage_root = Path(self.controller.storage.storage_root)
+            launch_root = storage_root / "launches" / execution.execution_id
+            launch_root.mkdir(parents=True, exist_ok=False)
+            guard.begin_attempt(
+                execution.execution_id,
+                run_id=execution.run_id,
+                launch_root=launch_root,
+                ownership_root=storage_root / "economic-ownership",
+            )
+            owner_started = True
+        try:
+            if self.product_runner is not None:
+                return self.product_runner.run(execution, project, task)
+            return self.controller.run(Path(project.workspace_ref), task.request, run_id=execution.execution_id)
+        finally:
+            if owner_started:
+                state = guard.state
+                if (
+                    state.pending_request_id is None
+                    and state.attempt_reserved_usd == 0
+                    and state.attempt_uncertain_consumed_usd == 0
+                    and state.reconciliation_state == "CLEAR"
+                ):
+                    guard.end_attempt()
+                else:
+                    # Preserve recovery-required state while releasing only
+                    # this process's local lock after a normal worker exit.
+                    guard.release_ownership()
 
     def _finished(self, execution_id: str, future: Future[object]) -> None:
         with self._lock:

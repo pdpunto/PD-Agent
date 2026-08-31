@@ -774,6 +774,12 @@ class LunaBudgetGuard:
             }
         self._persist()
 
+    def release_ownership(self) -> None:
+        """Release the local claimant without changing durable recovery state."""
+        if self._ownership is not None:
+            self._ownership.release()
+            self._ownership = None
+
     def end_attempt(self) -> None:
         try:
             self.state.end_attempt()

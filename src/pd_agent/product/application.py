@@ -13,6 +13,7 @@ from pd_agent.bootstrap import RuntimeBundle, build_runtime_bundle
 from pd_agent.brain import FrozenKnowledgePackSource, KnowledgeEnvironment, KnowledgeService, load_frozen_knowledge_pack
 from pd_agent.config import AppConfig, load_config
 from pd_agent.fabric import FabricNormalOrchestrator
+from pd_agent.experimental import LunaSharedBudgetSession
 
 from .catalog import ProductCatalog
 from .delivery import DeliveryService
@@ -67,6 +68,7 @@ def build_product_application(
     artifact_validator: Any | None = None,
     context_manager: Any | None = None,
     economic_budget_usd: Decimal | str | None = None,
+    economic_session: LunaSharedBudgetSession | None = None,
     product_data_root: Path | str | None = None,
     minecraft_runner: Any | None = None,
     minecraft_runner_factory: Callable[[Path], Any] | None = None,
@@ -88,6 +90,7 @@ def build_product_application(
         artifact_validator=artifact_validator,
         context_manager=context_manager,
         economic_budget_usd=economic_budget_usd,
+        economic_session=economic_session,
     )
     runtime.controller.model_config = {
         "max_output_tokens": 16_384,

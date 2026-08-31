@@ -17,7 +17,7 @@ from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.core import portable_seed_identity
 from pd_agent.providers import GeminiProvider, OpenAIProvider
-from pd_agent.experimental import LunaBudgetGuard, LunaEconomicState
+from pd_agent.experimental import LunaBudgetGuard, LunaEconomicState, LunaSharedBudgetSession
 from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
@@ -343,6 +343,7 @@ class RuntimeBundle:
     storage: RunStorage
     controller: RunController
     provider: Any
+    economic_session: LunaSharedBudgetSession | None = None
 
 
 def create_openai_provider(config: AppConfig, *, budget_guard: LunaBudgetGuard | None = None) -> OpenAIProvider:
@@ -401,6 +402,7 @@ def build_runtime_bundle(
     context_manager: ContextManager | None = None,
     controller_factory: Callable[..., RunController] = RunController,
     economic_budget_usd: Decimal | str | None = None,
+    economic_session: LunaSharedBudgetSession | None = None,
 ) -> RuntimeBundle:
     """Compose the runtime graph outside the core runtime."""
 
@@ -410,7 +412,16 @@ def build_runtime_bundle(
         config.gemini_api_key,
         config.runs_dir,
     )
-    budget_guard = _build_productive_budget_guard(config, economic_budget_usd)
+    if economic_session is not None:
+        if economic_budget_usd is not None and economic_session.ceiling_usd != Decimal(str(economic_budget_usd)):
+            raise ConfigurationError("shared economic ceiling does not match configured budget")
+        budget_guard = economic_session.guard(
+            consumer_id="productive-web-composition",
+            experimental=True,
+            non_official=True,
+        )
+    else:
+        budget_guard = _build_productive_budget_guard(config, economic_budget_usd)
     if provider_factory is create_provider:
         provider = provider_factory(config, budget_guard=budget_guard)
     else:
@@ -428,7 +439,13 @@ def build_runtime_bundle(
         limits=config.execution_limits,
         model_config={},
     )
-    return RuntimeBundle(config=config, storage=storage, controller=controller, provider=provider)
+    return RuntimeBundle(
+        config=config,
+        storage=storage,
+        controller=controller,
+        provider=provider,
+        economic_session=economic_session,
+    )
 
 
 def _build_productive_budget_guard(
