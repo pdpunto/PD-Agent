@@ -82,6 +82,11 @@ def build_product_application(
         context_manager=context_manager,
         economic_budget_usd=economic_budget_usd,
     )
+    runtime.controller.model_config = {
+        "max_output_tokens": 16_384,
+        "reasoning": {"effort": "medium"},
+        "service_tier": "default",
+    }
     catalog = catalog or ProductCatalog(product_data_root or config.runs_dir.parent / "product-data")
     projects = ProjectService(catalog)
     resolver = ProductFabricTaskContractResolver()

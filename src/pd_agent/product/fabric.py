@@ -42,6 +42,14 @@ class ProductFabricTaskContractResolver:
             raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
         if not workspace.fabric_manifests or not workspace.source_roots or not workspace.resource_roots:
             raise ProductFabricTaskContractError("inspected workspace lacks Fabric metadata")
+        mod_ids = tuple(dict.fromkeys(
+            manifest.mod_id.strip()
+            for manifest in workspace.fabric_manifests
+            if isinstance(manifest.mod_id, str) and manifest.mod_id.strip()
+        ))
+        if len(mod_ids) != 1:
+            raise ProductFabricTaskContractError("inspected workspace must expose exactly one Fabric mod id")
+        target_mod_id = mod_ids[0]
 
         requirements = (
             FabricRequirement(requirement_id="source-change", description="a relevant source change is required"),
@@ -66,7 +74,22 @@ class ProductFabricTaskContractResolver:
                 validation_requirement_id="validate-minecraft",
                 requirement_ids=("validation-minecraft",),
                 kind="minecraft",
-                spec={"observations": ("examplemod:server_core",)},
+                spec={
+                    "target_mod_id": target_mod_id,
+                    "observations": [{
+                        "observation_id": "server-core-registry",
+                        "observation_type": "REGISTRY_ENTRY_PRESENT",
+                        "profile": "registry",
+                        "selector": {
+                            "kind": "registry",
+                            "registry_kind": "block",
+                            "identifier": f"{target_mod_id}:server_core",
+                        },
+                        "expected": {"present": True},
+                        "requirement_ids": ["validation-minecraft"],
+                        "phase": "RUNTIME",
+                    }],
+                },
             ),
         )
         environment = workspace.detected_versions
