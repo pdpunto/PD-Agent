@@ -118,7 +118,7 @@ class ProductFabricTaskContractResolver:
             goal=task.request,
             requirements=requirements,
             required_capabilities=("Fabric project", "craftable utility block"),
-            completion_criteria=("source change", "build", "artifact", "Minecraft runtime"),
+            completion_criteria=("source change", "build", "artifact", "minecraft"),
             validation_requirements=validation_requirements,
             knowledge_signals=(FabricKnowledgeSignal(
                 signal_id="product-fabric-server-core",

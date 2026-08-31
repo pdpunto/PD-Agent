@@ -136,7 +136,7 @@ def _contract() -> FabricTaskContract:
             FabricRequirement(requirement_id="validation-artifact", description="the artifact is valid"),
             FabricRequirement(requirement_id="validation-minecraft", description="Minecraft runtime passes"),
         ),
-        completion_criteria=("source change", "build", "artifact", "Minecraft runtime"),
+        completion_criteria=("source change", "build", "artifact", "minecraft"),
         validation_requirements=(
             FabricValidationRequirement(validation_requirement_id="validate-build", requirement_ids=("validation-build",), kind="build"),
             FabricValidationRequirement(validation_requirement_id="validate-artifact", requirement_ids=("validation-artifact",), kind="artifact"),

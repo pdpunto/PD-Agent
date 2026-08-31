@@ -1,0 +1,31 @@
+import { expect, test } from "@playwright/test";
+
+test("integrated productive success uses Brain, repair, gate and delivery", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Projects" }).click();
+  await page.getByRole("button", { name: /New project/ }).click();
+  await page.getByLabel("Name").fill("R15-R1 integrated project");
+  await page.getByLabel("Workspace").fill(process.env.PD_AGENT_E2E_WORKSPACE!);
+  await page.getByRole("button", { name: "Create project" }).click();
+  const task = "Añade un bloque utilitario craftable llamado Server Core, incluyendo su block item, recursos en_us y receta, preservando el mod y los entrypoints existentes.";
+  await page.getByLabel("Task request").fill(task);
+  await page.getByRole("button", { name: "Start task" }).click();
+  await expect(page).toHaveURL(/\/executions\/[0-9a-f-]+$/i);
+  await expect(page.getByText("¡Todo listo!")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: "Descargar JAR" })).toBeVisible();
+  await page.getByRole("button", { name: "Ver detalles" }).click();
+  await expect(page.getByRole("dialog")).toContainText("SUCCEEDED");
+  await expect(page.getByRole("dialog")).not.toContainText(/traceback|api[_ -]?key|authorization|private/i);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: /Informaci.*cnica/ }).click();
+  const technical = page.getByRole("dialog");
+  await expect(technical).toContainText("COMPLETED");
+  await expect(technical).not.toContainText(/traceback|api[_ -]?key|authorization|private/i);
+  await technical.getByRole("button", { name: "Close", exact: true }).click();
+  const download = await page.request.get(await page.getByRole("link", { name: "Descargar JAR" }).getAttribute("href")!);
+  expect(download.ok()).toBeTruthy();
+  expect((await download.body()).length).toBeGreaterThan(0);
+  await page.getByRole("button", { name: /Open project/ }).click();
+  await page.getByRole("button", { name: /R15-R1 integrated project/ }).click();
+  await expect(page.getByText(/Server Core/)).toBeVisible();
+});
