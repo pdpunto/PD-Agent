@@ -105,6 +105,47 @@ def test_productive_boundary_validates_without_benchmark_imports(tmp_path: Path)
     assert state.progress_ledger.satisfied_requirement_ids == ("runtime",)
 
 
+def test_productive_boundary_flattens_authorized_runtime_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    gradle_home = tmp_path / "gradle-home"
+    gradle_home.mkdir()
+    dependency = gradle_home / "fabric-api.jar"
+    dependency.write_bytes(b"dependency")
+    captured: dict[str, object] = {}
+
+    class Dependency:
+        path = dependency
+
+    def resolve(_project_root: Path, *, gradle_user_home: Path):
+        assert gradle_user_home == gradle_home
+        return (Dependency(),)
+
+    monkeypatch.setattr("pd_agent.benchmark.dependencies.resolve_runtime_mod_dependencies", resolve)
+
+    class CapturingRunner:
+        def run(self, spec, **kwargs):  # noqa: ANN001
+            captured["roots"] = kwargs["authorized_runtime_roots"]
+            return _Runner(MinecraftObservationStatus.PASS).run(spec, **kwargs)
+
+    contract = _contract()
+    artifact = _artifact(project_root)
+    state = _state(contract, artifact)
+    validator = ProductiveMinecraftFunctionalValidator(
+        contract=contract,
+        runner=CapturingRunner(),
+        gradle_user_home=gradle_home,
+    )
+    validator.bind_run_state(state)
+
+    result = validator.validate(project_root, artifact, contract, state.run_id)
+
+    assert result.status is ValidationStatus.PASS
+    roots = captured["roots"]
+    assert roots == (project_root, gradle_home)
+    assert all(isinstance(root, Path) for root in roots)
+
+
 def test_productive_boundary_consumes_runner_metadata_observation(tmp_path: Path) -> None:
     contract = _contract()
     artifact = _artifact(tmp_path)

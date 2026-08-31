@@ -204,10 +204,9 @@ class ProductiveMinecraftFunctionalValidator:
             runtime_root=runtime_root,
             java_version=self.contract.environment_constraints.java_version,
             authorized_runtime_roots=(
-                (Path(project_root), self.gradle_user_home)
-                if self.gradle_user_home is not None
-                else (Path(project_root),)
-            ),
+                Path(project_root),
+                self.gradle_user_home,
+            ) if self.gradle_user_home is not None else (Path(project_root),),
         )
         self.last_runtime_result = outcome.runtime_result
         result = outcome.validation_result or ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.BLOCKED, summary="runtime validation did not produce a result")
