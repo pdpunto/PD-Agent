@@ -94,7 +94,8 @@ def test_live_source_connects_shared_budget_guard_before_provider() -> None:
     assert "budget_session.guard(" in source
     assert "consumer_id=run_id" in source
     assert "budget_guard=budget_guard" in source
-    assert "budget_guard.begin_attempt(run_id)" in source
+    assert "budget_guard.begin_attempt(" in source
+    assert "ownership_root=launch / \"economic-ownership\"" in source
     assert "budget_guard.end_attempt()" in source
 
 

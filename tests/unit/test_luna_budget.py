@@ -13,6 +13,7 @@ from pd_agent.experimental import (
     LunaBudgetGuard,
     LunaEconomicState,
     LunaEconomicStateStore,
+    LunaSharedBudgetSession,
     LunaPricingSnapshot,
     build_luna_experimental_manifest,
 )
@@ -629,3 +630,133 @@ def test_response_without_usage_is_uncertain_and_not_retried() -> None:
     assert client.responses.calls == 1
     assert error.value.details["abort_reason"] == "UNKNOWN_BILLABLE_USAGE"
     assert guard.state.reconciliation_state == "UNCERTAIN_CONSUMED"
+
+
+def test_attempt_ownership_is_durable_and_duplicate_claim_is_rejected(tmp_path: Path) -> None:
+    first = _guard(state=LunaEconomicState(execution_id="session"), state_store=None)
+    first.state_store = LunaEconomicStateStore(first.state, path=tmp_path / "state.json")
+    first.begin_attempt("attempt-1", run_id="run-1", launch_root=tmp_path / "launch", ownership_root=tmp_path / "locks")
+    assert first.state.attempt_lifecycle == "ACTIVE"
+    assert first.state.attempt_ownership["process_instance_token"]
+
+    other_state = LunaEconomicState(execution_id="session")
+    other_store = LunaEconomicStateStore(other_state, path=tmp_path / "other.json")
+    other = _guard(state=other_state, state_store=other_store)
+    with pytest.raises(ValueError, match="ownership"):
+        other.begin_attempt("attempt-2", run_id="run-2", launch_root=tmp_path / "launch", ownership_root=tmp_path / "locks")
+    first.end_attempt()
+
+
+def test_active_attempt_cannot_be_replaced_before_reconciliation() -> None:
+    state = LunaEconomicState(execution_id="active", active_attempt_id="old")
+    with pytest.raises(ValueError, match="cannot replace"):
+        state.begin_attempt("new")
+
+
+def test_abrupt_termination_reconciliation_preserves_cost_and_history(tmp_path: Path) -> None:
+    state = LunaEconomicState(
+        execution_id="session",
+        global_ceiling_usd=Decimal("1.00"),
+        global_accumulated_usd=Decimal("0.03"),
+        attempt_accumulated_usd=Decimal("0.03"),
+        active_attempt_id="orphan",
+        attempt_lifecycle="ACTIVE",
+    )
+    store = LunaEconomicStateStore(state, path=tmp_path / "state.json")
+    session = LunaSharedBudgetSession("session", state, store, ceiling_usd=Decimal("1.00"))
+    result = session.reconcile_abandoned_attempt(
+        attempt_id="orphan",
+        reason="owner terminated",
+        evidence={"owner_terminated": True, "dispatch_ambiguity": False},
+        explicit_legacy=True,
+    )
+    assert result["status"] == "ABORTED_RECONCILED"
+    assert state.global_accumulated_usd == Decimal("0.03")
+    assert state.active_attempt_id is None
+    assert state.attempt_lifecycle == "ABORTED_RECONCILED"
+    assert len(state.reconciliation_records) == 1
+    assert session.reconcile_abandoned_attempt(
+        attempt_id="orphan", reason="repeat", evidence={}, explicit_legacy=True
+    )["status"] == "ABORTED_RECONCILED"
+    assert len(state.reconciliation_records) == 1
+
+
+def test_reconciliation_rejects_live_owner_and_post_dispatch_ambiguity(tmp_path: Path) -> None:
+    state = LunaEconomicState(execution_id="session", active_attempt_id="active", attempt_lifecycle="ACTIVE")
+    store = LunaEconomicStateStore(state, path=tmp_path / "state.json")
+    guard = _guard(state=state, state_store=store)
+    guard.begin_attempt("active", launch_root=tmp_path / "launch", ownership_root=tmp_path / "locks")
+    with pytest.raises(ProviderError, match="OWNER_LOCK_STILL_HELD"):
+        guard.reconcile_abandoned_attempt(attempt_id="active", reason="test", evidence={})
+    guard.end_attempt()
+
+    ambiguous = LunaEconomicState(
+        execution_id="ambiguous", active_attempt_id="active", attempt_lifecycle="ACTIVE",
+        attempt_reserved_usd=Decimal("0.01"), global_reserved_usd=Decimal("0.01"), pending_request_id="request",
+    )
+    ambiguous_store = LunaEconomicStateStore(ambiguous, path=tmp_path / "ambiguous.json")
+    ambiguous_guard = _guard(state=ambiguous, state_store=ambiguous_store)
+    with pytest.raises(ProviderError, match="POST_DISPATCH_AMBIGUITY"):
+        ambiguous_guard.reconcile_abandoned_attempt(attempt_id="active", reason="test", evidence={}, explicit_legacy=True)
+
+
+def test_legacy_orphan_requires_explicit_reconciliation_evidence() -> None:
+    state = LunaEconomicState(execution_id="legacy", active_attempt_id="orphan", attempt_lifecycle="ACTIVE")
+    guard = _guard(state=state)
+    with pytest.raises(ProviderError, match="LEGACY_ORPHAN_REQUIRES_EXPLICIT_EVIDENCE"):
+        guard.reconcile_abandoned_attempt(attempt_id="orphan", reason="test", evidence={})
+
+
+def test_pre_dispatch_reconciliation_releases_only_proven_reservation() -> None:
+    guard = _guard()
+    decision = guard.before_request({"input": []}, retry_count=0)
+    guard.reconcile_abandoned_attempt(
+        attempt_id="legacy-attempt",
+        reason="cancelled before provider boundary",
+        evidence={"dispatch_started": False},
+        explicit_legacy=True,
+    )
+    entry = guard.state.ledger[decision["request_id"]]
+    assert entry["status"] == "RELEASED"
+    assert guard.state.global_reserved_usd == Decimal("0")
+    assert guard.state.attempt_reserved_usd == Decimal("0")
+    assert guard.state.global_accumulated_usd == Decimal("0")
+
+
+def test_owned_stale_attempt_requires_reacquired_lock_and_preserves_metadata(tmp_path: Path) -> None:
+    state = LunaEconomicState(execution_id="session", global_ceiling_usd=Decimal("1.00"))
+    store = LunaEconomicStateStore(state, path=tmp_path / "state.json")
+    owner = LunaBudgetGuard(hard_budget_usd=Decimal("1.00"), state=state, state_store=store)
+    launch = tmp_path / "launch"
+    locks = tmp_path / "locks"
+    owner.begin_attempt("attempt", run_id="run", launch_root=launch, ownership_root=locks)
+    owner._ownership.release()
+    owner._ownership = None
+
+    restored = LunaSharedBudgetSession.load(store.path)
+    result = restored.reconcile_abandoned_attempt(
+        attempt_id="attempt",
+        run_id="run",
+        launch_root=launch,
+        reason="owner terminated",
+        evidence={"owner_terminated": True, "dispatch_started": False},
+    )
+    assert result["previous_owner"]["process_instance_token"]
+    assert restored.state.global_accumulated_usd == Decimal("0")
+    persisted = LunaEconomicStateStore.load(store.path).state
+    assert persisted.attempt_lifecycle == "ABORTED_RECONCILED"
+    assert persisted.attempt_ownership is None
+
+
+def test_owned_reconciliation_rejects_incoherent_run_identity(tmp_path: Path) -> None:
+    state = LunaEconomicState(execution_id="session", global_ceiling_usd=Decimal("1.00"))
+    store = LunaEconomicStateStore(state, path=tmp_path / "state.json")
+    guard = LunaBudgetGuard(hard_budget_usd=Decimal("1.00"), state=state, state_store=store)
+    guard.begin_attempt("attempt", run_id="run", launch_root=tmp_path / "launch", ownership_root=tmp_path / "locks")
+    guard._ownership.release()
+    guard._ownership = None
+    session = LunaSharedBudgetSession.load(store.path)
+    with pytest.raises(ProviderError, match="RUN_OWNERSHIP_MISMATCH"):
+        session.reconcile_abandoned_attempt(
+            attempt_id="attempt", run_id="other", reason="test", evidence={}
+        )

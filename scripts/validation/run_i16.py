@@ -300,7 +300,12 @@ def run_live(args: argparse.Namespace, checks: Mapping[str, Any]) -> dict[str, A
         experimental=bool(args.experimental),
         non_official=bool(args.non_official),
     )
-    budget_guard.begin_attempt(run_id)
+    budget_guard.begin_attempt(
+        run_id,
+        run_id=run_id,
+        launch_root=launch,
+        ownership_root=launch / "economic-ownership",
+    )
     provider = OpenAIProvider(model=config["model"], api_key=os.environ["OPENAI_API_KEY"], provider_retry_limit=2, service_tier="default", budget_guard=budget_guard)
     environment = KnowledgeEnvironment.from_dict(task["acceptance"]["spec"]["knowledge_needs"][0]["environment"])
     snapshot = ProjectInspector().inspect(workspace)

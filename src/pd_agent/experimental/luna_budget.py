@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import msvcrt
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -54,6 +55,49 @@ def _dispatch_text(value: Any, *, field_name: str) -> str:
     if not value:
         raise ValueError(f"{field_name} must not be empty")
     return value
+
+
+class _LocalOwnership:
+    """Process-lifetime local locks; OS lock release handles abrupt exit."""
+
+    def __init__(self, root: Path, keys: tuple[str, ...], token: str) -> None:
+        self._handles: list[Any] = []
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            for key in sorted(keys):
+                path = root / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".lock")
+                handle: Any | None = None
+                try:
+                    handle = path.open("a+b")
+                    handle.seek(0)
+                    # Write before locking so a competing owner is normalized
+                    # to the ownership error instead of leaking raw access.
+                    handle.write(b"0")
+                    handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError as exc:
+                    if handle is not None:
+                        handle.close()
+                    raise ValueError("local economic ownership is already claimed") from exc
+                self._handles.append(handle)
+            self.token = token
+        except Exception:
+            self.release()
+            raise
+
+    def release(self) -> None:
+        for handle in reversed(self._handles):
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except (OSError, ValueError):
+                pass
+            try:
+                handle.close()
+            except OSError:
+                pass
+        self._handles.clear()
 
 
 @dataclass(slots=True)
@@ -263,6 +307,9 @@ class LunaEconomicState:
     reconciliation_state: str = "CLEAR"
     pause_reason: str | None = None
     pending_request_id: str | None = None
+    attempt_lifecycle: str = "CLEAR"
+    attempt_ownership: dict[str, Any] | None = None
+    reconciliation_records: list[dict[str, Any]] = field(default_factory=list)
     ledger: dict[str, dict[str, Any]] = field(default_factory=dict)
     dispatch_records: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -289,6 +336,10 @@ class LunaEconomicState:
             raise ValueError("economic counters must be non-negative")
         if not isinstance(self.dispatch_records, Mapping):
             raise ValueError("dispatch_records must be an object")
+        if self.attempt_lifecycle not in {"CLEAR", "ACTIVE", "COMPLETED", "ABORTED_RECONCILED"}:
+            raise ValueError("unsupported economic attempt lifecycle")
+        if self.attempt_ownership is not None and not isinstance(self.attempt_ownership, Mapping):
+            raise ValueError("attempt_ownership must be an object or null")
         reservation_ids: set[str] = set()
         for physical_request_id, record in self.dispatch_records.items():
             if str(physical_request_id) != str(record.get("physical_request_id")):
@@ -313,11 +364,7 @@ class LunaEconomicState:
             raise ValueError("attempt_id must not be empty")
         if self.active_attempt_id == attempt_id:
             return
-        if self.active_attempt_id is not None and (
-            self.attempt_reserved_usd
-            or self.attempt_accumulated_usd
-            or self.attempt_uncertain_consumed_usd
-        ):
+        if self.active_attempt_id is not None:
             raise ValueError("cannot replace an active economic attempt")
         self.active_attempt_id = attempt_id
         self.attempt_accumulated_usd = Decimal("0")
@@ -326,12 +373,15 @@ class LunaEconomicState:
         self.pending_request_id = None
         self.reconciliation_state = "CLEAR"
         self.pause_reason = None
+        self.attempt_lifecycle = "ACTIVE"
 
     def end_attempt(self) -> None:
         if self.attempt_reserved_usd != 0:
             raise ValueError("cannot end an attempt with reserved cost")
         self.active_attempt_id = None
         self.pending_request_id = None
+        self.attempt_lifecycle = "COMPLETED"
+        self.attempt_ownership = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -355,6 +405,9 @@ class LunaEconomicState:
             "reconciliation_state": self.reconciliation_state,
             "pause_reason": self.pause_reason,
             "pending_request_id": self.pending_request_id,
+            "attempt_lifecycle": self.attempt_lifecycle,
+            "attempt_ownership": self.attempt_ownership,
+            "reconciliation_records": self.reconciliation_records,
             "ledger": self.ledger,
             "dispatch_records": self.dispatch_records,
         }
@@ -395,6 +448,9 @@ class LunaEconomicState:
             reconciliation_state=str(data["reconciliation_state"]),
             pause_reason=data.get("pause_reason"),
             pending_request_id=data.get("pending_request_id"),
+            attempt_lifecycle=str(data.get("attempt_lifecycle", "ACTIVE" if data.get("active_attempt_id") else "CLEAR")),
+            attempt_ownership=(dict(data["attempt_ownership"]) if isinstance(data.get("attempt_ownership"), Mapping) else None),
+            reconciliation_records=[dict(item) for item in data.get("reconciliation_records", []) if isinstance(item, Mapping)],
             ledger={str(key): dict(value) for key, value in ledger.items()},
             dispatch_records={
                 str(key): dict(value)
@@ -581,6 +637,42 @@ class LunaSharedBudgetSession:
             retry_count=retry_count,
         )
 
+    def reconcile_abandoned_attempt(self, **kwargs: Any) -> dict[str, Any]:
+        """Delegate explicit recovery to the shared economic authority."""
+        guard = self.guard(consumer_id="reconciliation", experimental=True, non_official=True)
+        ownership = self.state.attempt_ownership
+        recovery_lock: _LocalOwnership | None = None
+        if ownership is not None:
+            attempt_id = str(kwargs.get("attempt_id", ""))
+            if attempt_id != str(ownership.get("attempt_id")):
+                raise guard._blocked("ATTEMPT_OWNERSHIP_MISMATCH")
+            supplied_run_id = kwargs.get("run_id")
+            if supplied_run_id is not None and str(supplied_run_id) != str(ownership.get("run_id")):
+                raise guard._blocked("RUN_OWNERSHIP_MISMATCH")
+            supplied_launch_root = kwargs.get("launch_root")
+            if supplied_launch_root is not None and str(Path(supplied_launch_root).resolve()) != str(ownership.get("launch_root")):
+                raise guard._blocked("LAUNCH_ROOT_OWNERSHIP_MISMATCH")
+            ownership_root = kwargs.get("ownership_root") or ownership.get("ownership_root")
+            if not ownership_root:
+                raise guard._blocked("OWNERSHIP_ROOT_MISSING")
+            recovery_lock = _LocalOwnership(
+                Path(str(ownership_root)),
+                (f"session:{self.session_id}", f"launch:{ownership.get('launch_root')}"),
+                str(uuid4()),
+            )
+        recovery_kwargs = dict(kwargs)
+        recovery_kwargs.pop("run_id", None)
+        recovery_kwargs.pop("launch_root", None)
+        recovery_kwargs.pop("ownership_root", None)
+        try:
+            return guard.reconcile_abandoned_attempt(
+                **recovery_kwargs,
+                _recovery_ownership=recovery_lock,
+            )
+        finally:
+            if recovery_lock is not None:
+                recovery_lock.release()
+
 
 @dataclass(slots=True)
 class LunaBudgetGuard:
@@ -598,6 +690,7 @@ class LunaBudgetGuard:
     response_records: list[dict[str, Any]] = field(default_factory=list)
     shared_session_id: str | None = None
     shared_consumer_id: str | None = None
+    _ownership: _LocalOwnership | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.hard_budget_usd = _decimal(self.hard_budget_usd, field_name="hard_budget_usd")
@@ -642,13 +735,133 @@ class LunaBudgetGuard:
     def logical_provider_turn_count(self) -> int:
         return self.state.logical_provider_turn_count
 
-    def begin_attempt(self, scheduled_attempt_id: str) -> None:
-        self.state.begin_attempt(scheduled_attempt_id)
+    def begin_attempt(
+        self,
+        scheduled_attempt_id: str,
+        *,
+        run_id: str | None = None,
+        launch_root: Path | str | None = None,
+        ownership_root: Path | str | None = None,
+        process_instance_token: str | None = None,
+    ) -> None:
+        if (launch_root is None) != (ownership_root is None):
+            raise ValueError("launch_root and ownership_root must be supplied together")
+        token = str(process_instance_token or uuid4())
+        if launch_root is not None and ownership_root is not None:
+            self._ownership = _LocalOwnership(
+                Path(ownership_root),
+                (f"session:{self.shared_session_id or self.state.execution_id}", f"launch:{Path(launch_root).resolve()}"),
+                token,
+            )
+        try:
+            self.state.begin_attempt(scheduled_attempt_id)
+        except Exception:
+            if self._ownership is not None:
+                self._ownership.release()
+                self._ownership = None
+            raise
+        if launch_root is not None:
+            self.state.attempt_ownership = {
+                "schema_version": 1,
+                "attempt_id": str(scheduled_attempt_id),
+                "session_id": self.shared_session_id or self.state.execution_id,
+                "run_id": str(run_id or scheduled_attempt_id),
+                "launch_root": str(Path(launch_root).resolve()),
+                "ownership_root": str(Path(ownership_root).resolve()) if ownership_root is not None else None,
+                "pid": os.getpid(),
+                "process_instance_token": token,
+                "claimed_at": _utc_now(),
+            }
         self._persist()
 
     def end_attempt(self) -> None:
-        self.state.end_attempt()
-        self._persist()
+        try:
+            self.state.end_attempt()
+            self._persist()
+        finally:
+            if self._ownership is not None:
+                self._ownership.release()
+                self._ownership = None
+
+    def reconcile_abandoned_attempt(
+        self,
+        *,
+        attempt_id: str,
+        reason: str,
+        evidence: Mapping[str, Any],
+        explicit_legacy: bool = False,
+        _recovery_ownership: _LocalOwnership | None = None,
+    ) -> dict[str, Any]:
+        """Reconcile only a proven abandoned attempt; never release dispatch ambiguity."""
+        if self.state.active_attempt_id != str(attempt_id):
+            if self.state.attempt_lifecycle == "ABORTED_RECONCILED" and self.state.attempt_ownership is None:
+                return dict(self.state.reconciliation_records[-1])
+            raise self._blocked("ATTEMPT_ID_MISMATCH")
+        if self.state.attempt_uncertain_consumed_usd or self.state.global_uncertain_consumed_usd:
+            raise self._blocked("UNCERTAINTY_RECONCILIATION_REJECTED")
+        ownership = self.state.attempt_ownership
+        if ownership is None and not explicit_legacy:
+            raise self._blocked("LEGACY_ORPHAN_REQUIRES_EXPLICIT_EVIDENCE")
+        if ownership is not None and self._ownership is not None:
+            raise self._blocked("OWNER_LOCK_STILL_HELD")
+        if ownership is not None and _recovery_ownership is None:
+            raise self._blocked("OWNER_LOCK_REQUIRED_FOR_RECONCILIATION")
+        pending_request_id = self.state.pending_request_id
+        released_reservation: dict[str, Any] | None = None
+        if pending_request_id is not None or self.state.attempt_reserved_usd:
+            entry = self.state.ledger.get(pending_request_id or "")
+            dispatch = next(
+                (
+                    record for record in self.state.dispatch_records.values()
+                    if record.get("reservation_id") == pending_request_id
+                ),
+                None,
+            )
+            pre_dispatch = (
+                entry is not None
+                and entry.get("status") == RESERVED
+                and dispatch is not None
+                and dispatch.get("dispatch_state") == RESERVATION_COMMITTED
+                and dispatch.get("dispatch_started_at") is None
+                and bool(evidence.get("dispatch_started") is False)
+            )
+            if not pre_dispatch:
+                raise self._blocked("POST_DISPATCH_AMBIGUITY")
+            reservation = Decimal(str(entry["reservation_usd"]))
+            self.state.global_reserved_usd -= reservation
+            self.state.attempt_reserved_usd -= reservation
+            entry["status"] = RELEASED
+            entry["actual_billed_cost_usd"] = "0"
+            entry["release_reason"] = str(reason)
+            entry["released_at"] = _utc_now()
+            dispatch["functional_state"] = ABANDONED
+            dispatch["sanitized_error"] = {"kind": "pre_dispatch", "reason": str(reason)}
+            dispatch["completed_at"] = _utc_now()
+            released_reservation = {"request_id": str(pending_request_id), "amount_usd": str(reservation)}
+        record = {
+            "attempt_id": str(attempt_id),
+            "status": "ABORTED_RECONCILED",
+            "reason": str(reason),
+            "previous_owner": dict(ownership or {"legacy": True}),
+            "evidence": dict(evidence),
+            "released_reservation": released_reservation,
+            "reconciled_at": _utc_now(),
+        }
+        self.state.reconciliation_records.append(record)
+        self.state.active_attempt_id = None
+        self.state.pending_request_id = None
+        self.state.attempt_lifecycle = "ABORTED_RECONCILED"
+        self.state.attempt_ownership = None
+        self.state.attempt_reserved_usd = Decimal("0")
+        self.state.attempt_uncertain_consumed_usd = Decimal("0")
+        self.state.reconciliation_state = "CLEAR"
+        self.state.pause_reason = None
+        try:
+            self._persist()
+        finally:
+            if _recovery_ownership is not None:
+                _recovery_ownership.release()
+        return dict(record)
 
     def begin_logical_turn(self) -> None:
         self.state.logical_provider_turn_count += 1
