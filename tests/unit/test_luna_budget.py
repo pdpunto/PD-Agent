@@ -234,6 +234,38 @@ def test_dual_ceiling_boundaries_are_checked_independently() -> None:
         global_block.before_request(payload, retry_count=0)
 
 
+def test_global_ceiling_blocks_when_productive_request_exceeds_it() -> None:
+    guard = LunaBudgetGuard(
+        hard_budget_usd=Decimal("0.15"),
+        state=LunaEconomicState(
+            execution_id="global-limit",
+            global_ceiling_usd=Decimal("0.15"),
+            attempt_ceiling_usd=Decimal("0.50"),
+        ),
+    )
+
+    with pytest.raises(ProviderError) as error:
+        guard.before_request({"input": []}, retry_count=0)
+
+    assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
+
+
+def test_explicit_stricter_attempt_ceiling_is_respected() -> None:
+    guard = LunaBudgetGuard(
+        hard_budget_usd=Decimal("0.50"),
+        state=LunaEconomicState(
+            execution_id="strict-attempt",
+            global_ceiling_usd=Decimal("0.50"),
+            attempt_ceiling_usd=Decimal("0.10"),
+        ),
+    )
+
+    with pytest.raises(ProviderError) as error:
+        guard.before_request({"input": []}, retry_count=0)
+
+    assert error.value.details["abort_reason"] == "BUDGET_BLOCKED"
+
+
 def test_retry_is_checked_by_guard() -> None:
     guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.10"))
     with pytest.raises(ProviderError):

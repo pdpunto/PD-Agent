@@ -34,6 +34,23 @@ def test_productive_runtime_injects_explicit_luna_budget_guard(tmp_path: Path) -
     assert isinstance(bundle.provider, OpenAIProvider)
     assert isinstance(bundle.provider.budget_guard, LunaBudgetGuard)
     assert bundle.provider.budget_guard.hard_budget_usd == Decimal("0.50")
+    assert bundle.provider.budget_guard.attempt_budget_usd == Decimal("0.50")
+
+
+def test_productive_budget_ceiling_is_not_benchmark_attempt_ceiling(tmp_path: Path) -> None:
+    bundle = build_runtime_bundle(_luna_config(), storage=RunStorage(tmp_path), economic_budget_usd="0.50")
+    guard = bundle.provider.budget_guard
+    assert isinstance(guard, LunaBudgetGuard)
+
+    decision = guard.preview_budget(input_tokens=0, output_limit=128_000)
+
+    assert decision["decision"] == "ALLOW"
+    assert Decimal(decision["reservation_usd"]) > Decimal("0.10")
+
+
+def test_benchmark_guard_default_attempt_ceiling_remains_strict() -> None:
+    guard = LunaBudgetGuard(hard_budget_usd=Decimal("0.50"))
+    assert guard.attempt_budget_usd == Decimal("0.10")
 
 
 @pytest.mark.parametrize("budget", ["0", "-0.01", "not-a-budget"])

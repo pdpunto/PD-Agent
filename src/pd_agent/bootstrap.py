@@ -17,7 +17,7 @@ from pd_agent.context import ContextManager
 from pd_agent.core.errors import ConfigurationError
 from pd_agent.core import portable_seed_identity
 from pd_agent.providers import GeminiProvider, OpenAIProvider
-from pd_agent.experimental import LunaBudgetGuard
+from pd_agent.experimental import LunaBudgetGuard, LunaEconomicState
 from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
@@ -447,7 +447,14 @@ def _build_productive_budget_guard(
         raise ConfigurationError("economic budget must be a positive decimal")
     if config.provider != "openai" or config.model != "gpt-5.6-luna":
         raise ConfigurationError("economic budget pricing is unavailable for the configured provider/model")
-    return LunaBudgetGuard(hard_budget_usd=ceiling)
+    # Productive web execution owns its configured global ceiling. Benchmark
+    # callers retain the stricter default attempt ceiling in LunaBudgetGuard.
+    state = LunaEconomicState(
+        execution_id="productive-web",
+        global_ceiling_usd=ceiling,
+        attempt_ceiling_usd=ceiling,
+    )
+    return LunaBudgetGuard(hard_budget_usd=ceiling, state=state)
 
 
 def _configure_storage(
