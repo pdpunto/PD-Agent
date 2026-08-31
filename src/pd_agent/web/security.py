@@ -59,6 +59,15 @@ class LocalWebSecurityPolicy:
             raise WebSecurityError("ORIGIN_NOT_ALLOWED", "request origin is not allowed", 403)
 
 
+def policy_for_server_port(port: int) -> LocalWebSecurityPolicy:
+    """Build the exact loopback origins served by the local Web process."""
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
+        raise ValueError("server port must be between 1 and 65535")
+    return LocalWebSecurityPolicy(
+        allowed_origins=(f"http://localhost:{port}", f"http://127.0.0.1:{port}"),
+    )
+
+
 def _host_without_port(value: str | None) -> str:
     if value is None or not value.strip():
         raise WebSecurityError("HOST_NOT_ALLOWED", "request host is not allowed", 400)
@@ -102,6 +111,7 @@ __all__ = [
     "DEFAULT_HOSTS",
     "DEFAULT_MAX_BODY_BYTES",
     "LocalWebSecurityPolicy",
+    "policy_for_server_port",
     "WebSecurityError",
     "header_value",
     "is_mutation",

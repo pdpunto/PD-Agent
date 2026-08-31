@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from pd_agent.web import CSRF_HEADER, LocalWebSecurityPolicy, WebServices, create_app
+from pd_agent.web import CSRF_HEADER, LocalWebSecurityPolicy, WebServices, create_app, policy_for_server_port
 
 
 def _client(*, max_body_bytes: int = 1_000_000, services: WebServices | None = None) -> TestClient:
@@ -67,6 +67,30 @@ def test_mutation_requires_csrf_and_accepts_valid_same_origin() -> None:
         response = client.post("/test/mutation", headers={**base, CSRF_HEADER: "test-token"}, json={"ok": True})
         assert response.status_code == 200
         assert called["count"] == 1
+
+
+def test_server_port_policy_accepts_exact_loopback_origins_only() -> None:
+    app = create_app(policy=policy_for_server_port(8000), csrf_token="test-token")
+    called = _mutation(app)
+    with TestClient(app) as client:
+        headers = {"host": "127.0.0.1:8000", "origin": "http://127.0.0.1:8000", CSRF_HEADER: "test-token"}
+        assert client.post("/test/mutation", headers=headers).status_code == 200
+        localhost_headers = {**headers, "origin": "http://localhost:8000", "host": "localhost:8000"}
+        assert client.post("/test/mutation", headers=localhost_headers).status_code == 200
+        for origin in ("http://127.0.0.1:8001", "https://127.0.0.1:8000", "http://evil.example:8000"):
+            response = client.post("/test/mutation", headers={**headers, "origin": origin})
+            assert response.status_code == 403
+            assert response.json()["error"]["code"] == "ORIGIN_NOT_ALLOWED"
+    assert called["count"] == 2
+
+
+def test_server_port_policy_rejects_invalid_ports() -> None:
+    for port in (0, 65_536, True, "8000"):
+        try:
+            policy_for_server_port(port)  # type: ignore[arg-type]
+        except ValueError:
+            continue
+        raise AssertionError("invalid server port was accepted")
 
 
 def test_foreign_origin_is_rejected_and_absent_origin_uses_csrf_policy() -> None:

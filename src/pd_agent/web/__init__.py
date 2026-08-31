@@ -7,6 +7,7 @@ from .security import (
     DEFAULT_HOSTS,
     DEFAULT_MAX_BODY_BYTES,
     LocalWebSecurityPolicy,
+    policy_for_server_port,
     WebSecurityError,
 )
 
@@ -16,6 +17,7 @@ __all__ = [
     "DEFAULT_HOSTS",
     "DEFAULT_MAX_BODY_BYTES",
     "LocalWebSecurityPolicy",
+    "policy_for_server_port",
     "WebSecurityError",
     "WebServices",
     "create_app",

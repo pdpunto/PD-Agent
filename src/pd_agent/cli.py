@@ -15,6 +15,7 @@ from .config import AppConfig, load_config
 from .core.errors import ConfigurationError
 from .logging import configure_logging
 from .pass_policy import PassEvaluation, evaluate_pass
+from .web.security import policy_for_server_port
 
 
 EXIT_OK = 0
@@ -197,7 +198,11 @@ def _web_command(
         application = application_factory(config, **kwargs)
         from .web import create_app
 
-        app = create_app(services=application.web_services, frontend_dist=frontend)
+        app = create_app(
+            services=application.web_services,
+            frontend_dist=frontend,
+            policy=policy_for_server_port(port),
+        )
         server_runner(app, host=host, port=port)
         return EXIT_OK
     finally:
