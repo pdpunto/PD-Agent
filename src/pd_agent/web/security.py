@@ -63,9 +63,11 @@ def policy_for_server_port(port: int) -> LocalWebSecurityPolicy:
     """Build the exact loopback origins served by the local Web process."""
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65_535:
         raise ValueError("server port must be between 1 and 65535")
-    return LocalWebSecurityPolicy(
-        allowed_origins=(f"http://localhost:{port}", f"http://127.0.0.1:{port}"),
-    )
+    origins = [f"http://localhost:{port}", f"http://127.0.0.1:{port}"]
+    if port == 80:
+        # Browsers omit the default HTTP port when serializing Origin.
+        origins.extend(("http://localhost", "http://127.0.0.1"))
+    return LocalWebSecurityPolicy(allowed_origins=tuple(origins))
 
 
 def _host_without_port(value: str | None) -> str:

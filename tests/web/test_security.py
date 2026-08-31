@@ -84,6 +84,16 @@ def test_server_port_policy_accepts_exact_loopback_origins_only() -> None:
     assert called["count"] == 2
 
 
+def test_server_port_policy_accepts_browser_default_port_origin() -> None:
+    app = create_app(policy=policy_for_server_port(80), csrf_token="test-token")
+    called = _mutation(app)
+    with TestClient(app) as client:
+        headers = {"host": "127.0.0.1", "origin": "http://127.0.0.1", CSRF_HEADER: "test-token"}
+        response = client.post("/test/mutation", headers=headers)
+        assert response.status_code == 200
+    assert called["count"] == 1
+
+
 def test_server_port_policy_rejects_invalid_ports() -> None:
     for port in (0, 65_536, True, "8000"):
         try:
