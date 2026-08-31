@@ -21,6 +21,7 @@ from pd_agent.core import (
     RunStateError,
     RunStatus,
     TaskProgressLedger,
+    compute_source_revision,
     generate_run_id,
 )
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
@@ -93,6 +94,7 @@ class FabricNormalOrchestrator:
     repair_knowledge_source: Any | None = None
     repair_knowledge_environment: Any | None = None
     minecraft_runner: Any | None = None
+    minecraft_runner_factory: Any | None = None
     runtime_root_factory: Any | None = None
 
     def run(
@@ -144,11 +146,15 @@ class FabricNormalOrchestrator:
         if self.reporting is not None:
             executor.event_sink = self.reporting.event_writer(state.run_id)
         functional_validator = self.functional_validator
-        if functional_validator is None and self.minecraft_runner is not None:
-            functional_validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=self.minecraft_runner, runtime_root_factory=self.runtime_root_factory)
+        minecraft_runner = self.minecraft_runner
+        if minecraft_runner is None and self.minecraft_runner_factory is not None:
+            minecraft_runner = self.minecraft_runner_factory(Path(project_root))
+        if functional_validator is None and minecraft_runner is not None:
+            functional_validator = ProductiveMinecraftFunctionalValidator(contract=contract, runner=minecraft_runner, runtime_root_factory=self.runtime_root_factory)
             functional_validator.bind_run_state(state)
         runtime = AgentRuntime(provider=self.provider, tool_executor=executor, build_runner=self.build_runner, artifact_validator=self.artifact_validator, context_manager=self.context_manager, reporting=self.reporting, model_config=self.model_config or {}, pre_build_validator=self.pre_build_validator, functional_validator=functional_validator, validation_contract=self.validation_contract or contract, repair_knowledge_source=self.repair_knowledge_source, repair_knowledge_environment=self.repair_knowledge_environment)
         state, report = runtime.run(run_state=state, project_snapshot=snapshot, task=contract.goal, external_context=(*external_context, *knowledge_context), limits=self.limits)
+        self._reconcile_requirement_progress(state, contract)
         if self.reporting is not None:
             self.reporting.write_run_state(state)
         completion = CompletionGate().evaluate(contract, state.progress_ledger, state)
@@ -176,6 +182,35 @@ class FabricNormalOrchestrator:
         if self.reporting is not None:
             self.reporting.write_final_report(report)
         return self._result(state, contract, completion, report)
+
+    def _reconcile_requirement_progress(self, state: RunState, contract: FabricTaskContract) -> None:
+        """Bind objective files and validator identities to contract requirements."""
+        ledger = state.progress_ledger
+        if ledger is None:
+            return
+        satisfied = set(ledger.satisfied_requirement_ids)
+        evidence = dict(ledger.evidence_by_requirement)
+        source = state.source_revision.revision if state.source_revision is not None else None
+        for requirement in contract.requirements:
+            refs: tuple[str, ...] = ()
+            if requirement.requirement_id == "source-change":
+                refs = tuple(state.changed_files)
+            elif requirement.requirement_id.startswith("resource-"):
+                validation = next((item for item in contract.validation_requirements if requirement.requirement_id in item.requirement_ids), None)
+                paths = validation.spec.get("required_paths", ()) if validation is not None else ()
+                present = tuple(str(path) for path in paths if (state.project_root / path).is_file()) if state.project_root is not None else ()
+                refs = present
+            elif requirement.requirement_id.startswith("validation-"):
+                if requirement.requirement_id == "validation-build":
+                    refs = tuple(item.result_ref for item in state.build_identities if item.success and (source is None or item.source_revision == source))
+                elif requirement.requirement_id == "validation-artifact" and state.artifact_identity is not None:
+                    refs = (f"artifacts/{state.artifact_identity.artifact_identity}",)
+                elif requirement.requirement_id == "validation-minecraft":
+                    refs = tuple(ref for item in state.runtime_identities if item.status == "PASS" for ref in item.result_refs)
+            if refs:
+                satisfied.add(requirement.requirement_id)
+                evidence[requirement.requirement_id] = tuple(dict.fromkeys((*evidence.get(requirement.requirement_id, ()), *refs)))
+        state.progress_ledger = replace(ledger, satisfied_requirement_ids=tuple(item.requirement_id for item in contract.requirements if item.requirement_id in satisfied), evidence_by_requirement=evidence)
 
     def _emit(self, run_id: str, event_type: RunEventType, payload: Mapping[str, Any]) -> None:
         if self.reporting is not None:

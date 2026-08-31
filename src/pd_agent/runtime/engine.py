@@ -17,6 +17,7 @@ from pd_agent.core import (
     AgentMessage,
     AgentRequest,
     ArtifactResult,
+    BuildAttemptIdentity,
     BuildResult,
     ExecutionLimits,
     ModelProvider,
@@ -31,6 +32,8 @@ from pd_agent.core import (
     ToolResultStatus,
     ValidationResult,
     ValidationStatus,
+    artifact_identity_from_result,
+    compute_source_revision,
 )
 from pd_agent.core.errors import BuildError, LimitReachedError
 from pd_agent.core.errors import ArtifactValidationError
@@ -419,6 +422,7 @@ class AgentRuntime:
                         break
                     self._check_limits(run_state, limits)
                     build_result = self.build_runner.run(project_snapshot, run_state, limits)
+                    self._record_build_identity(run_state, project_snapshot, build_result)
                     self._observe_progress(run_state, build_result=build_result)
                     self._record_action_telemetry(
                         run_state,
@@ -449,6 +453,8 @@ class AgentRuntime:
                         break
                     artifact = self.artifact_validator.validate(project_snapshot, final_build, run_id=run_state.run_id)
                     run_state.artifact_result = artifact
+                    if artifact.classification == "VALID":
+                        self._record_artifact_identity(run_state, project_snapshot, artifact)
                     self._emit(
                         run_state.run_id,
                         RunEventType.ARTIFACT_VALIDATED,
@@ -880,6 +886,47 @@ class AgentRuntime:
             self.reporting.write_final_report(report)
             self._emit(run_state.run_id, RunEventType.RUN_FINISHED, {"final_state": run_state.state.value, "summary": summary})
         return run_state, report
+
+    def _record_build_identity(
+        self,
+        run_state: RunState,
+        project_snapshot: ProjectSnapshot,
+        result: BuildResult,
+    ) -> None:
+        """Publish the build currentness fact produced by the normal runtime."""
+        source = compute_source_revision(project_snapshot.project_root)
+        run_state.source_revision = source
+        contract = run_state.task_contract
+        if contract is None:
+            return
+        build_id = f"build-{run_state.run_id}-{result.attempt}"
+        identity = BuildAttemptIdentity(
+            build_attempt_id=build_id,
+            source_revision=source.revision,
+            contract_identity=contract.identity(),
+            result_ref=f"builds/{result.attempt}",
+            success=result.success,
+        )
+        run_state.build_identities = (*run_state.build_identities, identity)
+
+    def _record_artifact_identity(
+        self,
+        run_state: RunState,
+        project_snapshot: ProjectSnapshot,
+        artifact: ArtifactResult,
+    ) -> None:
+        contract = run_state.task_contract
+        if contract is None or not run_state.build_identities:
+            return
+        source = run_state.source_revision or compute_source_revision(project_snapshot.project_root)
+        run_state.source_revision = source
+        build = run_state.build_identities[-1]
+        run_state.artifact_identity = artifact_identity_from_result(
+            artifact,
+            producing_build_attempt_id=build.build_attempt_id,
+            source_revision=source.revision,
+            contract_identity=contract.identity(),
+        )
 
     def _run_prebuild_validation(
         self,

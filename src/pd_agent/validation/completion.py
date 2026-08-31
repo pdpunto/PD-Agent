@@ -82,24 +82,66 @@ class CompletionGate:
         for requirement in contract.validation_requirements:
             if not requirement.required:
                 continue
-            state = self._validation_state(requirement, run_state, contract, source)
-            if state == "missing":
+            validation_state = self._validation_state(requirement, run_state, contract, source)
+            if validation_state == "missing":
                 missing.append(requirement.validation_requirement_id)
-            elif state == "stale":
+            elif validation_state == "stale":
                 stale.append(requirement.validation_requirement_id)
-            elif state == "blocked":
+            elif validation_state == "blocked":
                 blocked.append(requirement.validation_requirement_id)
 
         criteria = tuple(contract.completion_criteria)
+        missing_criteria = self._missing_criteria(contract, ledger, run_state, satisfied, evidence, source)
         refs = self._current_refs(ledger, run_state, source)
         if blocked:
             return self._result(CompletionStatus.BLOCKED, pending, active, missing, stale, blocked, refs, criteria, "BLOCKED", "required validation is blocked or invalid")
         if active:
             return self._result(CompletionStatus.INCOMPLETE, pending, active, missing, stale, blocked, refs, criteria, "REPAIR", "active failure blocks completion")
-        if pending or missing or stale or criteria:
+        if pending or missing or stale or missing_criteria:
             disposition = "BUILD" if any(item.kind.casefold() in {"build", "compilation"} for item in contract.validation_requirements if item.validation_requirement_id in (*missing, *stale)) else "CONTINUE"
-            return self._result(CompletionStatus.INCOMPLETE, pending, active, missing, stale, blocked, refs, criteria, disposition, "required current evidence is incomplete")
+            return self._result(CompletionStatus.INCOMPLETE, pending, active, missing, stale, blocked, refs, missing_criteria, disposition, "required current evidence is incomplete")
         return self._result(CompletionStatus.COMPLETE, (), (), [], [], [], refs, (), "COMPLETE", "all required objective evidence is current")
+
+    def _missing_criteria(
+        self,
+        contract: FabricTaskContract,
+        ledger: TaskProgressLedger,
+        state: RunState,
+        satisfied: set[str],
+        evidence: set[str],
+        source: str | None,
+    ) -> tuple[str, ...]:
+        """Resolve descriptive criteria against their typed obligations."""
+        missing: list[str] = []
+        requirements = tuple(contract.requirements)
+        for criterion in contract.completion_criteria:
+            normalized = " ".join(criterion.casefold().replace("_", " ").split())
+            matched_requirement = next(
+                (
+                    item for item in requirements
+                    if normalized == item.requirement_id.casefold().replace("_", " ")
+                    or normalized in item.description.casefold()
+                ),
+                None,
+            )
+            if matched_requirement is not None:
+                if matched_requirement.requirement_id not in satisfied or matched_requirement.requirement_id not in evidence:
+                    missing.append(criterion)
+                continue
+            matched_validation = next(
+                (
+                    item for item in contract.validation_requirements
+                    if normalized in {item.validation_requirement_id.casefold().replace("_", " "), item.kind.casefold()}
+                ),
+                None,
+            )
+            if matched_validation is None:
+                missing.append(criterion)
+                continue
+            state_value = self._validation_state(matched_validation, state, contract, source)
+            if state_value != "pass":
+                missing.append(criterion)
+        return tuple(missing)
 
     def _validation_state(self, requirement: Any, state: RunState, contract: FabricTaskContract, source: str | None) -> str:
         kind = str(requirement.kind).casefold()

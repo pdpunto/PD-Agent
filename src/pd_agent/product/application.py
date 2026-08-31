@@ -66,6 +66,8 @@ def build_product_application(
     context_manager: Any | None = None,
     economic_budget_usd: Decimal | str | None = None,
     product_data_root: Path | str | None = None,
+    minecraft_runner: Any | None = None,
+    minecraft_runner_factory: Callable[[Path], Any] | None = None,
 ) -> ProductApplication:
     """Construct the real product graph without starting any work."""
     config = config or load_config()
@@ -83,6 +85,11 @@ def build_product_application(
     catalog = catalog or ProductCatalog(product_data_root or config.runs_dir.parent / "product-data")
     projects = ProjectService(catalog)
     resolver = ProductFabricTaskContractResolver()
+    effective_minecraft_runner_factory = minecraft_runner_factory
+    if minecraft_runner is None and effective_minecraft_runner_factory is None:
+        from pd_agent.minecraft import MinecraftTestRunner
+
+        effective_minecraft_runner_factory = lambda root: MinecraftTestRunner(project_root=root)
     orchestrator = FabricNormalOrchestrator(
         provider=runtime.provider,
         build_runner=runtime.controller.build_runner,
@@ -98,6 +105,8 @@ def build_product_application(
         validation_contract=None,
         repair_knowledge_source=runtime.controller.repair_knowledge_source,
         repair_knowledge_environment=runtime.controller.repair_knowledge_environment,
+        minecraft_runner=minecraft_runner,
+        minecraft_runner_factory=effective_minecraft_runner_factory,
     )
     fabric_runner = FabricProductExecutionRunner(
         orchestrator=orchestrator,
