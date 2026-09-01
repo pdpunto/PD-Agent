@@ -19,6 +19,7 @@ from pd_agent.product.application import build_product_application
 from pd_agent.product.fabric import ProductFabricTaskContractResolver
 from pd_agent.product.models import ProjectRecord, TaskRecord
 from pd_agent.project import ProjectInspector
+from pd_agent.validation import PreBuildWorkspaceValidator
 from pd_agent.brain import KnowledgeService
 from pd_agent.brain import BrainTrigger, FabricBrainOrchestrator
 
@@ -95,6 +96,17 @@ def test_productive_composition_fixes_output_budget_and_preview(tmp_path: Path) 
         assert preview["decision"] == "ALLOW"
         assert preview["output_tokens_limit"] == 16_384
         assert preview["reservation_usd"] == "0.03716080"
+    finally:
+        application.shutdown()
+
+
+def test_productive_composition_wires_prebuild_validation_to_runtime_boundary(tmp_path: Path) -> None:
+    application = _application(tmp_path)
+    try:
+        validator = application.runtime.controller.pre_build_validator
+
+        assert isinstance(validator, PreBuildWorkspaceValidator)
+        assert application.fabric_orchestrator.pre_build_validator is validator
     finally:
         application.shutdown()
 

@@ -23,6 +23,7 @@ from pd_agent.reporting.redaction import Redactor
 from pd_agent.runtime import RunController
 from pd_agent.project import ProjectInspectionStatus, ProjectInspector
 from pd_agent.tools import SecurePathResolver
+from pd_agent.validation import PreBuildWorkspaceValidator
 
 
 class FabricBootstrapError(ValueError):
@@ -444,6 +445,7 @@ def build_runtime_bundle(
         context_manager=context_manager or ContextManager(),
         limits=config.execution_limits,
         model_config={},
+        pre_build_validator=PreBuildWorkspaceValidator(),
     )
     return RuntimeBundle(
         config=config,
