@@ -9,6 +9,7 @@ from pd_agent.brain import (
     KnowledgeItem,
     KnowledgeProvenance,
     KnowledgeRetrievalStatus,
+    KnowledgeService,
     KnowledgeSourceResult,
     SourceAuthority,
 )
@@ -55,6 +56,88 @@ def test_runtime_startup_failure_preserves_runtime_diagnostic_signal() -> None:
         KnowledgeType.DIAGNOSTIC, KnowledgeType.PATTERN, KnowledgeType.SYMBOL, KnowledgeType.API,
     }
     assert all("persistence" not in need.query.casefold() for need in result.needs)
+
+
+def test_structured_failure_derives_failure_specific_query_and_identity() -> None:
+    violation = ValidationViolation(
+        code="FABRIC_BLOCK_IDENTITY_MISSING",
+        requirement="src/main/java/example/ExampleMod.java",
+        observed={"path": "src/main/java/example/ExampleMod.java", "line": 2},
+        expected="AbstractBlock.Settings.registryKey(...) before Block construction",
+        actual="inline Block construction without registryKey",
+        message="Block construction lacks registry identity before registration",
+        phase="PRE_BUILD",
+        evidence_refs=("src/main/java/example/ExampleMod.java",),
+    )
+
+    result = SemanticRepairKnowledgeNeedDeriver().derive(violation, ENV)
+
+    assert any(need.query == "block" for need in result.needs)
+    assert all("failure_code=FABRIC_BLOCK_IDENTITY_MISSING" in need.hints for need in result.needs)
+    assert all("phase=PRE_BUILD" in need.hints for need in result.needs)
+    assert all(any(hint.startswith("expected=") for hint in need.hints) for need in result.needs)
+    assert all(any(hint.startswith("actual=") for hint in need.hints) for need in result.needs)
+    assert all("registrykey" in hint for need in result.needs for hint in need.hints if hint.startswith("failure_terms="))
+
+
+def test_prebuild_failure_retrieval_and_injection_stays_failure_specific() -> None:
+    violation = ValidationViolation(
+        code="FABRIC_BLOCK_IDENTITY_MISSING",
+        requirement="ExampleMod.java",
+        observed={"path": "ExampleMod.java", "line": 2},
+        expected="registry identity before construction",
+        actual="Block construction without registryKey",
+        message="Block construction lacks registry identity before registration",
+        phase="PRE_BUILD",
+    )
+
+    class Source:
+        source_id = "r34-repair-source"
+        source_kind = "fixture"
+        artifact_version = "r34"
+
+        def supports(self, need):
+            return need.type is KnowledgeType.PATTERN
+
+        def compatibility(self, _environment):
+            return CompatibilityStatus.COMPATIBLE
+
+        def resolve(self, need, offline=False):
+            item = KnowledgeItem(
+                "block-registration-guidance",
+                {"guidance": "register the block with a stable registry identity"},
+                need.environment,
+                SourceAuthority.AUTHORITATIVE_SOURCE,
+                KnowledgeProvenance(self.source_id, self.source_kind, "fixture:r34"),
+            )
+            return KnowledgeSourceResult(
+                KnowledgeRetrievalStatus.SUCCESS, self.source_id, self.source_kind,
+                need, items=(item,),
+            )
+
+    derivation = SemanticRepairKnowledgeNeedDeriver().derive(violation, ENV)
+    pattern_need = next(need for need in derivation.needs if need.type is KnowledgeType.PATTERN)
+    retrieved = KnowledgeService((Source(),)).retrieve(pattern_need, offline=True)
+    context = ContextManager().build_context(external_context=(retrieved,))
+
+    assert retrieved.items
+    assert pattern_need.query == "block"
+    assert context.items
+    assert "block-registration-guidance" in context.items[0].metadata["knowledge_item_id"]
+    assert "registry" in context.items[0].content
+
+
+def test_generic_failure_does_not_invent_fabric_terms() -> None:
+    violation = _violation("GENERIC_FAILURE", "operation failed")
+
+    result = SemanticRepairKnowledgeNeedDeriver().derive(violation, ENV)
+
+    assert result.needs
+    assert all(
+        not any(term in f"{need.query} {' '.join(need.hints)}".casefold()
+                for term in ("fabric", "registry", "block", "minecraft"))
+        for need in result.needs
+    )
 
 
 def test_same_failure_is_deterministic_and_noise_is_bounded() -> None:
