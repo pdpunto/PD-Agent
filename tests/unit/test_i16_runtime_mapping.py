@@ -77,3 +77,30 @@ def test_minecraft_spec_round_trip_preserves_all_observation_requests() -> None:
     restored = MinecraftTestSpec.from_dict(spec.to_dict())
 
     assert restored.observation_requests == requests
+
+
+def test_productive_spec_derives_registry_harness_config_from_observation_request() -> None:
+    driver = _driver_module()
+    task = driver._load_json(REPO_ROOT / "benchmarks" / "tasks" / "F6-T3-v5.json")
+    contract = driver.build_contract(task, REPO_ROOT / "benchmarks" / "projects" / "v0_5_fabric_base")
+    requirement = next(item for item in contract.validation_requirements if item.kind == "minecraft")
+
+    from pd_agent.core import ArtifactResult
+    from pd_agent.artifacts import ArtifactClassification
+    from datetime import datetime, timezone
+    from pd_agent.validation.runtime import _minecraft_spec
+
+    artifact_path = next(
+        (REPO_ROOT / "tests" / "fixtures" / "l11_fabric_fixture" / "build" / "libs").glob("*.jar")
+    )
+    artifact = ArtifactResult(
+        path=artifact_path,
+        size=artifact_path.stat().st_size,
+        timestamp=datetime.now(timezone.utc),
+        classification=ArtifactClassification.VALID.value,
+    )
+    spec = _minecraft_spec(REPO_ROOT, contract, requirement, artifact)
+
+    assert spec.observation_type is MinecraftObservationType.REGISTRY_ENTRY_PRESENT
+    assert spec.observation_params == {"registry_kind": "block", "identifier": "examplemod:server_core"}
+    assert spec.observation_requests[0].selector["identifier"] == "examplemod:server_core"

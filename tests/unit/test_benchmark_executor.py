@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
@@ -918,6 +918,78 @@ def test_executor_carries_registry_observation_into_minecraft_spec(
     assert spec.expect_neighbor_update is False
     assert spec.target_jar == Path("build/libs/mod.jar")
     assert kwargs["run_id"] == "attempt-registry"
+
+
+def test_executor_derives_productive_registry_observation_from_structured_contract() -> None:
+    task = _task(minecraft=True)
+    structured_spec = {
+        **task.acceptance.spec,
+        "observations": [{
+            "observation_id": "server-core-block",
+            "observation_type": "REGISTRY_ENTRY_PRESENT",
+            "profile": "registry_entry",
+            "selector": {
+                "kind": "registry",
+                "registry_kind": "block",
+                "identifier": "examplemod:server_core",
+            },
+            "expected": {"present": True},
+            "requirement_ids": ["validation-minecraft"],
+        }],
+    }
+    structured_spec.pop("observation_type")
+    task = replace(task, acceptance=replace(task.acceptance, spec=structured_spec))
+
+    spec = _minecraft_spec_for_task(
+        task,
+        artifact_path=Path("build/libs/mod.jar"),
+        artifact_sha256="sha256",
+        default_timeout_seconds=30,
+    )
+
+    assert spec.observation_type.value == "REGISTRY_ENTRY_PRESENT"
+    assert spec.observation_params == {
+        "registry_kind": "block",
+        "identifier": "examplemod:server_core",
+    }
+    assert len(spec.observation_requests) == 1
+
+
+def test_executor_preserves_multiple_structured_observations_for_runner() -> None:
+    task = _task(minecraft=True)
+    observations = []
+    for suffix, registry_kind in (("block", "block"), ("item", "item")):
+        observations.append({
+            "observation_id": f"server-core-{suffix}",
+            "observation_type": "REGISTRY_ENTRY_PRESENT",
+            "profile": "registry_entry",
+            "selector": {
+                "kind": "registry",
+                "registry_kind": registry_kind,
+                "identifier": "examplemod:server_core",
+            },
+            "expected": {"present": True},
+            "requirement_ids": ["validation-minecraft"],
+        })
+    structured_spec = {**task.acceptance.spec, "observations": observations}
+    structured_spec.pop("observation_type")
+    task = replace(
+        task,
+        acceptance=replace(task.acceptance, spec=structured_spec),
+    )
+
+    spec = _minecraft_spec_for_task(
+        task,
+        artifact_path=Path("build/libs/mod.jar"),
+        artifact_sha256="sha256",
+        default_timeout_seconds=30,
+    )
+
+    assert [item.observation_id for item in spec.observation_requests] == [
+        "server-core-block",
+        "server-core-item",
+    ]
+    assert spec.observation_type.value == "REGISTRY_ENTRY_PRESENT"
 
 
 def test_executor_enforces_required_resources_and_secondary_item_observation(

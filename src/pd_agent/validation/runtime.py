@@ -26,6 +26,7 @@ from pd_agent.minecraft import (
     MinecraftObservationType,
     MinecraftTestRunner,
     MinecraftTestSpec,
+    effective_observation_config,
     runtime_spec_from_requirement,
 )
 from pd_agent.tools import SecurePathResolver
@@ -72,17 +73,26 @@ def _minecraft_spec(
     target_mod_id = spec.get("target_mod_id")
     if not isinstance(target_mod_id, str) or not target_mod_id.strip():
         raise ValueError("runtime validation spec requires target_mod_id")
+    runtime_plan = runtime_spec_from_requirement(requirement)
+    explicit_observation_type = spec.get("observation_type")
+    if explicit_observation_type is None and runtime_plan.observations:
+        observation_type, observation_params = effective_observation_config(runtime_plan.observations[0])
+    else:
+        observation_type = MinecraftObservationType(
+            str(explicit_observation_type or MinecraftObservationType.LEGACY_BLOCK_STATE)
+        )
+        observation_params = dict(spec.get("observation_params", {}))
     return MinecraftTestSpec(
         target_jar=_artifact_reference(project_root, Path(artifact.path)) if artifact.path is not None else Path("."),
         runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", runtime_mod_jars)),
-        observation_requests=runtime_spec_from_requirement(requirement).observations,
+        observation_requests=runtime_plan.observations,
         target_mod_id=target_mod_id,
         minecraft_version=str(spec.get("minecraft_version", environment.minecraft_version)),
         loader_version=str(spec.get("loader_version", environment.loader_version)),
         test_id=str(spec.get("test_id", requirement.validation_requirement_id)),
         timeout_seconds=int(spec.get("timeout_seconds", 600)),
-        observation_type=MinecraftObservationType(str(spec.get("observation_type", MinecraftObservationType.LEGACY_BLOCK_STATE))),
-        observation_params=dict(spec.get("observation_params", {})),
+        observation_type=observation_type,
+        observation_params=observation_params,
         expect_neighbor_update=bool(spec.get("expect_neighbor_update", False)),
     )
 

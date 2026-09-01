@@ -744,6 +744,20 @@ class ObservationRequest:
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def effective_observation_config(
+    request: ObservationRequest,
+) -> tuple[MinecraftObservationType, dict[str, Any]]:
+    """Adapt one structured request to the harness' scalar launch properties."""
+
+    params = dict(request.parameters)
+    if request.observation_type is MinecraftObservationType.REGISTRY_ENTRY_PRESENT:
+        if request.selector.get("kind") != "registry":
+            raise ValueError("registry observation selector is invalid")
+        params.setdefault("registry_kind", request.selector.get("registry_kind"))
+        params.setdefault("identifier", request.selector.get("identifier"))
+    return request.observation_type, params
+
+
 @dataclass(frozen=True, slots=True)
 class ObservationResult:
     """Closed provider-neutral result envelope for future observations."""

@@ -28,6 +28,7 @@ from pd_agent.core import ExecutionLimits, ModelProvider, ProviderError, RunStat
 from pd_agent.minecraft import (
     MinecraftEvidencePaths,
     MinecraftObservationType,
+    ObservationRequest,
     MinecraftTargetMetadata,
     MinecraftTestResult,
     MinecraftTestRunner,
@@ -203,9 +204,30 @@ def _minecraft_spec_for_task(
     spec = task.acceptance.spec if isinstance(task.acceptance.spec, Mapping) else {}
     target_mod_id = _target_mod_id_for_task(task)
     test_id = str(spec.get("test_id") or f"{task.task_id}:{task.task_version}").strip()
-    observation_type = str(spec.get("observation_type") or MinecraftObservationType.LEGACY_BLOCK_STATE.value).strip()
-    observation_params = spec.get("observation_params")
-    if observation_params is None:
+    raw_observations = spec.get("observations", spec.get("observation_requests"))
+    observation_requests = ()
+    if raw_observations is not None:
+        if not isinstance(raw_observations, (list, tuple)) or not raw_observations:
+            raise ValueError("observations must be a non-empty sequence")
+        observation_requests = tuple(
+            ObservationRequest.from_dict(
+                {key: value for key, value in dict(item).items() if key != "requirement_ids"}
+            )
+            for item in raw_observations
+        )
+    if "observation_type" in spec:
+        observation_type = str(spec["observation_type"]).strip()
+        observation_params = spec.get("observation_params")
+        if observation_params is None:
+            observation_params = spec.get("expectations", {})
+    elif observation_requests:
+        from pd_agent.minecraft import effective_observation_config
+
+        effective_type, effective_params = effective_observation_config(observation_requests[0])
+        observation_type = effective_type.value
+        observation_params = effective_params
+    else:
+        observation_type = MinecraftObservationType.LEGACY_BLOCK_STATE.value
         observation_params = spec.get("expectations", {})
     minecraft_version = str(spec.get("minecraft_version") or task.environment.minecraft_version or "").strip()
     loader_version = str(spec.get("loader_version") or task.environment.loader_version or "").strip()
@@ -222,6 +244,7 @@ def _minecraft_spec_for_task(
         timeout_seconds=timeout_seconds,
         expect_neighbor_update=expect_neighbor_update,
         runtime_mod_jars=tuple(runtime_mod_jars),
+        observation_requests=observation_requests,
     )
 
 
