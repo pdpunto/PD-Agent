@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from pd_agent.core import ArtifactIdentity, BuildAttemptIdentity, FabricRequirement, FabricTaskContract, FabricValidationRequirement, RunState, TaskProgressLedger, ValidationStatus
+from pd_agent.core import ArtifactIdentity, BuildAttemptIdentity, FabricRequirement, FabricTaskContract, FabricValidationRequirement, RunState, TaskProgressLedger, ValidationResult, ValidationStage, ValidationStatus
 from pd_agent.minecraft import (
     FabricRuntimeOrchestrator,
     MinecraftEvidenceKind,
@@ -16,6 +16,7 @@ from pd_agent.minecraft import (
     RuntimeOrchestrationStatus,
     runtime_spec_from_requirement,
 )
+from pd_agent.runtime import AgentRuntime
 
 
 SHA = "a" * 64
@@ -113,6 +114,36 @@ def test_current_artifact_launches_and_pass_is_bound_and_reusable(tmp_path: Path
     assert second.status is RuntimeOrchestrationStatus.REUSED
     assert runner.calls == 1
     assert state.progress_ledger is not None and state.progress_ledger.satisfied_requirement_ids == ()
+    assert state.validation_results == ()
+
+
+def test_agent_runtime_owns_one_validation_result_per_logical_validation() -> None:
+    class FunctionalValidator:
+        last_results = ()
+
+        def validate(self, project_root, artifact, contract, run_id):  # noqa: ANN001
+            del project_root, artifact, contract, run_id
+            return ValidationResult(
+                stage=ValidationStage.RUNTIME,
+                status=ValidationStatus.PASS,
+                summary="runtime validation passed",
+            )
+
+    contract = _contract(requirement=_requirement())
+    state, _artifact_identity = _state(contract)
+    state.artifact_result = object()
+    runtime = AgentRuntime(
+        provider=object(),
+        build_runner=object(),
+        artifact_validator=object(),
+        context_manager=object(),
+        functional_validator=FunctionalValidator(),
+    )
+
+    project_snapshot = SimpleNamespace(project_root=Path("."))
+    assert runtime._run_functional_validation(state, project_snapshot, []) == "PASS"
+    assert runtime._run_functional_validation(state, project_snapshot, []) == "PASS"
+    assert len(state.validation_results) == 2
 
 
 def test_failed_target_observation_is_repairable_and_failure_is_active(tmp_path: Path) -> None:

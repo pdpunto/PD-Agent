@@ -159,7 +159,6 @@ class FabricRuntimeOrchestrator:
         validation, failure = self._validate_observations(plan, observations, runtime_result, artifact, run_id)
         identity = RuntimeAttemptIdentity(runtime_attempt_id=run_id, artifact_identity=artifact.artifact_identity, validation_revision=plan.validation_revision, requirement_ids=tuple(dict.fromkeys(item for values in plan.observation_requirements.values() for item in values)), result_refs=tuple(ref.ref for observation in observations for ref in observation.evidence_refs), status=validation.status.value)
         run_state.runtime_identities = (*run_state.runtime_identities, identity)
-        run_state.record_validation_result(validation)
         if failure is not None:
             self._record_failure(run_state, failure)
         self._record_evidence(run_state, plan, validation)
