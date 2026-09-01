@@ -609,18 +609,21 @@ class KnowledgeContextSource:
         if request.limits is not None:
             budget = min(budget, request.limits.max_context_bytes)
 
+        # A current failure is more actionable than stale or generic context.
+        # Keep the single global budget, but allocate it in this order.
+        raw_inputs = tuple(sorted(raw_inputs, key=lambda item: (
+            0 if self._is_failure_specific(item) else 1,
+        )))
         items: list[ContextItem] = []
         traces: list[KnowledgeTrace] = []
         remaining_budget = budget
         context_index = 0
         for raw in raw_inputs:
-            if isinstance(raw, SelectedKnowledge):
-                selected = raw
-            else:
-                selected = self.selector.select(
-                    raw,
-                    budget_bytes=remaining_budget,
-                    run_id=request.run_state.run_id if request.run_state is not None else None,
+            retrieval = raw.retrieval_result if isinstance(raw, SelectedKnowledge) else raw
+            selected = self.selector.select(
+                retrieval,
+                budget_bytes=remaining_budget,
+                run_id=request.run_state.run_id if request.run_state is not None else None,
             )
             injected_ids: list[str] = []
             for item in selected.selected_items[:self.max_items]:
@@ -654,6 +657,11 @@ class KnowledgeContextSource:
 
         self.last_traces = tuple(traces)
         return tuple(items)
+
+    @staticmethod
+    def _is_failure_specific(raw: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult | SelectedKnowledge) -> bool:
+        retrieval = raw.retrieval_result if isinstance(raw, SelectedKnowledge) else raw
+        return retrieval.need.id.casefold().startswith("semantic-repair:")
 
     def _to_context_item(self, result: KnowledgeRetrievalResult | RankedKnowledgeRetrievalResult,
                          item: KnowledgeItem, index: int) -> ContextItem:

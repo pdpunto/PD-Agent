@@ -9,6 +9,8 @@ from typing import Any, Mapping
 from pd_agent.core import ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot, resolve_logical_resource_path
 
+from .fabric import FabricBlockIdentityValidator
+
 
 class PreBuildValidationError(ValueError):
     """Malformed validator contract or unsafe workspace requirement."""
@@ -55,8 +57,14 @@ def _contract_mapping(contract: Any) -> Mapping[str, Any]:
 class PreBuildWorkspaceValidator:
     """Validate only required files and JSON pointer requirements."""
 
-    def __init__(self, *, resource_roots: tuple[Path, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        resource_roots: tuple[Path, ...] = (),
+        semantic_validators: tuple[object, ...] | None = None,
+    ) -> None:
         self.resource_roots = tuple(Path(root) for root in resource_roots)
+        self.semantic_validators = semantic_validators if semantic_validators is not None else (FabricBlockIdentityValidator(),)
 
     def validate(self, project_root: Path, contract: Any) -> ValidationResult:
         data = _contract_mapping(contract)
@@ -153,6 +161,12 @@ class PreBuildWorkspaceValidator:
                             evidence_refs=(evidence_ref,),
                         )
                     )
+
+        for validator in self.semantic_validators:
+            result = validator.validate(root, data)
+            if not isinstance(result, ValidationResult):
+                raise TypeError("semantic validator must return ValidationResult")
+            violations.extend(result.violations)
 
         status = ValidationStatus.PASS if not violations else ValidationStatus.REPAIRABLE_FAIL
         summary = "pre-build requirements passed" if not violations else "pre-build requirements failed"
