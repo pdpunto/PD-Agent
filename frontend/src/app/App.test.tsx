@@ -55,8 +55,25 @@ describe("frontend route and state foundations", () => {
     expect(window.location.pathname).toBe("/projects");
     expect(window.location.search).toContain("request=Add%20a%20Server%20Core%20block");
   });
+  it("preserves Home intent whitespace and reserved characters exactly", () => {
+    const request = "  A\u00f1ade un bloque: N\u00facleo / en_us?x=1&y=2  ";
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("What should we build?"), {
+      target: { value: request },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Start a task/ }));
+    expect(new URLSearchParams(window.location.search).get("request")).toBe(request);
+  });
+  it("does not transport a whitespace-only Home intent", () => {
+    render(<App />);
+    const textarea = screen.getByLabelText("What should we build?");
+    fireEvent.change(textarea, { target: { value: "  \n\t  " } });
+    fireEvent.submit(textarea.closest("form")!);
+    expect(window.location.pathname).toBe("/projects");
+    expect(window.location.search).toBe("");
+  });
   it("preserves an encoded Home request when selecting an existing project", async () => {
-    const request = "Añade un bloque: Server Core / en_us";
+    const request = "  A\u00f1ade un bloque: N\u00facleo / en_us?x=1&y=2  ";
     window.history.replaceState({}, "", `/projects?request=${encodeURIComponent(request)}`);
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [project] } as Response)
@@ -207,6 +224,25 @@ describe("frontend route and state foundations", () => {
     fireEvent.click(screen.getByRole("button", { name: /Close settings/ }));
     expect(window.location.pathname).toBe("/");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("traps Settings focus and restores it after Escape and Close", async () => {
+    render(<App />);
+    const trigger = screen.getByRole("button", { name: "Settings" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(trigger);
+    const close = screen.getByRole("button", { name: /Close settings/ });
+    await waitFor(() => expect(close).toHaveFocus());
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: /Close settings/ }));
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
   it("moves focus to the new page landmark after keyboard navigation", () => {
     render(<App />);

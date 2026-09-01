@@ -66,6 +66,31 @@ test.describe("Point 11 deterministic UX acceptance", () => {
     await expect(page.getByRole("textbox", { name: "Task request" })).toHaveValue(request);
   });
 
+  test("preserves exact Home intent whitespace and reserved characters", async ({ page }) => {
+    const request = "  A\u00f1ade un bloque: N\u00facleo / en_us?x=1&y=2  ";
+    await page.route("**/api/v1/projects**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/history")) {
+        await route.fulfill({ json: { project_id: projectId, tasks: [], executions: [], deliveries: [] } });
+      } else if (path.endsWith(`/projects/${projectId}`)) {
+        await route.fulfill({ json: { project_id: projectId, name: "Project A", created_at: "2026-01-01", updated_at: "2026-01-01", task_ids: [] } });
+      } else {
+        await route.fulfill({ json: [{ project_id: projectId, name: "Project A", created_at: "2026-01-01", updated_at: "2026-01-01", task_ids: [] }] });
+      }
+    });
+    await page.goto(`/projects?request=${encodeURIComponent(request)}`);
+    await page.getByRole("button", { name: /Project A/ }).click();
+    await expect(page.getByRole("textbox", { name: "Task request" })).toHaveValue(request);
+  });
+
+  test("does not create a Home intent from whitespace-only input", async ({ page }) => {
+    await page.goto("/");
+    const composer = page.getByLabel("What should we build?");
+    await composer.fill("  \n\t  ");
+    await expect(page.getByRole("button", { name: /Start a task/ })).toBeDisabled();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
   test("returns Execution deterministically to its owner Project", async ({ page }) => {
     await page.route(`**/api/v1/executions/${executionId}*`, async (route) => {
       await route.fulfill({ json: execution("BLOCKED") });
@@ -141,8 +166,20 @@ test.describe("Point 11 deterministic UX acceptance", () => {
     await settings.press("Enter");
     const settingsLayer = page.getByRole("dialog");
     await expect(settingsLayer).toHaveAttribute("aria-modal", "true");
+    await expect(settingsLayer.getByRole("button", { name: /Close settings/ })).toBeFocused();
     await settingsLayer.getByRole("button", { name: /Close settings/ }).click();
     await expect(page).toHaveURL(/\/$/);
+    await expect(settings).toBeFocused();
+
+    await settings.press("Enter");
+    const reopened = page.getByRole("dialog", { name: "Settings" });
+    await expect(reopened).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(reopened.getByRole("button", { name: /Close settings/ })).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(reopened.getByRole("button", { name: /Close settings/ })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(reopened).toHaveCount(0);
     await expect(settings).toBeFocused();
   });
 });

@@ -167,7 +167,10 @@ function HomePage({ navigate }: { navigate: (path: string) => void }) {
   const [request, setRequest] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    navigate(`/projects?request=${encodeURIComponent(request.trim())}`);
+    const query = request.trim()
+      ? `?request=${encodeURIComponent(request)}`
+      : "";
+    navigate(`/projects${query}`);
   };
   return (
     <section className="home-page" aria-labelledby="home-title">
@@ -219,7 +222,9 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
   const initialRequest = new URLSearchParams(window.location.search).get("request") ?? "";
   const [request, setRequest] = useState(initialRequest);
   const projectPath = (projectId: string) => {
-    const query = request.trim() ? `?request=${encodeURIComponent(request.trim())}` : "";
+    const query = request.trim()
+      ? `?request=${encodeURIComponent(request)}`
+      : "";
     return `/projects/${projectId}${query}`;
   };
   useEffect(() => {
@@ -786,12 +791,58 @@ function SettingsPage({
   navigate: (path: string) => void;
   restoreFocus: () => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
   const close = () => {
     navigate("/");
     window.setTimeout(restoreFocus, 0);
   };
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    const initialFocus = window.setTimeout(() => focusable()[0]?.focus(), 0);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      window.clearTimeout(initialFocus);
+      document.removeEventListener("keydown", key);
+      restoreFocus();
+    };
+  }, [navigate, restoreFocus]);
   return (
-    <section role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <section
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+    >
       <button className="back-link" onClick={close}>
         &#8592; Close settings
       </button>
