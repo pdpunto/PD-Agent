@@ -32,8 +32,20 @@ const safeError = (error: unknown) =>
     ? { message: error.message, code: error.code }
     : {
         message: "The local service could not complete that request.",
-        code: "REQUEST_FAILED",
-      };
+      code: "REQUEST_FAILED",
+    };
+const terminalStatuses = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "BLOCKED",
+  "LIMIT_REACHED",
+  "INTERRUPTED",
+]);
+const statusLabel = (status: string | null) => {
+  if (status === "SUCCEEDED") return "Completado · Mod verificado";
+  if (status && terminalStatuses.has(status)) return "Detenido · No se pudo completar";
+  return "Trabajando · Procesando la solicitud";
+};
 
 export default function App() {
   const [route, setRoute] = useState(() => routeFor(window.location.pathname));
@@ -124,25 +136,33 @@ function Shell({
           <ExecutionPage
             executionId={route.id!}
             navigate={navigate}
+            onBack={() => {
+              if (window.history.length > 1) window.history.back();
+              else navigate("/projects");
+            }}
             onStatusChange={setExecutionStatus}
           />
         )}
         {route.name === "settings" && <SettingsPage />}
       </main>
-      <footer className="statusbar">
+      <footer className="statusbar" aria-live="polite" aria-atomic="true">
         <span className="status-dot" aria-hidden="true" />{" "}
-        {route.name !== "execution"
-          ? "Listo"
-          : executionStatus === "FAILED"
-            ? "Detenido · No se pudo completar"
-            : "Trabajando · Procesando la solicitud"}
+        {route.name !== "execution" ? "Listo" : statusLabel(executionStatus)}
       </footer>
     </div>
   );
 }
 function HomePage({ navigate }: { navigate: (path: string) => void }) {
+  const [request, setRequest] = useState("");
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    navigate(`/projects?request=${encodeURIComponent(request.trim())}`);
+  };
   return (
     <section className="home-page" aria-labelledby="home-title">
+      <div className="voxel-mark" role="img" aria-label="Minecraft Fabric visual identity">
+        <span /><span /><span /><span /><span /><span /><span /><span /><span />
+      </div>
       <div className="eyebrow">FABRIC / BUILD WITH CONFIDENCE</div>
       <h1 id="home-title">
         Turn an idea into
@@ -153,25 +173,28 @@ function HomePage({ navigate }: { navigate: (path: string) => void }) {
         Describe what you want to make. PD Agent understands the Fabric
         ecosystem and shapes the work into a persistent project.
       </p>
-      <div className="composer-shell">
+      <form className="composer-shell" onSubmit={submit}>
         <label htmlFor="home-request">What should we build?</label>
         <textarea
           id="home-request"
           placeholder="Describe a block, item, mechanic, or idea..."
           rows={3}
+          value={request}
+          onChange={(event) => setRequest(event.target.value)}
         />
         <div className="composer-actions">
           <button
             className="quiet-action"
             onClick={() => navigate("/projects")}
+            type="button"
           >
             Choose a Project
           </button>
-          <button className="primary-action" disabled>
+          <button className="primary-action" type="submit" disabled={!request.trim()}>
             Start a task <span aria-hidden="true">&#8594;</span>
           </button>
         </div>
-      </div>
+      </form>
     </section>
   );
 }
@@ -182,6 +205,8 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
   const [workspace, setWorkspace] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const initialRequest = new URLSearchParams(window.location.search).get("request") ?? "";
+  const [request, setRequest] = useState(initialRequest);
   useEffect(() => {
     let live = true;
     api
@@ -201,7 +226,8 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
     setError("");
     try {
       const project = await api.createProject({ name, workspace });
-      navigate(`/projects/${project.project_id}`);
+      const query = request.trim() ? `?request=${encodeURIComponent(request.trim())}` : "";
+      navigate(`/projects/${project.project_id}${query}`);
     } catch (e) {
       setError(safeError(e).message);
     } finally {
@@ -302,6 +328,10 @@ function ProjectPage({
   const [request, setRequest] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const initialRequest = new URLSearchParams(window.location.search).get("request") ?? "";
+  useEffect(() => {
+    setRequest(initialRequest);
+  }, [initialRequest]);
   useEffect(() => {
     let live = true;
     Promise.all([api.getProject(projectId), api.getHistory(projectId)])
@@ -382,9 +412,23 @@ function ProjectPage({
                 <p role="alert">{history.error}</p>
               )}
               {(history.data?.tasks ?? []).map((task) => (
-                <div className="history-item" key={task.task_id}>
+              <div className="history-item" key={task.task_id}>
                   <strong>{task.request}</strong>
                   <small>{task.execution_ids.length} executions</small>
+                  {history.data?.executions
+                    .filter((execution) => execution.task_id === task.task_id)
+                    .map((execution) => (
+                      <span className="history-meta" key={execution.execution_id}>
+                        {statusLabel(execution.status)} · {new Date(task.created_at).toLocaleString()}
+                      </span>
+                    ))}
+                  {history.data?.deliveries
+                    .filter((delivery) => delivery.task_id === task.task_id)
+                    .map((delivery) => (
+                      <a className="history-delivery" key={delivery.delivery_id} href={api.artifactUrl(delivery.delivery_id)}>
+                        Delivery / JAR · {delivery.artifact_sha256}
+                      </a>
+                    ))}
                 </div>
               ))}
             </div>
@@ -397,10 +441,12 @@ function ProjectPage({
 function ExecutionPage({
   executionId,
   navigate,
+  onBack,
   onStatusChange,
 }: {
   executionId: string;
   navigate: (path: string) => void;
+  onBack: () => void;
   onStatusChange: (status: string | null) => void;
 }) {
   const [snapshot, setSnapshot] = useState<Load<Execution>>({
@@ -459,10 +505,10 @@ function ExecutionPage({
     };
   }, [details, executionId]);
   const item = snapshot.data;
-  const terminalFailure = item && item.terminal && item.status !== "SUCCEEDED";
+  const terminalFailure = item && (item.terminal || terminalStatuses.has(item.status)) && item.status !== "SUCCEEDED";
   return (
     <section aria-labelledby="execution-title">
-      <button className="back-link" onClick={() => navigate("/projects")}>
+      <button className="back-link" onClick={onBack}>
         &#8592; Open project
       </button>
       <div className="eyebrow">EXECUTION</div>
@@ -529,7 +575,7 @@ function WorkingState({ snapshot }: { snapshot: Execution }) {
       <strong>PD Agent está trabajando en tu mod</strong>
       <span>{snapshot.current_activity || "Procesando la solicitud"}</span>
       <span className="milestone" role="status" aria-live="polite" aria-atomic="true">
-        {snapshot.current_milestone || "Entendiendo"}
+        {snapshot.current_milestone || "Trabajando"}
       </span>
     </div>
   );
@@ -659,6 +705,13 @@ function EvidenceDialog({
                 {human?.runtime_validation_summary && (
                   <p>{human.runtime_validation_summary}</p>
                 )}
+                {human?.completion_summary && <p>{human.completion_summary}</p>}
+                {human?.artifact_summary && <p>{human.artifact_summary}</p>}
+                {!!human?.changes?.length && (
+                  <ul aria-label="Changes">
+                    {human.changes.map((change) => <li key={change}>{change}</li>)}
+                  </ul>
+                )}
               </>
             ) : (
               <>
@@ -671,6 +724,18 @@ function EvidenceDialog({
                 )}
                 {technical?.artifact_sha256 && (
                   <p>Artifact: {technical.artifact_sha256}</p>
+                )}
+                {!!technical?.changed_files?.length && (
+                  <p>Files: {technical.changed_files.join(", ")}</p>
+                )}
+                {!!technical?.build_attempts?.length && (
+                  <p>Build attempts: {technical.build_attempts.length}</p>
+                )}
+                {!!technical?.runtime_observations?.length && (
+                  <p>Runtime observations: {technical.runtime_observations.length}</p>
+                )}
+                {!!technical?.evidence_refs?.length && (
+                  <p>Evidence refs: {technical.evidence_refs.join(", ")}</p>
                 )}
               </>
             )}

@@ -44,6 +44,17 @@ describe("frontend route and state foundations", () => {
     render(<App />);
     expect(screen.getByText("Listo")).toBeInTheDocument();
   });
+  it("routes the Home task CTA to the real project flow", () => {
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("What should we build?"), {
+      target: { value: "Add a Server Core block" },
+    });
+    const start = screen.getByRole("button", { name: /Start a task/ });
+    expect(start).not.toBeDisabled();
+    fireEvent.click(start);
+    expect(window.location.pathname).toBe("/projects");
+    expect(window.location.search).toContain("request=Add%20a%20Server%20Core%20block");
+  });
   it("shows the project loading state", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
     render(<App />);
@@ -299,6 +310,32 @@ describe("frontend route and state foundations", () => {
     } as Response);
     render(<App />);
     expect(await screen.findByText("interrupted")).toBeInTheDocument();
+  });
+  it.each(["BLOCKED", "LIMIT_REACHED", "INTERRUPTED"])(
+    "does not show Working for terminal status %s",
+    async (status) => {
+      window.history.replaceState({}, "", "/executions/e");
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...running, status, terminal: true }),
+      } as Response);
+      render(<App />);
+      await screen.findByText("No he podido terminar este mod");
+      expect(screen.queryByText(/Trabajando/)).not.toBeInTheDocument();
+      expect(screen.getByText("Detenido · No se pudo completar")).toBeInTheDocument();
+    },
+  );
+  it("does not invent Entendiendo when the backend omits a milestone", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...running, current_milestone: null }),
+    } as Response);
+    render(<App />);
+    await screen.findByText("Trabajando");
+    expect(screen.queryByText("Entendiendo")).not.toBeInTheDocument();
   });
   it("does not render percentages", async () => {
     window.history.replaceState({}, "", "/executions/e");
