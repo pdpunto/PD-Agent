@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 import zipfile
 
 import pytest
@@ -11,7 +12,18 @@ from pd_agent.config import load_config
 from pd_agent.artifacts import ArtifactClassification
 from pd_agent.benchmark.dependencies import resolve_runtime_mod_dependencies
 from pd_agent.core import ArtifactResult
-from pd_agent.core import TaskProgressLedger
+from pd_agent.core import (
+    AgentResponse,
+    BuildResult,
+    FabricRequirement,
+    FabricTaskContract,
+    TaskProgressLedger,
+    ToolCall,
+    ValidationResult,
+    ValidationStage,
+    ValidationStatus,
+    ValidationViolation,
+)
 from pd_agent.minecraft import runtime_spec_from_requirement
 from pd_agent.minecraft import MinecraftTestRunner, MinecraftTestSpec, UnsupportedMinecraftEnvironmentError
 from pd_agent.project import DetectedValue
@@ -107,6 +119,169 @@ def test_productive_composition_wires_prebuild_validation_to_runtime_boundary(tm
 
         assert isinstance(validator, PreBuildWorkspaceValidator)
         assert application.fabric_orchestrator.pre_build_validator is validator
+    finally:
+        application.shutdown()
+
+
+def _prebuild_boundary_contract() -> FabricTaskContract:
+    return FabricTaskContract(
+        task_id="offline-boundary",
+        revision="1",
+        goal="make a source mutation",
+        requirements=(FabricRequirement(requirement_id="source", description="source mutation"),),
+    )
+
+
+class _BoundaryProvider:
+    def __init__(self, contents: tuple[str, ...]) -> None:
+        self.contents = iter(contents)
+        self.mutation_count = 0
+
+    def execute(self, _request):
+        try:
+            content = next(self.contents)
+        except StopIteration:
+            return AgentResponse(assistant_message="continue")
+        tool_name = "create_file" if self.mutation_count == 0 else "write_file"
+        self.mutation_count += 1
+        return AgentResponse(
+            assistant_message="edit",
+            tool_calls=(ToolCall(
+                call_id=f"edit-{hash(content)}",
+                tool_name=tool_name,
+                arguments={
+                    "path": "src/main/java/generated/Boundary.java",
+                    "content": content,
+                },
+            ),),
+        )
+
+
+class _BoundaryBuildRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, _snapshot, state, _limits):
+        self.calls += 1
+        result = BuildResult(
+            attempt=self.calls,
+            command_display="offline fake build",
+            cwd=state.project_root,
+            started_at=datetime.now(timezone.utc),
+            duration_seconds=0.01,
+            exit_code=0,
+            stdout_log="BUILD SUCCESSFUL",
+            stderr_log="",
+        )
+        state.record_build_attempt()
+        state.record_build_result(result)
+        return result
+
+
+class _BoundaryArtifactValidator:
+    def validate(self, snapshot, _build, *, run_id):
+        path = snapshot.project_root / "build" / "libs" / "offline.jar"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"offline artifact")
+        return ArtifactResult(
+            path=path,
+            size=path.stat().st_size,
+            timestamp=datetime.now(timezone.utc),
+            classification="VALID",
+        )
+
+
+def _boundary_application(tmp_path: Path, contents: tuple[str, ...], *, functional_validator=None):
+    workspace = tmp_path / "workspace"
+    shutil.copytree(FIXTURE, workspace)
+    build_runner = _BoundaryBuildRunner()
+    provider = _BoundaryProvider(contents)
+    application = build_product_application(
+        replace(load_config(), provider="openai", model="offline-test", runs_dir=tmp_path / "runs"),
+        provider_factory=lambda _config: provider,
+        build_runner=build_runner,
+        artifact_validator=_BoundaryArtifactValidator(),
+        product_data_root=tmp_path / "product-data",
+        minecraft_runner_factory=lambda _root: None,
+    )
+    if functional_validator is not None:
+        application.fabric_orchestrator.functional_validator = functional_validator
+    return application, workspace, build_runner
+
+
+def _invalid_block_source() -> str:
+    return "new Block(AbstractBlock.Settings.create().strength(1.0f));\n"
+
+
+def _valid_block_source() -> str:
+    return "new Block(AbstractBlock.Settings.create().registryKey(key).strength(1.0f));\n"
+
+
+def test_productive_boundary_blocks_invalid_source_before_build(tmp_path: Path) -> None:
+    application, workspace, build_runner = _boundary_application(tmp_path, (_invalid_block_source(),))
+    try:
+        result = application.fabric_orchestrator.run(_prebuild_boundary_contract(), workspace, brain_enabled=False)
+        assert build_runner.calls == 0, result.to_dict()
+        assert any(
+            violation.code == "FABRIC_BLOCK_IDENTITY_MISSING"
+            for validation in result.report.validation_results
+            for violation in validation.violations
+        ), result.to_dict()
+    finally:
+        application.shutdown()
+
+
+def test_productive_boundary_allows_valid_source_after_prebuild(tmp_path: Path) -> None:
+    application, workspace, build_runner = _boundary_application(tmp_path, (_valid_block_source(),))
+    try:
+        result = application.fabric_orchestrator.run(_prebuild_boundary_contract(), workspace, brain_enabled=False)
+        assert build_runner.calls == 1, result.report.to_dict() if result.report else result.to_dict()
+    finally:
+        application.shutdown()
+
+
+class _OneRepairValidator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def validate(self, *_args):
+        self.calls += 1
+        if self.calls == 1:
+            return ValidationResult(
+                stage=ValidationStage.RUNTIME,
+                status=ValidationStatus.REPAIRABLE_FAIL,
+                summary="offline repair required",
+                violations=(ValidationViolation(
+                    code="OFFLINE_REPAIR_REQUIRED",
+                    requirement="source",
+                    observed={"category": "mismatch"},
+                    message="offline repair required",
+                ),),
+            )
+        return ValidationResult(
+            stage=ValidationStage.RUNTIME,
+            status=ValidationStatus.PASS,
+            summary="offline runtime pass",
+        )
+
+
+def test_productive_boundary_rechecks_prebuild_after_invalid_then_valid_repair(tmp_path: Path) -> None:
+    repair_validator = _OneRepairValidator()
+    application, workspace, build_runner = _boundary_application(
+        tmp_path,
+        (_valid_block_source(), _invalid_block_source(), _valid_block_source()),
+        functional_validator=repair_validator,
+    )
+    try:
+        result = application.fabric_orchestrator.run(_prebuild_boundary_contract(), workspace, brain_enabled=False)
+        assert result.report is not None, result.to_dict()
+        assert any(
+            violation.code == "FABRIC_BLOCK_IDENTITY_MISSING"
+            for validation in result.report.validation_results
+            for violation in validation.violations
+        )
+        assert build_runner.calls == 2
+        assert repair_validator.calls == 2
     finally:
         application.shutdown()
 
