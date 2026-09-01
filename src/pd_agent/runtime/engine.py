@@ -1378,7 +1378,8 @@ class AgentRuntime:
             if any(result.status == ToolResultStatus.SUCCESS and result.metadata.get("changed") for result in tool_results):
                 self._telemetry.last_tool_signature = None
                 self._telemetry.tool_repeat_count = 0
-                run_state.reset_validation_stall()
+                if not self._telemetry.validation_repair_pending:
+                    run_state.reset_validation_stall()
             else:
                 signature = self._tool_signature(tool_results)
                 if signature == self._telemetry.last_tool_signature:
