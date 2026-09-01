@@ -185,6 +185,12 @@ class RunState:
     validation_results: tuple[ValidationResult, ...] = ()
     last_validation_signature: str | None = None
     validation_repeat_count: int = 0
+    repair_attempt_count: int = 0
+    last_repair_attempt_ref: str | None = None
+    last_repair_failure_signature: str | None = None
+    last_repair_mutation_refs: tuple[str, ...] = ()
+    ineffective_repair: bool = False
+    ineffective_repair_ref: str | None = None
     last_error: str | None = None
     provider_error_kind: str | None = None
     provider_error_message: str | None = None
@@ -233,6 +239,21 @@ class RunState:
     def reset_validation_stall(self) -> None:
         self.last_validation_signature = None
         self.validation_repeat_count = 0
+        self.ineffective_repair = False
+        self.ineffective_repair_ref = None
+
+    def record_repair_attempt(self, failure_signature: str) -> str:
+        self.repair_attempt_count += 1
+        self.last_repair_attempt_ref = f"repair-{self.run_id}-{self.repair_attempt_count}"
+        self.last_repair_failure_signature = failure_signature
+        self.last_repair_mutation_refs = tuple(self.changed_files)
+        self.ineffective_repair = False
+        self.ineffective_repair_ref = None
+        return self.last_repair_attempt_ref
+
+    def record_ineffective_repair(self) -> None:
+        self.ineffective_repair = True
+        self.ineffective_repair_ref = self.last_repair_attempt_ref
 
     def record_changed_file(self, path: Path | str) -> None:
         normalized = Path(path).as_posix()
@@ -323,6 +344,12 @@ class RunState:
             "validation_results": [item.to_dict() for item in self.validation_results],
             "last_validation_signature": self.last_validation_signature,
             "validation_repeat_count": self.validation_repeat_count,
+            "repair_attempt_count": self.repair_attempt_count,
+            "last_repair_attempt_ref": self.last_repair_attempt_ref,
+            "last_repair_failure_signature": self.last_repair_failure_signature,
+            "last_repair_mutation_refs": list(self.last_repair_mutation_refs),
+            "ineffective_repair": self.ineffective_repair,
+            "ineffective_repair_ref": self.ineffective_repair_ref,
             "last_error": self.last_error,
             "provider_error_kind": self.provider_error_kind,
             "provider_error_message": self.provider_error_message,
@@ -374,6 +401,12 @@ class RunState:
             ),
             last_validation_signature=data.get("last_validation_signature"),
             validation_repeat_count=int(data.get("validation_repeat_count", 0)),
+            repair_attempt_count=int(data.get("repair_attempt_count", 0)),
+            last_repair_attempt_ref=data.get("last_repair_attempt_ref"),
+            last_repair_failure_signature=data.get("last_repair_failure_signature"),
+            last_repair_mutation_refs=tuple(data.get("last_repair_mutation_refs", ())),
+            ineffective_repair=bool(data.get("ineffective_repair", False)),
+            ineffective_repair_ref=data.get("ineffective_repair_ref"),
             last_error=data.get("last_error"),
             provider_error_kind=data.get("provider_error_kind"),
             provider_error_message=data.get("provider_error_message"),

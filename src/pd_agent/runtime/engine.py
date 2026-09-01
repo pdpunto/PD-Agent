@@ -958,21 +958,39 @@ class AgentRuntime:
             {"result": result.to_dict(), "signature": signature},
         )
         if result.status == ValidationStatus.PASS:
+            run_state.reset_validation_stall()
             return "PASS"
         if result.status == ValidationStatus.BLOCKED:
             run_state.state = RunStatus.BLOCKED
             run_state.termination_reason = "pre-build validation blocked"
             return "BLOCKED"
 
-        if run_state.validation_repeat_count >= 1:
+        if run_state.validation_repeat_count >= 2:
             run_state.state = RunStatus.FAILED
             run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
             return "FAILED"
-        feedback = self._validation_feedback(result)
+        ineffective = run_state.validation_repeat_count >= 1
+        if ineffective:
+            run_state.record_ineffective_repair()
+        else:
+            run_state.record_repair_attempt(signature)
+        feedback = self._validation_feedback(result, run_state=run_state, ineffective=ineffective)
         self._emit(
             run_state.run_id,
             RunEventType.SEMANTIC_REPAIR_FEEDBACK,
-            {"stage": result.stage.value, "signature": signature, "feedback": feedback},
+            {
+                "stage": result.stage.value,
+                "signature": signature,
+                "feedback": feedback,
+                "classification": (
+                    "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR"
+                    if ineffective else "FIRST_FAILURE"
+                ),
+                "repair_attempt_ref": run_state.last_repair_attempt_ref,
+                "previous_mutation_refs": list(run_state.last_repair_mutation_refs),
+                "previous_failure_signature": run_state.last_repair_failure_signature,
+                "ineffective_repair": ineffective,
+            },
         )
         history.append(AgentMessage(role="user", content=feedback))
         self._prepare_repair_knowledge(result)
@@ -1024,15 +1042,34 @@ class AgentRuntime:
                 run_state.termination_reason = "functional validation blocked"
                 return "BLOCKED"
             if staged_result.status == ValidationStatus.REPAIRABLE_FAIL:
-                if run_state.validation_repeat_count >= 1:
+                if run_state.validation_repeat_count >= 2:
                     run_state.state = RunStatus.FAILED
                     run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
                     return "FAILED"
-                feedback = self._functional_validation_feedback(staged_result)
+                ineffective = run_state.validation_repeat_count >= 1
+                if ineffective:
+                    run_state.record_ineffective_repair()
+                else:
+                    run_state.record_repair_attempt(signature)
+                feedback = self._functional_validation_feedback(
+                    staged_result, run_state=run_state, ineffective=ineffective,
+                )
                 self._emit(
                     run_state.run_id,
                     RunEventType.SEMANTIC_REPAIR_FEEDBACK,
-                    {"stage": staged_result.stage.value, "signature": signature, "feedback": feedback},
+                    {
+                        "stage": staged_result.stage.value,
+                        "signature": signature,
+                        "feedback": feedback,
+                        "classification": (
+                            "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR"
+                            if ineffective else "FIRST_FAILURE"
+                        ),
+                        "repair_attempt_ref": run_state.last_repair_attempt_ref,
+                        "previous_mutation_refs": list(run_state.last_repair_mutation_refs),
+                        "previous_failure_signature": run_state.last_repair_failure_signature,
+                        "ineffective_repair": ineffective,
+                    },
                 )
                 history.append(AgentMessage(role="user", content=feedback))
                 self._prepare_repair_knowledge(staged_result)
@@ -1044,8 +1081,20 @@ class AgentRuntime:
         run_state.reset_validation_stall()
         return "PASS"
 
-    def _functional_validation_feedback(self, result: ValidationResult) -> str:
+    def _functional_validation_feedback(
+        self, result: ValidationResult, *, run_state: RunState | None = None,
+        ineffective: bool = False,
+    ) -> str:
         lines = [f"{result.stage.value.title().replace('_', ' ')} validation failed:"]
+        if ineffective and run_state is not None:
+            lines = [
+                "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR",
+                f"previous_repair_attempt: {run_state.last_repair_attempt_ref}",
+                f"previous_failure_signature: {run_state.last_repair_failure_signature}",
+                f"previous_mutation_refs: {list(run_state.last_repair_mutation_refs)}",
+                "previous repair was ineffective; the same root cause remains.",
+                *lines,
+            ]
         for violation in result.violations:
             lines.append(f"- {violation.requirement}: {violation.message}")
         return "\n".join(lines)
@@ -1072,8 +1121,20 @@ class AgentRuntime:
             if retrieved.items:
                 self._repair_context.append(retrieved)
 
-    def _validation_feedback(self, result: ValidationResult) -> str:
+    def _validation_feedback(
+        self, result: ValidationResult, *, run_state: RunState | None = None,
+        ineffective: bool = False,
+    ) -> str:
         lines = ["Semantic validation failed before build:"]
+        if ineffective and run_state is not None:
+            lines = [
+                "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR",
+                f"previous_repair_attempt: {run_state.last_repair_attempt_ref}",
+                f"previous_failure_signature: {run_state.last_repair_failure_signature}",
+                f"previous_mutation_refs: {list(run_state.last_repair_mutation_refs)}",
+                "previous repair was ineffective; the same root cause remains.",
+                *lines,
+            ]
         for violation in result.violations:
             lines.append(
                 f"- {violation.code}: {violation.requirement}; {violation.message}"
