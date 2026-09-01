@@ -969,6 +969,9 @@ class AgentRuntime:
             run_state.state = RunStatus.FAILED
             run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
             return "FAILED"
+        previous_repair_attempt_ref = run_state.last_repair_attempt_ref
+        previous_failure_signature = run_state.last_repair_failure_signature
+        previous_mutation_refs = tuple(run_state.last_repair_mutation_refs)
         ineffective = run_state.validation_repeat_count >= 1
         if ineffective:
             run_state.record_ineffective_repair()
@@ -987,8 +990,9 @@ class AgentRuntime:
                     if ineffective else "FIRST_FAILURE"
                 ),
                 "repair_attempt_ref": run_state.last_repair_attempt_ref,
-                "previous_mutation_refs": list(run_state.last_repair_mutation_refs),
-                "previous_failure_signature": run_state.last_repair_failure_signature,
+                "previous_repair_attempt_ref": previous_repair_attempt_ref,
+                "previous_mutation_refs": list(previous_mutation_refs),
+                "previous_failure_signature": previous_failure_signature,
                 "ineffective_repair": ineffective,
             },
         )
@@ -1046,6 +1050,9 @@ class AgentRuntime:
                     run_state.state = RunStatus.FAILED
                     run_state.termination_reason = REPEATED_SEMANTIC_VALIDATION_FAILURE
                     return "FAILED"
+                previous_repair_attempt_ref = run_state.last_repair_attempt_ref
+                previous_failure_signature = run_state.last_repair_failure_signature
+                previous_mutation_refs = tuple(run_state.last_repair_mutation_refs)
                 ineffective = run_state.validation_repeat_count >= 1
                 if ineffective:
                     run_state.record_ineffective_repair()
@@ -1066,8 +1073,9 @@ class AgentRuntime:
                             if ineffective else "FIRST_FAILURE"
                         ),
                         "repair_attempt_ref": run_state.last_repair_attempt_ref,
-                        "previous_mutation_refs": list(run_state.last_repair_mutation_refs),
-                        "previous_failure_signature": run_state.last_repair_failure_signature,
+                        "previous_repair_attempt_ref": previous_repair_attempt_ref,
+                        "previous_mutation_refs": list(previous_mutation_refs),
+                        "previous_failure_signature": previous_failure_signature,
                         "ineffective_repair": ineffective,
                     },
                 )

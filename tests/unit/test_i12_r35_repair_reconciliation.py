@@ -83,8 +83,13 @@ def test_r35_same_failure_is_reported_after_ineffective_repair(tmp_path: Path) -
     assert "previous_failure_signature:" in feedback
     assert "src/Main.java" in feedback
     assert len(repair_events) == 2
+    assert repair_events[0].payload["classification"] == "FIRST_FAILURE"
+    assert repair_events[0].payload["previous_repair_attempt_ref"] is None
+    assert repair_events[0].payload["previous_failure_signature"] is None
+    assert repair_events[0].payload["previous_mutation_refs"] == []
     assert repair_events[-1].payload["classification"] == "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR"
     assert repair_events[-1].payload["ineffective_repair"] is True
+    assert repair_events[-1].payload["previous_repair_attempt_ref"] is not None
     assert state.ineffective_repair is True
     assert state.ineffective_repair_ref == state.last_repair_attempt_ref
 
