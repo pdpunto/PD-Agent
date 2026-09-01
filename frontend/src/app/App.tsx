@@ -13,6 +13,7 @@ import type {
 type Route = {
   name: "home" | "projects" | "project" | "execution" | "settings";
   id?: string;
+  projectId?: string;
 };
 type Load<T> = {
   status: "loading" | "ready" | "error";
@@ -23,7 +24,13 @@ const routeFor = (path: string): Route => {
   const p = path.split("/").filter(Boolean);
   if (p[0] === "projects" && p[1]) return { name: "project", id: p[1] };
   if (p[0] === "projects") return { name: "projects" };
-  if (p[0] === "executions" && p[1]) return { name: "execution", id: p[1] };
+  if (p[0] === "executions" && p[1]) {
+    return {
+      name: "execution",
+      id: p[1],
+      projectId: new URLSearchParams(window.location.search).get("project") ?? undefined,
+    };
+  }
   if (p[0] === "settings") return { name: "settings" };
   return { name: "home" };
 };
@@ -89,6 +96,7 @@ function Shell({
   executionStatus: string | null;
   setExecutionStatus: (status: string | null) => void;
 }) {
+  const settingsTrigger = useRef<HTMLButtonElement>(null);
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -117,6 +125,7 @@ function Shell({
             Projects
           </button>
           <button
+            ref={settingsTrigger}
             className={
               route.name === "settings" ? "nav-link active" : "nav-link"
             }
@@ -135,15 +144,17 @@ function Shell({
         {route.name === "execution" && (
           <ExecutionPage
             executionId={route.id!}
+            projectId={route.projectId}
             navigate={navigate}
-            onBack={() => {
-              if (window.history.length > 1) window.history.back();
-              else navigate("/projects");
-            }}
             onStatusChange={setExecutionStatus}
           />
         )}
-        {route.name === "settings" && <SettingsPage />}
+        {route.name === "settings" && (
+          <SettingsPage
+            navigate={navigate}
+            restoreFocus={() => settingsTrigger.current?.focus()}
+          />
+        )}
       </main>
       <footer className="statusbar" aria-live="polite" aria-atomic="true">
         <span className="status-dot" aria-hidden="true" />{" "}
@@ -207,6 +218,10 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
   const [error, setError] = useState("");
   const initialRequest = new URLSearchParams(window.location.search).get("request") ?? "";
   const [request, setRequest] = useState(initialRequest);
+  const projectPath = (projectId: string) => {
+    const query = request.trim() ? `?request=${encodeURIComponent(request.trim())}` : "";
+    return `/projects/${projectId}${query}`;
+  };
   useEffect(() => {
     let live = true;
     api
@@ -226,8 +241,7 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
     setError("");
     try {
       const project = await api.createProject({ name, workspace });
-      const query = request.trim() ? `?request=${encodeURIComponent(request.trim())}` : "";
-      navigate(`/projects/${project.project_id}${query}`);
+      navigate(projectPath(project.project_id));
     } catch (e) {
       setError(safeError(e).message);
     } finally {
@@ -294,7 +308,7 @@ function ProjectsPage({ navigate }: { navigate: (path: string) => void }) {
             <li key={project.project_id}>
               <button
               className="project-card"
-              onClick={() => navigate(`/projects/${project.project_id}`)}
+                onClick={() => navigate(projectPath(project.project_id))}
             >
               <span className="project-glyph" aria-hidden="true">
                 ✦
@@ -356,7 +370,7 @@ function ProjectPage({
     try {
       const task = await api.createTask(projectId, { request });
       const execution = await api.startExecution(task.task_id);
-      navigate(`/executions/${execution.execution_id}`);
+      navigate(`/executions/${execution.execution_id}?project=${encodeURIComponent(projectId)}`);
     } catch (e) {
       setError(safeError(e).message);
     } finally {
@@ -440,13 +454,13 @@ function ProjectPage({
 }
 function ExecutionPage({
   executionId,
+  projectId,
   navigate,
-  onBack,
   onStatusChange,
 }: {
   executionId: string;
+  projectId?: string;
   navigate: (path: string) => void;
-  onBack: () => void;
   onStatusChange: (status: string | null) => void;
 }) {
   const [snapshot, setSnapshot] = useState<Load<Execution>>({
@@ -508,7 +522,10 @@ function ExecutionPage({
   const terminalFailure = item && (item.terminal || terminalStatuses.has(item.status)) && item.status !== "SUCCEEDED";
   return (
     <section aria-labelledby="execution-title">
-      <button className="back-link" onClick={onBack}>
+      <button
+        className="back-link"
+        onClick={() => navigate(projectId ? `/projects/${projectId}` : "/projects")}
+      >
         &#8592; Open project
       </button>
       <div className="eyebrow">EXECUTION</div>
@@ -719,6 +736,9 @@ function EvidenceDialog({
                 {technical?.runtime_state && (
                   <p>Runtime: {technical.runtime_state}</p>
                 )}
+                {technical?.run_id && <p>Run ID: {technical.run_id}</p>}
+                {technical?.execution_id && <p>Execution ID: {technical.execution_id}</p>}
+                {technical?.started_at && <p>Started: {technical.started_at}</p>}
                 {technical?.failure_classification && (
                   <p>Classification: {technical.failure_classification}</p>
                 )}
@@ -730,6 +750,9 @@ function EvidenceDialog({
                 )}
                 {!!technical?.build_attempts?.length && (
                   <p>Build attempts: {technical.build_attempts.length}</p>
+                )}
+                {!!technical?.validation_summaries?.length && (
+                  <p>Validations: {technical.validation_summaries.map(validationSummary).join(" · ")}</p>
                 )}
                 {!!technical?.runtime_observations?.length && (
                   <p>Runtime observations: {technical.runtime_observations.length}</p>
@@ -750,9 +773,28 @@ function EvidenceDialog({
     </div>
   );
 }
-function SettingsPage() {
+function validationSummary(value: Record<string, unknown>) {
+  const stage = typeof value.stage === "string" ? value.stage : "validation";
+  const status = typeof value.status === "string" ? value.status : "recorded";
+  return `${stage}: ${status}`;
+}
+
+function SettingsPage({
+  navigate,
+  restoreFocus,
+}: {
+  navigate: (path: string) => void;
+  restoreFocus: () => void;
+}) {
+  const close = () => {
+    navigate("/");
+    window.setTimeout(restoreFocus, 0);
+  };
   return (
-    <section aria-labelledby="settings-title">
+    <section role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <button className="back-link" onClick={close}>
+        &#8592; Close settings
+      </button>
       <div className="eyebrow">PREVIEW</div>
       <h1 id="settings-title">Settings</h1>
       <div className="state-panel settings-panel">

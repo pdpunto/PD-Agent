@@ -55,6 +55,17 @@ describe("frontend route and state foundations", () => {
     expect(window.location.pathname).toBe("/projects");
     expect(window.location.search).toContain("request=Add%20a%20Server%20Core%20block");
   });
+  it("preserves an encoded Home request when selecting an existing project", async () => {
+    const request = "Añade un bloque: Server Core / en_us";
+    window.history.replaceState({}, "", `/projects?request=${encodeURIComponent(request)}`);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [project] } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => project } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => history } as Response);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Demo/ }));
+    expect(await screen.findByRole("textbox", { name: "Task request" })).toHaveValue(request);
+  });
   it("shows the project loading state", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
     render(<App />);
@@ -188,6 +199,14 @@ describe("frontend route and state foundations", () => {
     expect(
       screen.queryByText(/tokens|billing|endpoint/i),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  });
+  it("closes Settings as an accessible layer", () => {
+    render(<App />);
+    go("Settings");
+    fireEvent.click(screen.getByRole("button", { name: /Close settings/ }));
+    expect(window.location.pathname).toBe("/");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("moves focus to the new page landmark after keyboard navigation", () => {
     render(<App />);
@@ -387,6 +406,14 @@ describe("frontend route and state foundations", () => {
     vi.mocked(fetch).mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect(screen.getByText("execution-42")).toBeInTheDocument();
+  });
+  it("returns a direct execution to Projects without relying on browser history", async () => {
+    window.history.replaceState({}, "", "/executions/execution-42");
+    vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => running } as Response);
+    render(<App />);
+    await screen.findByRole("button", { name: /Open project/ });
+    fireEvent.click(screen.getByRole("button", { name: /Open project/ }));
+    expect(window.location.pathname).toBe("/projects");
   });
   it("uses task request input in project context", async () => {
     window.history.replaceState({}, "", "/projects/project-1");
