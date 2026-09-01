@@ -69,6 +69,7 @@ def build_product_application(
     context_manager: Any | None = None,
     economic_budget_usd: Decimal | str | None = None,
     economic_session: LunaSharedBudgetSession | None = None,
+    attempt_ceiling_usd: Decimal | str | None = None,
     product_data_root: Path | str | None = None,
     minecraft_runner: Any | None = None,
     minecraft_runner_factory: Callable[[Path], Any] | None = None,
@@ -91,6 +92,7 @@ def build_product_application(
         context_manager=context_manager,
         economic_budget_usd=economic_budget_usd,
         economic_session=economic_session,
+        attempt_ceiling_usd=attempt_ceiling_usd,
     )
     runtime.controller.model_config = {
         "max_output_tokens": 16_384,

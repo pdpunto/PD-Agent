@@ -24,6 +24,7 @@ def test_web_entrypoint_constructs_product_application_and_does_not_run_task(tmp
     def factory(config, **kwargs):  # noqa: ANN001
         assert config.provider == "openai"
         assert kwargs["economic_budget_usd"] is None
+        assert kwargs["attempt_ceiling_usd"] is None
         return Application()
 
     def server(app, *, host: str, port: int) -> None:  # noqa: ANN001

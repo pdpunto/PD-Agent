@@ -72,6 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     web_parser.add_argument("--product-data-root", default=None, type=Path, help="Directory for product metadata.")
     web_parser.add_argument("--frontend-dist", default=None, type=Path, help="Built frontend directory.")
     web_parser.add_argument("--economic-budget-usd", default=None, help="Optional positive provider budget.")
+    web_parser.add_argument("--attempt-ceiling-usd", default=None, help="Optional positive per-attempt provider budget.")
     web_parser.add_argument("--economic-state", default=None, type=Path, help="Shared economic state JSON path.")
     return parser
 
@@ -156,6 +157,7 @@ def _web_command(
         raise CLIError(f"frontend dist does not exist: {frontend}")
     product_root = args.product_data_root or os.environ.get("PD_AGENT_PRODUCT_DATA_ROOT")
     budget = args.economic_budget_usd or os.environ.get("PD_AGENT_ECONOMIC_BUDGET_USD")
+    attempt_ceiling = args.attempt_ceiling_usd
     economic_state_path = args.economic_state or os.environ.get("PD_AGENT_ECONOMIC_STATE")
     knowledge_pack = os.environ.get("PD_AGENT_KNOWLEDGE_PACK_PATH")
     knowledge_pack_id = os.environ.get("PD_AGENT_KNOWLEDGE_PACK_ID")
@@ -167,7 +169,10 @@ def _web_command(
         server_runner = _run_uvicorn
     application = None
     try:
-        kwargs: dict[str, Any] = {"economic_budget_usd": budget}
+        kwargs: dict[str, Any] = {
+            "economic_budget_usd": budget,
+            "attempt_ceiling_usd": attempt_ceiling,
+        }
         if economic_state_path is not None:
             from .experimental import LunaSharedBudgetSession
 

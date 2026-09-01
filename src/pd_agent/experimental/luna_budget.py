@@ -595,6 +595,36 @@ class LunaSharedBudgetSession:
             raise
         return {"previous": _money(current), "current": _money(target), "changed": "true"}
 
+    def configure_attempt_ceiling(self, attempt_ceiling: Decimal | str) -> dict[str, str]:
+        """Persist a new per-attempt ceiling without changing spend history."""
+
+        target = _decimal(attempt_ceiling, field_name="attempt_ceiling")
+        if target <= 0:
+            raise ValueError("attempt ceiling must be positive")
+        state = self.state
+        if (
+            state.active_attempt_id is not None
+            or state.global_reserved_usd != 0
+            or state.attempt_reserved_usd != 0
+            or state.global_uncertain_consumed_usd != 0
+            or state.attempt_uncertain_consumed_usd != 0
+        ):
+            raise ValueError("cannot configure attempt ceiling with active economic state")
+        if target > state.global_remaining_usd:
+            raise ValueError("attempt ceiling exceeds remaining global budget")
+        if target < state.attempt_accumulated_usd:
+            raise ValueError("attempt ceiling is below accumulated attempt cost")
+        previous = state.attempt_ceiling_usd
+        if target == previous:
+            return {"previous": _money(previous), "current": _money(previous), "changed": "false"}
+        state.attempt_ceiling_usd = target
+        try:
+            self.store.persist()
+        except Exception:
+            state.attempt_ceiling_usd = previous
+            raise
+        return {"previous": _money(previous), "current": _money(target), "changed": "true"}
+
     def guard(
         self,
         *,

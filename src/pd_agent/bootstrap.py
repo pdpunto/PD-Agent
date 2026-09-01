@@ -403,6 +403,7 @@ def build_runtime_bundle(
     controller_factory: Callable[..., RunController] = RunController,
     economic_budget_usd: Decimal | str | None = None,
     economic_session: LunaSharedBudgetSession | None = None,
+    attempt_ceiling_usd: Decimal | str | None = None,
 ) -> RuntimeBundle:
     """Compose the runtime graph outside the core runtime."""
 
@@ -415,13 +416,18 @@ def build_runtime_bundle(
     if economic_session is not None:
         if economic_budget_usd is not None and economic_session.ceiling_usd != Decimal(str(economic_budget_usd)):
             raise ConfigurationError("shared economic ceiling does not match configured budget")
+        if attempt_ceiling_usd is not None:
+            try:
+                economic_session.configure_attempt_ceiling(attempt_ceiling_usd)
+            except ValueError as exc:
+                raise ConfigurationError(str(exc)) from exc
         budget_guard = economic_session.guard(
             consumer_id="productive-web-composition",
             experimental=True,
             non_official=True,
         )
     else:
-        budget_guard = _build_productive_budget_guard(config, economic_budget_usd)
+        budget_guard = _build_productive_budget_guard(config, economic_budget_usd, attempt_ceiling_usd)
     if provider_factory is create_provider:
         provider = provider_factory(config, budget_guard=budget_guard)
     else:
@@ -451,6 +457,7 @@ def build_runtime_bundle(
 def _build_productive_budget_guard(
     config: AppConfig,
     economic_budget_usd: Decimal | str | None,
+    attempt_ceiling_usd: Decimal | str | None = None,
 ) -> LunaBudgetGuard | None:
     """Build the optional productive guard without changing the default runtime."""
 
@@ -464,12 +471,22 @@ def _build_productive_budget_guard(
         raise ConfigurationError("economic budget must be a positive decimal")
     if config.provider != "openai" or config.model != "gpt-5.6-luna":
         raise ConfigurationError("economic budget pricing is unavailable for the configured provider/model")
+    attempt_ceiling = None
+    if attempt_ceiling_usd is not None:
+        try:
+            attempt_ceiling = Decimal(str(attempt_ceiling_usd))
+        except (InvalidOperation, ValueError) as exc:
+            raise ConfigurationError("attempt ceiling must be a positive decimal") from exc
+        if not attempt_ceiling.is_finite() or attempt_ceiling <= 0:
+            raise ConfigurationError("attempt ceiling must be a positive decimal")
+        if attempt_ceiling > ceiling:
+            raise ConfigurationError("attempt ceiling exceeds global budget")
     # Productive web execution owns its configured global ceiling. Benchmark
     # callers retain the stricter default attempt ceiling in LunaBudgetGuard.
     state = LunaEconomicState(
         execution_id="productive-web",
         global_ceiling_usd=ceiling,
-        attempt_ceiling_usd=ceiling,
+        attempt_ceiling_usd=ceiling if attempt_ceiling is None else attempt_ceiling,
     )
     return LunaBudgetGuard(hard_budget_usd=ceiling, state=state)
 

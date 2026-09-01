@@ -185,3 +185,79 @@ def test_web_shared_state_keeps_attempt_ceiling_separate_from_global(tmp_path: P
     assert guard.hard_budget_usd == Decimal("0.70")
     assert guard.attempt_budget_usd == Decimal("0.10")
     assert Decimal(preview["attempt_remaining_usd"]) == Decimal("0.10")
+
+
+def test_web_attempt_ceiling_is_configured_and_reopened_without_history_change(tmp_path: Path) -> None:
+    session = _session(tmp_path, ceiling="0.70")
+    before = (session.state.global_accumulated_usd, len(session.state.ledger), len(session.state.dispatch_records))
+    bundle = build_runtime_bundle(
+        _config(tmp_path),
+        economic_budget_usd="0.70",
+        economic_session=session,
+        attempt_ceiling_usd="0.09",
+    )
+    assert bundle.provider.budget_guard.attempt_budget_usd == Decimal("0.09")
+    reopened = LunaSharedBudgetSession.load(session.path, expected_global_ceiling="0.70")
+    assert reopened.state.attempt_ceiling_usd == Decimal("0.09")
+    assert (reopened.state.global_accumulated_usd, len(reopened.state.ledger), len(reopened.state.dispatch_records)) == before
+    guard = reopened.guard(consumer_id="r22-r1", experimental=True, non_official=True)
+    guard.begin_attempt("r22-r1-attempt")
+    guard.end_attempt()
+    assert LunaSharedBudgetSession.load(session.path).state.attempt_ceiling_usd == Decimal("0.09")
+
+
+def test_web_attempt_ceiling_cannot_exceed_global_remaining(tmp_path: Path) -> None:
+    session = LunaSharedBudgetSession.create(
+        tmp_path / "economic.json",
+        session_id="shared-test",
+        global_ceiling="0.70",
+    )
+    session.state.global_accumulated_usd = Decimal("0.62")
+    session.store.persist()
+    with pytest.raises(ConfigurationError, match="remaining global"):
+        build_runtime_bundle(
+            _config(tmp_path),
+            economic_budget_usd="0.70",
+            economic_session=session,
+            attempt_ceiling_usd="0.09",
+        )
+
+
+@pytest.mark.parametrize("value", ["0", "-0.01", "NaN", "Infinity", "-Infinity", "not-money"])
+def test_web_attempt_ceiling_rejects_invalid_values(tmp_path: Path, value: str) -> None:
+    session = _session(tmp_path, ceiling="0.70")
+    with pytest.raises(ConfigurationError):
+        build_runtime_bundle(
+            _config(tmp_path),
+            economic_budget_usd="0.70",
+            economic_session=session,
+            attempt_ceiling_usd=value,
+        )
+    assert session.state.attempt_ceiling_usd == Decimal("0.10")
+
+
+def test_web_cli_forwards_attempt_ceiling_to_product_composition(tmp_path: Path) -> None:
+    session = _session(tmp_path, ceiling="0.70")
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    captured: dict[str, object] = {}
+
+    class Application:
+        web_services = WebServices()
+
+        def shutdown(self) -> None:
+            pass
+
+    result = main(
+        [
+            "web",
+            "--frontend-dist", str(frontend),
+            "--economic-state", str(session.path),
+            "--economic-budget-usd", "0.70",
+            "--attempt-ceiling-usd", "0.09",
+        ],
+        application_factory=lambda _config, **kwargs: (captured.update(kwargs) or Application()),
+        server_runner=lambda _app, **kwargs: None,
+    )
+    assert result == 0
+    assert captured["attempt_ceiling_usd"] == "0.09"
