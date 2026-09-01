@@ -119,6 +119,7 @@ class DispatchRecord:
     response_status: str | None = None
     http_status: int | None = None
     sanitized_error: dict[str, Any] | None = None
+    budget_diagnostic: dict[str, Any] | None = None
     prepared_at: str = field(default_factory=_utc_now)
     reservation_committed_at: str | None = None
     dispatch_started_at: str | None = None
@@ -156,6 +157,8 @@ class DispatchRecord:
             raise ValueError("started dispatch requires dispatch timestamp")
         if self.http_status is not None and self.http_status < 100:
             raise ValueError("http_status must be a valid status code")
+        if self.budget_diagnostic is not None and not isinstance(self.budget_diagnostic, Mapping):
+            raise ValueError("budget_diagnostic must be an object or null")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -175,6 +178,7 @@ class DispatchRecord:
             "response_status": self.response_status,
             "http_status": self.http_status,
             "sanitized_error": self.sanitized_error,
+            "budget_diagnostic": self.budget_diagnostic,
             "prepared_at": self.prepared_at,
             "reservation_committed_at": self.reservation_committed_at,
             "dispatch_started_at": self.dispatch_started_at,
@@ -223,6 +227,7 @@ class DispatchRecord:
             response_status=(str(data["response_status"]) if data["response_status"] is not None else None),
             http_status=(int(data["http_status"]) if data["http_status"] is not None else None),
             sanitized_error=dict(sanitized_error) if sanitized_error is not None else None,
+            budget_diagnostic=(dict(data["budget_diagnostic"]) if isinstance(data.get("budget_diagnostic"), Mapping) else None),
             prepared_at=str(data["prepared_at"]),
             reservation_committed_at=(str(data["reservation_committed_at"]) if data["reservation_committed_at"] is not None else None),
             dispatch_started_at=(str(data["dispatch_started_at"]) if data["dispatch_started_at"] is not None else None),
@@ -667,6 +672,28 @@ class LunaSharedBudgetSession:
             retry_count=retry_count,
         )
 
+    def preview_initial_admission(
+        self,
+        *,
+        consumer_id: str,
+        input_tokens: int,
+        output_limit: int | None = None,
+        retry_count: int = 0,
+        experimental: bool = False,
+        non_official: bool = False,
+    ) -> dict[str, Any]:
+        """Preview the initial gate without promising full-run viability."""
+
+        return self.guard(
+            consumer_id=consumer_id,
+            experimental=experimental,
+            non_official=non_official,
+        ).preview_initial_admission(
+            input_tokens=input_tokens,
+            output_limit=output_limit,
+            retry_count=retry_count,
+        )
+
     def reconcile_abandoned_attempt(self, **kwargs: Any) -> dict[str, Any]:
         """Delegate explicit recovery to the shared economic authority."""
         guard = self.guard(consumer_id="reconciliation", experimental=True, non_official=True)
@@ -967,6 +994,27 @@ class LunaBudgetGuard:
         self.last_reserve = reserve
         self.last_decision = str(projection["decision"])
         if self.last_decision != "ALLOW":
+            dispatch_record.budget_diagnostic = {
+                "dispatch_id": dispatch_record.physical_request_id,
+                "logical_attempt_id": dispatch_record.logical_attempt_id,
+                "provider": dispatch_record.provider,
+                "model": dispatch_record.model,
+                "decision": self.last_decision,
+                "input_tokens_estimate": projection["input_tokens_estimate"],
+                "output_tokens_limit": projection["output_tokens_limit"],
+                "reservation_usd": projection["reservation_usd"],
+                "attempt_accumulated_usd": str(self.state.attempt_accumulated_usd),
+                "attempt_remaining_usd": projection["attempt_remaining_usd"],
+                "global_confirmed_usd": str(self.state.global_accumulated_usd),
+                "global_remaining_usd": projection["global_remaining_usd"],
+                "attempt_reserved_usd": str(self.state.attempt_reserved_usd),
+                "global_reserved_usd": str(self.state.global_reserved_usd),
+                "attempt_uncertain_consumed_usd": str(self.state.attempt_uncertain_consumed_usd),
+                "global_uncertain_consumed_usd": str(self.state.global_uncertain_consumed_usd),
+                "blocking_limit": projection["blocking_limit"],
+            }
+            self.state.dispatch_records[dispatch_record.physical_request_id] = dispatch_record.to_dict()
+            self._persist()
             raise self._abort("BUDGET_BLOCKED")
         request_id = self._request_id(retry_count)
         self.state.ledger[request_id] = {
@@ -1033,7 +1081,54 @@ class LunaBudgetGuard:
             "reservation_usd": str(reserve),
             "attempt_remaining_usd": str(attempt_remaining),
             "global_remaining_usd": str(global_remaining),
+            "blocking_limit": self._blocking_limit(reserve, attempt_remaining, global_remaining),
         }
+
+    def preview_initial_admission(
+        self,
+        *,
+        input_tokens: int,
+        output_limit: int | None = None,
+        retry_count: int = 0,
+    ) -> dict[str, Any]:
+        """Evaluate the read-only initial gate without promising full-run viability."""
+
+        self._validate_state(retry_count=retry_count)
+        global_remaining = self.state.global_remaining_usd if self.state is not None else self.hard_budget_usd
+        attempt_ceiling = self.state.attempt_ceiling_usd if self.state is not None else self.hard_budget_usd
+        if attempt_ceiling > global_remaining:
+            return {
+                "readiness_scope": "INITIAL_ADMISSION",
+                "decision": "BLOCK",
+                "reason": "ATTEMPT_CEILING_EXCEEDS_GLOBAL_REMAINING",
+                "blocking_limit": "GLOBAL_REMAINING",
+                "full_run_economic_viability": "NOT_GUARANTEED",
+                "attempt_ceiling_usd": str(attempt_ceiling),
+                "global_remaining_usd": str(global_remaining),
+            }
+        projection = self.preview_budget(
+            input_tokens=input_tokens,
+            output_limit=output_limit,
+            retry_count=retry_count,
+        )
+        return {
+            "readiness_scope": "INITIAL_ADMISSION",
+            "full_run_economic_viability": "NOT_GUARANTEED",
+            "attempt_ceiling_usd": str(attempt_ceiling),
+            **projection,
+        }
+
+    @staticmethod
+    def _blocking_limit(reserve: Decimal, attempt_remaining: Decimal, global_remaining: Decimal) -> str | None:
+        attempt_blocked = reserve > attempt_remaining
+        global_blocked = reserve > global_remaining
+        if attempt_blocked and global_blocked:
+            return "BOTH"
+        if attempt_blocked:
+            return "ATTEMPT_REMAINING"
+        if global_blocked:
+            return "GLOBAL_REMAINING"
+        return None
 
     def mark_dispatch_started(self, dispatch_record: DispatchRecord) -> None:
         """Persist DISPATCH_STARTED immediately before crossing the SDK boundary."""

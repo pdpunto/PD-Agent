@@ -235,6 +235,108 @@ def test_dual_ceiling_boundaries_are_checked_independently() -> None:
         global_block.before_request(payload, retry_count=0)
 
 
+def test_initial_admission_blocks_when_attempt_ceiling_exceeds_global_remaining() -> None:
+    state = LunaEconomicState(
+        execution_id="admission-config",
+        global_ceiling_usd=Decimal("0.20"),
+        attempt_ceiling_usd=Decimal("0.10"),
+        global_accumulated_usd=Decimal("0.15"),
+    )
+    guard = _guard(state=state, hard_budget_usd=Decimal("0.20"))
+
+    result = guard.preview_initial_admission(input_tokens=1, output_limit=1)
+
+    assert result["readiness_scope"] == "INITIAL_ADMISSION"
+    assert result["decision"] == "BLOCK"
+    assert result["reason"] == "ATTEMPT_CEILING_EXCEEDS_GLOBAL_REMAINING"
+    assert result["full_run_economic_viability"] == "NOT_GUARANTEED"
+
+
+def test_initial_admission_allows_only_the_initial_gate() -> None:
+    guard = _guard(
+        hard_budget_usd=Decimal("0.20"),
+        state=LunaEconomicState(
+            execution_id="admission-allow",
+            global_ceiling_usd=Decimal("0.20"),
+            attempt_ceiling_usd=Decimal("0.10"),
+        )
+    )
+
+    result = guard.preview_initial_admission(input_tokens=1, output_limit=1)
+
+    assert result["decision"] == "ALLOW"
+    assert result["full_run_economic_viability"] == "NOT_GUARANTEED"
+
+
+@pytest.mark.parametrize(
+    ("attempt_remaining", "global_remaining", "expected"),
+    [
+        ("0.001", "0.10", "ATTEMPT_REMAINING"),
+        ("0.10", "0.001", "GLOBAL_REMAINING"),
+        ("0.001", "0.001", "BOTH"),
+    ],
+)
+def test_preview_reports_the_blocking_limit(
+    attempt_remaining: str, global_remaining: str, expected: str
+) -> None:
+    reference = _guard()
+    payload = {"input": "x" * 10, "max_output_tokens": 4_096}
+    reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload), payload)
+    state = LunaEconomicState(
+        execution_id=f"blocking-{expected}",
+        global_ceiling_usd=Decimal(global_remaining) + reserve,
+        attempt_ceiling_usd=Decimal(attempt_remaining) + reserve,
+        global_accumulated_usd=reserve,
+        attempt_accumulated_usd=reserve,
+    )
+    guard = _guard(state=state, hard_budget_usd=state.global_ceiling_usd)
+
+    result = guard.preview_budget(
+        input_tokens=guard._conservative_input_tokens(payload),
+        output_limit=payload["max_output_tokens"],
+    )
+
+    assert result["decision"] == "BLOCK"
+    assert result["blocking_limit"] == expected
+
+
+def test_blocked_dispatch_persists_safe_diagnostic_and_reopens(tmp_path: Path) -> None:
+    payload = {"input": "x" * 10, "max_output_tokens": 4_096}
+    reference = _guard()
+    reserve = reference._worst_case_cost(reference._conservative_input_tokens(payload), payload)
+    state = LunaEconomicState(
+        execution_id="diagnostic",
+        global_ceiling_usd=reserve * 2,
+        attempt_ceiling_usd=reserve - Decimal("0.0000001"),
+    )
+    path = tmp_path / "economic.json"
+    store = LunaEconomicStateStore(state, path=path)
+    guard = _guard(state=state, state_store=store, hard_budget_usd=state.global_ceiling_usd)
+    before = state.to_dict()
+    record = guard.prepare_dispatch(payload, provider="openai", model="gpt-test", retry_count=0)
+
+    with pytest.raises(ProviderError, match="BUDGET_BLOCKED"):
+        guard.before_request(payload, retry_count=0, dispatch_record=record)
+    guard.abandon_pre_dispatch(record, reason="economic reservation was not committed")
+
+    persisted = LunaEconomicStateStore.load(path).state
+    saved = persisted.dispatch_records[record.physical_request_id]
+    diagnostic = saved["budget_diagnostic"]
+    assert saved["dispatch_state"] == "REQUEST_PREPARED"
+    assert saved["functional_state"] == "ABANDONED"
+    assert diagnostic["dispatch_id"] == record.physical_request_id
+    assert diagnostic["logical_attempt_id"] == record.logical_attempt_id
+    assert diagnostic["provider"] == "openai"
+    assert diagnostic["model"] == "gpt-test"
+    assert diagnostic["blocking_limit"] == "ATTEMPT_REMAINING"
+    assert diagnostic["reservation_usd"] == str(reserve)
+    assert diagnostic["attempt_remaining_usd"] == str(reserve - Decimal("0.0000001"))
+    assert "input" not in diagnostic
+    assert persisted.physical_request_count == 0
+    assert persisted.global_reserved_usd == Decimal("0")
+    assert persisted.to_dict()["global_accumulated_usd"] == before["global_accumulated_usd"]
+
+
 def test_global_ceiling_blocks_when_productive_request_exceeds_it() -> None:
     guard = LunaBudgetGuard(
         hard_budget_usd=Decimal("0.15"),
