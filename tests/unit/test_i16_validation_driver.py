@@ -223,7 +223,15 @@ def test_i16_prebuild_rejects_incomplete_lang_and_accepts_complete_lang(tmp_path
     lang.parent.mkdir(parents=True)
     recipe.parent.mkdir(parents=True)
     lang.write_text('{"block.examplemod.server_core": "Server Core"}\n', encoding="utf-8")
-    recipe.write_text('{"result": {"id": "examplemod:server_core", "count": 1}}\n', encoding="utf-8")
+    recipe.write_text(
+        json.dumps({
+            "type": "minecraft:crafting_shaped",
+            "pattern": ["III", "ICI", "III"],
+            "key": {"I": {"item": "minecraft:iron_ingot"}, "C": {"item": "minecraft:crafting_table"}},
+            "result": {"id": "examplemod:server_core", "count": 1},
+        }) + "\n",
+        encoding="utf-8",
+    )
 
     spec = _f6_t3()["acceptance"]["spec"]
     validator = PreBuildWorkspaceValidator(resource_roots=(resource_root,))

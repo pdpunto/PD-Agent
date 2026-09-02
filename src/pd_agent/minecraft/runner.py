@@ -637,6 +637,11 @@ class MinecraftTestRunner:
             target=preflight.target,
             timeout_seconds=spec.timeout_seconds,
             persistence_phase=persistence_phase.value if persistence_phase is not None else None,
+            observation_id=(
+                spec.observation_requests[0].observation_id
+                if len(spec.observation_requests) == 1
+                else None
+            ),
         )
         runtime_evidence = MinecraftRuntimeEvidence(
             harness_result_path=runtime_evidence.harness_result_path,
@@ -1178,6 +1183,7 @@ class MinecraftTestRunner:
         target: MinecraftTargetMetadata,
         timeout_seconds: int,
         persistence_phase: str | None = None,
+        observation_id: str | None = None,
     ) -> tuple[MinecraftTestStatus, str, dict[str, Any]]:
         metadata: dict[str, Any] = {
             "launch_mode": launch_mode,
@@ -1229,6 +1235,10 @@ class MinecraftTestRunner:
         functional_test_result = str(harness_result.get("functional_test_result", "")).upper()
         shutdown_requested = bool(harness_result.get("shutdown_requested"))
         reason = str(harness_result.get("reason", "")).strip() or "runtime completed"
+        contract_observation_id = observation_id or str(harness_result.get("test_id", ""))
+        if observation_id is not None:
+            metadata["harness_test_id"] = harness_result.get("test_id")
+            metadata["contract_observation_id"] = observation_id
 
         metadata.update(
             {
@@ -1250,7 +1260,7 @@ class MinecraftTestRunner:
                 observed_kind = harness_result.get("registry_kind")
                 observed_identifier = harness_result.get("observed_identifier")
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
                     status=(
                         MinecraftObservationStatus.PASS
@@ -1280,7 +1290,7 @@ class MinecraftTestRunner:
                 metadata["observation_result"] = observation.to_dict()
             elif str(result_type).upper() == MinecraftObservationType.ITEM_COMPONENT_STATE.value:
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=MinecraftObservationType.ITEM_COMPONENT_STATE,
                     status=(
                         MinecraftObservationStatus.PASS
@@ -1324,7 +1334,7 @@ class MinecraftTestRunner:
             }:
                 observation_type = MinecraftObservationType(str(result_type).upper())
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=observation_type,
                     status=(
                         MinecraftObservationStatus.PASS
@@ -1357,7 +1367,7 @@ class MinecraftTestRunner:
                 metadata["observation_result"] = observation.to_dict()
             elif str(result_type).upper() == MinecraftObservationType.TAG_MEMBERSHIP.value:
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=MinecraftObservationType.TAG_MEMBERSHIP,
                     status=(
                         MinecraftObservationStatus.PASS
@@ -1383,7 +1393,7 @@ class MinecraftTestRunner:
                 metadata["observation_result"] = observation.to_dict()
             elif str(result_type).upper() == MinecraftObservationType.RECIPE_MATCH.value:
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=MinecraftObservationType.RECIPE_MATCH,
                     status=(
                         MinecraftObservationStatus.PASS
@@ -1409,7 +1419,7 @@ class MinecraftTestRunner:
                 metadata["observation_result"] = observation.to_dict()
             elif str(result_type).upper() == MinecraftObservationType.LOOT_RESULT.value:
                 observation = ObservationResult(
-                    observation_id=str(harness_result.get("test_id", "")),
+                    observation_id=contract_observation_id,
                     observation_type=MinecraftObservationType.LOOT_RESULT,
                     status=(
                         MinecraftObservationStatus.PASS

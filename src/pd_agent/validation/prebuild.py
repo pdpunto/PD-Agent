@@ -54,6 +54,34 @@ def _contract_mapping(contract: Any) -> Mapping[str, Any]:
     return contract
 
 
+def _recipe_violation(path: str, parsed: Any) -> ValidationViolation | None:
+    """Reject JSON recipes that cannot be decoded by the recipe manager."""
+    if "/recipe/" not in f"/{path}" or not isinstance(parsed, Mapping):
+        return None
+    recipe_type = parsed.get("type")
+    result = parsed.get("result")
+    invalid = not isinstance(recipe_type, str) or not recipe_type.strip() or not isinstance(result, Mapping)
+    if not invalid and isinstance(result, Mapping):
+        result_id = result.get("id", result.get("item"))
+        invalid = not isinstance(result_id, str) or not result_id.strip()
+    if not invalid and recipe_type.endswith("crafting_shaped"):
+        invalid = not isinstance(parsed.get("pattern"), list) or not isinstance(parsed.get("key"), Mapping)
+    if not invalid and recipe_type.endswith("crafting_shapeless"):
+        invalid = not isinstance(parsed.get("ingredients"), list)
+    if not invalid:
+        return None
+    return ValidationViolation(
+        code="RECIPE_SCHEMA_INVALID",
+        requirement=path,
+        observed={"category": "invalid_recipe_schema", "type": recipe_type},
+        expected="a typed recipe with a result and valid shaped/shapeless fields",
+        actual=parsed,
+        message=f"required recipe is not compatible with the supported recipe schema: {path}",
+        phase="PRE_BUILD",
+        evidence_refs=(f"workspace/{path}",),
+    )
+
+
 class PreBuildWorkspaceValidator:
     """Validate only required files and JSON pointer requirements."""
 
@@ -68,7 +96,15 @@ class PreBuildWorkspaceValidator:
 
     def validate(self, project_root: Path, contract: Any) -> ValidationResult:
         data = _contract_mapping(contract)
-        raw_resources = data.get("required_resources", ())
+        raw_resources = data.get("required_resources")
+        if raw_resources is None:
+            raw_resources = tuple(
+                {"path": path, "resource_type": "json"}
+                for validation in data.get("validation_requirements", ())
+                if isinstance(validation, Mapping)
+                and validation.get("kind") == "artifact"
+                for path in validation.get("spec", {}).get("required_paths", ())
+            )
         if not isinstance(raw_resources, (list, tuple)):
             raise PreBuildValidationError("required_resources must be a sequence")
 
@@ -81,7 +117,9 @@ class PreBuildWorkspaceValidator:
             resource_type = str(raw_resource.get("resource_type", raw_resource.get("type", "json"))).strip().casefold()
             if resource_type not in {"json", "text"}:
                 raise PreBuildValidationError(f"unsupported resource type: {resource_type}")
-            if self.resource_roots:
+            if path.startswith("src/main/resources/"):
+                candidate = (root / Path(path)).resolve(strict=False)
+            elif self.resource_roots:
                 try:
                     physical_path = resolve_logical_resource_path(
                         ProjectSnapshot(
@@ -126,6 +164,9 @@ class PreBuildWorkspaceValidator:
                     )
                 )
                 continue
+            recipe_violation = _recipe_violation(path, parsed)
+            if recipe_violation is not None:
+                violations.append(recipe_violation)
             assertions = raw_resource.get("assertions", ())
             if not isinstance(assertions, (list, tuple)):
                 raise PreBuildValidationError(f"{path}.assertions must be a sequence")

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from pd_agent.benchmark import BenchmarkAcceptanceSpec, build_public_validation_contract
-from pd_agent.core import AgentResponse, ToolCall, ValidationStatus
+from pd_agent.core import AgentResponse, FabricRequirement, FabricTaskContract, FabricValidationRequirement, ToolCall, ValidationStatus
 from pd_agent.validation import PreBuildValidationError, PreBuildWorkspaceValidator
 from tests.unit.test_l9_runtime import ScriptedProvider, _controller, _runtime_project
 
@@ -87,7 +87,12 @@ def test_t2_and_t3_contracts_pass_prebuild_from_fabric_resource_root(tmp_path: P
         encoding="utf-8",
     )
     (resource_root / "data/examplemod/recipe/server_core.json").write_text(
-        json.dumps({"result": {"id": "examplemod:server_core", "count": 1}}),
+        json.dumps({
+            "type": "minecraft:crafting_shaped",
+            "pattern": ["III", "ICI", "III"],
+            "key": {"I": {"item": "minecraft:iron_ingot"}, "C": {"item": "minecraft:crafting_table"}},
+            "result": {"id": "examplemod:server_core", "count": 1},
+        }),
         encoding="utf-8",
     )
     validator = PreBuildWorkspaceValidator(resource_roots=(resource_root,))
@@ -96,6 +101,46 @@ def test_t2_and_t3_contracts_pass_prebuild_from_fabric_resource_root(tmp_path: P
         contract = build_public_validation_contract(BenchmarkAcceptanceSpec.from_dict(task["acceptance"]))
         result = validator.validate(root, contract)
         assert result.status is ValidationStatus.PASS
+
+
+def test_prebuild_rejects_structurally_invalid_recipe(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    resource_root = root / "src/main/resources/data/examplemod/recipe"
+    resource_root.mkdir(parents=True)
+    recipe = resource_root / "server_core.json"
+    recipe.write_text(json.dumps({"result": {"id": "examplemod:server_core", "count": 1}}), encoding="utf-8")
+
+    result = PreBuildWorkspaceValidator(resource_roots=(root / "src/main/resources",)).validate(
+        root,
+        _contract(_json_resource("data/examplemod/recipe/server_core.json")),
+    )
+
+    assert result.status is ValidationStatus.REPAIRABLE_FAIL
+    assert [item.code for item in result.violations] == ["RECIPE_SCHEMA_INVALID"]
+
+
+def test_product_contract_cannot_build_with_invalid_recipe(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    recipe = root / "src/main/resources/data/examplemod/recipe/server_core.json"
+    recipe.parent.mkdir(parents=True)
+    recipe.write_text(json.dumps({"result": {"id": "examplemod:server_core"}}), encoding="utf-8")
+    contract = FabricTaskContract(
+        task_id="server-core",
+        revision="product-1",
+        goal="add Server Core",
+        requirements=(FabricRequirement(requirement_id="artifact", description="artifact"),),
+        validation_requirements=(FabricValidationRequirement(
+            validation_requirement_id="validate-artifact",
+            requirement_ids=("artifact",),
+            kind="artifact",
+            spec={"required_paths": ("src/main/resources/data/examplemod/recipe/server_core.json",)},
+        ),),
+    )
+
+    result = PreBuildWorkspaceValidator().validate(root, contract)
+
+    assert result.status is ValidationStatus.REPAIRABLE_FAIL
+    assert result.violations[0].code == "RECIPE_SCHEMA_INVALID"
 
 
 def test_repair_feedback_allows_write_then_build_and_rechecks(tmp_path: Path) -> None:

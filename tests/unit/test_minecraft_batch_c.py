@@ -640,6 +640,34 @@ def test_runner_maps_registry_harness_result_to_structured_observation(tmp_path:
     assert metadata["observation_result"]["actual"]["present"] is True
 
 
+def test_runner_preserves_contract_observation_id_over_harness_test_id(tmp_path: Path) -> None:
+    runner = _runner(tmp_path)
+    status, _reason, metadata = runner._classify_runtime(
+        process={"timed_out": False, "exit_code": 0},
+        harness_result={
+            "test_id": "harness-technical-id",
+            "observation_type": "REGISTRY_ENTRY_PRESENT",
+            "registry_kind": "block",
+            "observed_identifier": "examplemod:server_core",
+            "target_loaded": True,
+            "target_origin_resolved": True,
+            "target_sha_match": True,
+            "server_started": True,
+            "functional_test_result": "PASS",
+            "shutdown_requested": True,
+        },
+        latest_log="",
+        launch_mode="pass",
+        target=type("Target", (), {"path": Path("target.jar"), "sha256": "a" * 64, "mod_id": "examplemod"})(),
+        timeout_seconds=30,
+        observation_id="server-core-registry",
+    )
+
+    assert status is MinecraftTestStatus.PASS
+    assert metadata["observation_result"]["observation_id"] == "server-core-registry"
+    assert metadata["harness_test_id"] == "harness-technical-id"
+
+
 def test_runner_rejects_missing_or_ambiguous_main_entrypoint(tmp_path: Path) -> None:
     runner = _runner(tmp_path)
     _make_manifest_jar(

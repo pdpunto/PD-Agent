@@ -322,6 +322,8 @@ describe("frontend route and state foundations", () => {
     expect(
       await screen.findByText("No he podido terminar este mod"),
     ).toBeInTheDocument();
+    expect(screen.getByText("No he podido completar y verificar el mod.")).toBeInTheDocument();
+    expect(screen.queryByText("build_failed")).not.toBeInTheDocument();
     expect(screen.getByText(/Detenido/)).toBeInTheDocument();
   });
   it("renders a blocked execution safely", async () => {
@@ -349,7 +351,8 @@ describe("frontend route and state foundations", () => {
       }),
     } as Response);
     render(<App />);
-    expect(await screen.findByText("limit")).toBeInTheDocument();
+    expect(await screen.findByText("No he podido completar y verificar el mod.")).toBeInTheDocument();
+    expect(screen.queryByText("limit")).not.toBeInTheDocument();
   });
   it("renders interrupted safely", async () => {
     window.history.replaceState({}, "", "/executions/e");
@@ -364,7 +367,8 @@ describe("frontend route and state foundations", () => {
       }),
     } as Response);
     render(<App />);
-    expect(await screen.findByText("interrupted")).toBeInTheDocument();
+    expect(await screen.findByText("No he podido completar y verificar el mod.")).toBeInTheDocument();
+    expect(screen.queryByText("interrupted")).not.toBeInTheDocument();
   });
   it.each(["BLOCKED", "LIMIT_REACHED", "INTERRUPTED"])(
     "does not show Working for terminal status %s",

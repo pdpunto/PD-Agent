@@ -646,7 +646,7 @@ function FailureState({
       <span>
         {status === "BLOCKED"
           ? "La ejecución quedó bloqueada."
-          : reason || "La ejecución terminó sin éxito."}
+          : "No he podido completar y verificar el mod."}
       </span>
     </div>
   );
