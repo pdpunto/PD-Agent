@@ -140,6 +140,24 @@ describe("frontend route and state foundations", () => {
     expect(await screen.findByText("PROJECT")).toBeInTheDocument();
     expect(screen.getByText("TASK COMPOSER")).toBeInTheDocument();
   });
+  it("opens a historical execution while preserving its project context", async () => {
+    window.history.replaceState({}, "", "/projects/project-1");
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => project } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ...history,
+          tasks: [{ task_id: "t", project_id: "project-1", request: "Server Core", created_at: "2026-01-01", execution_ids: ["e"] }],
+          executions: [{ ...running, task_id: "t", status: "SUCCEEDED", terminal: true }],
+        }),
+      } as Response);
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Ver ejecucion/ }));
+    expect(window.location.pathname).toBe("/executions/e");
+    expect(window.location.search).toBe("?project=project-1");
+  });
   it("renders an execution route", () => {
     window.history.replaceState({}, "", "/executions/execution-1");
     render(<App />);
@@ -507,6 +525,7 @@ describe("frontend route and state foundations", () => {
     expect(
       screen.queryByRole("link", { name: /Descargar JAR/i }),
     ).not.toBeInTheDocument();
+    expect(screen.getByText(/entrega aparecer/)).toBeInTheDocument();
   });
   it("prioritizes terminal snapshots without a sequence over active progress", async () => {
     window.history.replaceState({}, "", "/executions/e");
@@ -543,6 +562,7 @@ describe("frontend route and state foundations", () => {
     const reveal = vi.spyOn(api, "reveal").mockResolvedValue({ delivery_id: "delivery-1", revealed: true, filename: "mod.jar" });
     render(<App />);
     expect(await screen.findByRole("link", { name: "Descargar JAR" })).toHaveAttribute("href", "/api/v1/deliveries/delivery-1/artifact");
+    expect(screen.queryByText(/entrega aparecer/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Abrir carpeta" }));
     await waitFor(() => expect(reveal).toHaveBeenCalledWith("delivery-1"));
     expect(await screen.findByRole("status")).toHaveTextContent("Carpeta abierta.");

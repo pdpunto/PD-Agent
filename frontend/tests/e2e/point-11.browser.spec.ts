@@ -118,6 +118,8 @@ test.describe("Point 11 deterministic UX acceptance", () => {
     await page.goto(`/projects/${projectId}`);
     await expect(page.getByText("Completado · Mod verificado")).toBeVisible();
     await expect(page.getByText(/Delivery \/ JAR/)).toBeVisible();
+    await page.getByRole("button", { name: /Ver ejecuci/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/executions/${executionId}\\?project=${projectId}$`));
 
     await page.route(`**/api/v1/executions/${executionId}/evidence/technical`, async (route) => {
       await route.fulfill({ json: {

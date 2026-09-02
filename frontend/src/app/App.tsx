@@ -437,9 +437,17 @@ function ProjectPage({
                   {history.data?.executions
                     .filter((execution) => execution.task_id === task.task_id)
                     .map((execution) => (
-                      <span className="history-meta" key={execution.execution_id}>
+                      <div key={execution.execution_id}>
+                        <span className="history-meta">
                         {statusLabel(execution.status)} · {new Date(task.created_at).toLocaleString()}
-                      </span>
+                        </span>
+                        <button
+                          className="history-execution"
+                          onClick={() => navigate(`/executions/${execution.execution_id}?project=${encodeURIComponent(projectId)}`)}
+                        >
+                          Ver ejecucion
+                        </button>
+                      </div>
                     ))}
                   {history.data?.deliveries
                     .filter((delivery) => delivery.task_id === task.task_id)
@@ -630,7 +638,9 @@ function SuccessState({ executionId }: { executionId: string }) {
       <strong>¡Todo listo!</strong>
       <span>PD Agent ha creado y verificado tu mod.</span>
       {delivery && <div className="delivery-actions"><a className="primary-action" href={api.artifactUrl(delivery.delivery_id)}>Descargar JAR</a><button className="quiet-action" onClick={reveal} disabled={revealing}>{revealing ? "Abriendo..." : "Abrir carpeta"}</button>{message && <small role="status">{message}</small>}</div>}
-      <small>La entrega aparecerá cuando el backend la confirme.</small>
+      {!delivery && (
+        <small>La entrega aparecerá cuando el backend la confirme.</small>
+      )}
     </div>
   );
 }
