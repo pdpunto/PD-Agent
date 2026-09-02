@@ -248,7 +248,7 @@ Not every imaginable custom behavior should require a predefined capability type
 4. [x] Definir estrategia de assets: texturas, modelos, sonidos y generación visual
 5. [x] Definir estrategia multi-versión Minecraft/Fabric
 6. [x] Definir evolución necesaria del Minecraft Brain
-7. [ ] Definir evolución de validación, Test Harness y CompletionGate
+7. [x] Definir evolución de validación, Test Harness y CompletionGate
 8. [ ] Evaluar dónde Multi-Agent aporta valor real
 9. [ ] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
 10. [ ] Definir requisitos Product/UI restantes para Alpha
@@ -338,6 +338,100 @@ No Asset Agent is created by this decision.
 No independent Brain DESIGN/RFC/IMP is created yet. Roadmap completion must
 first establish the grouping and dependencies between Brain evolution,
 Capability Planner, Multi-Version, Asset Pipeline and Validation/Harness.
+
+## 7. Validation, Test Harness and CompletionGate evolution
+
+Status: `ACCEPTED`
+
+R73 evidence:
+
+- `PD_AGENT_R73_ALPHA_VALIDATION_FOUNDATION_PARTIAL`
+- `PD_AGENT_R73_V_EVIDENCE_CONFIRMED_WITH_CORRECTIONS`
+
+Offline validation evidence at baseline `1cc9d4add3644072820945b9b110639886d9b536`:
+
+`295 passed, 1 warning, 0 failed`
+
+No central validation component should be replaced. Alpha must reuse and
+extend `FabricTaskContract`, `TaskProgressLedger`, validation results and
+violations, evidence/currentness identities, failure facts, Semantic Repair,
+ArtifactValidator, the Minecraft Test Harness and `CompletionGate`.
+
+`CompletionGate` remains the single global completion authority. It must stay
+data-driven, requirement-aware, failure-aware, currentness-aware,
+artifact-aware and runtime-aware. No parallel completion authority is added.
+
+### Composed validation
+
+The contract and gate already support multiple requirements. The confirmed
+productive gap is `PRODUCTIVE_RUNTIME_SINGLE_VALIDATION_SELECTION`: the
+current Minecraft runtime selects only the first compatible runtime validation
+requirement. Alpha must extend this to N independently executed, evidenced and
+reconciled validation requirements.
+
+The canonical validation shape is:
+
+`Capability -> Requirement -> ValidationExpectation(s) -> parameterized validator/probe -> normalized Evidence -> Ledger -> CompletionGate`
+
+Validators and probes must remain parameterized and data-driven rather than
+being created for individual mods. The Capability Planner owns what must be
+demonstrated; validators and the Harness produce the evidence.
+
+### Artifact and Harness evolution
+
+`ArtifactValidator` keeps its current JAR, ZIP, manifest, metadata, identity,
+version, candidate and stale/currentness responsibilities and must gain
+structural expectations for required entries, resources, classes, assets,
+recipes, tags, loot, models, blockstates and references without hardcoding
+specific mod content.
+
+The existing Harness is extended rather than duplicated. Its observation
+foundation is:
+
+- `LEGACY_BLOCK_STATE`;
+- `REGISTRY_ENTRY_PRESENT`;
+- `ITEM_COMPONENT_STATE`;
+- `BLOCK_ENTITY_STATE`;
+- `INVENTORY_STATE`;
+- `TAG_MEMBERSHIP`;
+- `RECIPE_MATCH`;
+- `LOOT_RESULT`.
+
+`REGISTRY_ENTRY_PRESENT` demonstrates the parameterized pattern; several other
+observations remain fixture-specific and must become productive only as Alpha
+capabilities require them. New coverage includes equipment, entities,
+interactions, effects, commands, drops, spawning and deterministic worldgen.
+
+### Multi-version, assets and repair
+
+Requirements and normalized observations are shared across Alpha targets
+`1.21.11`, `26.1` and `26.2`, while implementations and probes may vary by
+environment. A representable version is not supported until its compatible
+knowledge, bootstrap, Harness and probes are validated end-to-end.
+
+Asset Pipeline owns creation and transformation. Structural artifact
+validation owns format, dimensions, alpha, paths, references and packaging.
+Screenshot/render validation is not a general Alpha blocking gate.
+
+New probes must emit the existing normalized validation evidence so they can
+reuse Semantic Repair, rebuild, revalidation and reconciliation. No parallel
+evidence system is introduced.
+
+### Ownership and blockers
+
+- Capability Planner: capabilities, requirements and expectations.
+- ArtifactValidator: structural artifact evidence.
+- Build/Debug: build evidence and build repair.
+- Test Harness: Minecraft runtime evidence.
+- Asset Pipeline: asset operations and asset validation.
+- Brain: knowledge and diagnosis/repair.
+- Runtime/Ledger: execution and evidence reconciliation.
+- CompletionGate: final completion decision.
+
+Current Alpha blockers are general expectation generation, single runtime
+validation selection, fixture-specific probes, entity/spawn/attribute/
+interaction/worldgen coverage, real `26.1`/`26.2` Harness support and broader
+asset structural expectations. Visual screenshots are not an Alpha blocker.
 
 ## 7. Assets strategy
 
