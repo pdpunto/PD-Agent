@@ -326,6 +326,30 @@ describe("frontend route and state foundations", () => {
     expect(screen.queryByText("build_failed")).not.toBeInTheDocument();
     expect(screen.getByText(/Detenido/)).toBeInTheDocument();
   });
+  it("keeps early worker diagnostics out of the main failure state", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...running,
+        status: "FAILED",
+        terminal: true,
+        reason: "worker_exception",
+        failure_diagnostics: {
+          exception_type: "RuntimeError",
+          safe_message: "failure token=[REDACTED]",
+          failure_phase: "UNKNOWN",
+        },
+      }),
+    } as Response);
+    render(<App />);
+    expect(await screen.findByText("No he podido terminar este mod")).toBeInTheDocument();
+    expect(screen.getByText("No he podido completar y verificar el mod.")).toBeInTheDocument();
+    expect(screen.queryByText(/RuntimeError|failure token|UNKNOWN/)).not.toBeInTheDocument();
+    const message = screen.getByText("No he podido completar y verificar el mod.");
+    expect(message).toHaveClass("terminal-message");
+  });
   it("renders a blocked execution safely", async () => {
     window.history.replaceState({}, "", "/executions/e");
     vi.mocked(fetch).mockResolvedValue({

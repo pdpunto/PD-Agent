@@ -184,7 +184,9 @@ def test_early_worker_failure_is_terminal_and_has_evidence_without_run_state(tmp
             assert human.status_code == technical.status_code == 200
             assert human.json()["status"] == technical.json()["status"] == "FAILED"
             assert technical.json()["runtime_state"] is None
-            assert "traceback" not in technical.text.lower()
+            assert "traceback" in technical.text.lower()
+            assert "traceback" not in human.text.lower()
+            assert "unsupported task" in technical.text
     finally:
         execution_service.shutdown()
 

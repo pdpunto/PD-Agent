@@ -154,6 +154,7 @@ class ExecutionRecord:
     terminal_recorded_at: datetime | None = None
     status: str = "RUNNING"
     status_reason: str | None = None
+    failure_diagnostics: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         execution_id = _uuid4_text(self.execution_id or _new_id(), "execution_id")
@@ -177,6 +178,7 @@ class ExecutionRecord:
             "terminal_recorded_at": self.terminal_recorded_at.isoformat() if self.terminal_recorded_at else None,
             "status": self.status,
             "status_reason": self.status_reason,
+            "failure_diagnostics": dict(self.failure_diagnostics) if self.failure_diagnostics is not None else None,
         }
 
     @classmethod
@@ -189,6 +191,11 @@ class ExecutionRecord:
             terminal_recorded_at=data.get("terminal_recorded_at"),
             status=data.get("status", "RUNNING"),
             status_reason=data.get("status_reason"),
+            failure_diagnostics=(
+                dict(data["failure_diagnostics"])
+                if data.get("failure_diagnostics") is not None
+                else None
+            ),
         )
 
     def canonical_json(self) -> str:

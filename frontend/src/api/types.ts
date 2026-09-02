@@ -48,6 +48,7 @@ export type TechnicalEvidence = {
   failure_classification?: string | null;
   artifact_sha256?: string | null;
   evidence_refs: string[];
+  failure_diagnostics?: Record<string, string> | null;
 };
 export type Delivery = {
   delivery_id: string;

@@ -643,7 +643,7 @@ function FailureState({
   return (
     <div className="terminal-state failure-state">
       <strong>No he podido terminar este mod</strong>
-      <span>
+      <span className="terminal-message">
         {status === "BLOCKED"
           ? "La ejecución quedó bloqueada."
           : "No he podido completar y verificar el mod."}
@@ -744,6 +744,15 @@ function EvidenceDialog({
                 {technical?.run_id && <p>Run ID: {technical.run_id}</p>}
                 {technical?.execution_id && <p>Execution ID: {technical.execution_id}</p>}
                 {technical?.started_at && <p>Started: {technical.started_at}</p>}
+                {technical?.failure_diagnostics?.exception_type && (
+                  <p>Exception: {technical.failure_diagnostics.exception_type}</p>
+                )}
+                {technical?.failure_diagnostics?.safe_message && (
+                  <p>Message: {technical.failure_diagnostics.safe_message}</p>
+                )}
+                {technical?.failure_diagnostics?.failure_phase && (
+                  <p>Phase: {technical.failure_diagnostics.failure_phase}</p>
+                )}
                 {technical?.failure_classification && (
                   <p>Classification: {technical.failure_classification}</p>
                 )}

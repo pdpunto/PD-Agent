@@ -76,6 +76,7 @@ class TechnicalEvidenceDTO(_DTO):
     failure_classification: str | None = None
     artifact_sha256: str | None = None
     evidence_refs: tuple[str, ...] = ()
+    failure_diagnostics: dict[str, Any] | None = None
 
 
 class DeliveryDTO(_DTO):

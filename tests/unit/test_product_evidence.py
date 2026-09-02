@@ -200,4 +200,5 @@ def test_dto_shapes_are_explicit_allowlists() -> None:
     assert set(technical.to_dict()) == {
         "execution_id", "run_id", "status", "runtime_state", "started_at", "changed_files",
         "build_attempts", "validation_summaries", "runtime_observations", "failure_classification", "artifact_sha256", "evidence_refs",
+        "failure_diagnostics",
     }

@@ -72,6 +72,7 @@ class TechnicalEvidenceDTO:
     failure_classification: str | None = None
     artifact_sha256: str | None = None
     evidence_refs: tuple[str, ...] = ()
+    failure_diagnostics: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +88,7 @@ class TechnicalEvidenceDTO:
             "failure_classification": self.failure_classification,
             "artifact_sha256": self.artifact_sha256,
             "evidence_refs": list(self.evidence_refs),
+            "failure_diagnostics": dict(self.failure_diagnostics) if self.failure_diagnostics is not None else None,
         }
 
 
@@ -138,7 +140,14 @@ class EvidenceService:
         milestone, activity = self._progress(state, events, product.status, report)
         latest_sequence = max((event.sequence or 0 for event in events), default=0) or None
         human = self._human(execution_id, state, report, product.status, milestone, activity)
-        technical = self._technical(execution_id, state, report, product.status, events)
+        technical = self._technical(
+            execution_id,
+            state,
+            report,
+            product.status,
+            events,
+            product.failure_diagnostics,
+        )
         return ProductExecutionSnapshot(
             execution_id=execution_id,
             run_id=state.run_id,
@@ -169,6 +178,7 @@ class EvidenceService:
             status=product.status.value,
             started_at=product.execution.created_at.isoformat(),
             failure_classification=reason,
+            failure_diagnostics=product.failure_diagnostics,
         )
         return ProductExecutionSnapshot(
             execution_id=execution_id,
@@ -260,12 +270,34 @@ class EvidenceService:
         completion = report.completion_status if report and report.completion_status else ("Completada" if status is ProductExecutionStatus.SUCCEEDED else None)
         return HumanEvidenceDTO(execution_id, status.value, milestone, activity, _safe_changed_files(state.changed_files), build_summary, repair_summary, runtime, completion, artifact)
 
-    def _technical(self, execution_id: str, state: RunState, report: FinalReport | None, status: ProductExecutionStatus, events: tuple[RunEvent, ...]) -> TechnicalEvidenceDTO:
+    def _technical(
+        self,
+        execution_id: str,
+        state: RunState,
+        report: FinalReport | None,
+        status: ProductExecutionStatus,
+        events: tuple[RunEvent, ...],
+        failure_diagnostics: Mapping[str, Any] | None = None,
+    ) -> TechnicalEvidenceDTO:
         builds = tuple({"attempt": result.attempt, "exit_code": result.exit_code, "success": result.success} for result in state.build_results)
         validations = tuple({"stage": result.stage.value, "status": result.status.value} for result in state.validation_results)
         observations = tuple({"event_type": event.event_type.value, "sequence": event.sequence} for event in events if event.event_type in {RunEventType.RUNTIME_VALIDATION_RECORDED, RunEventType.VALIDATION_COMPLETED})
         artifact_sha = state.artifact_result.metadata.get("sha256") if state.artifact_result is not None else None
-        return TechnicalEvidenceDTO(execution_id, state.run_id, status.value, state.state.value, state.started_at.isoformat(), _safe_changed_files(state.changed_files), builds, validations, observations, state.provider_error_kind, artifact_sha, report.evidence_refs if report else ())
+        return TechnicalEvidenceDTO(
+            execution_id,
+            state.run_id,
+            status.value,
+            state.state.value,
+            state.started_at.isoformat(),
+            _safe_changed_files(state.changed_files),
+            builds,
+            validations,
+            observations,
+            state.provider_error_kind,
+            artifact_sha,
+            report.evidence_refs if report else (),
+            failure_diagnostics,
+        )
 
     @staticmethod
     def _completion_is_authoritative(state: RunState, report: FinalReport | None) -> bool:

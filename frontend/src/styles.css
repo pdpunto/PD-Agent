@@ -27,4 +27,5 @@ button:disabled, button[aria-disabled="true"] { cursor: not-allowed; opacity: .6
 .modal { max-height: calc(100vh - 40px); overflow-y: auto; }
 .delivery-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
 .delivery-actions a { text-decoration: none; }
+.terminal-message { display: block; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

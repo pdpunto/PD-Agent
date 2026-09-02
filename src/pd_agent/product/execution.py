@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
+import re
+import traceback
 from threading import RLock
 from typing import Any
 
@@ -51,6 +53,7 @@ class ExecutionSnapshot:
     current_activity: str | None = None
     terminal: bool = False
     latest_sequence: int | None = None
+    failure_diagnostics: dict[str, Any] | None = None
 
     @property
     def execution_id(self) -> str:
@@ -226,7 +229,9 @@ class ExecutionService:
                 except BaseException as exc:
                     status = ProductExecutionStatus.FAILED
                     reason = self._worker_failure_reason(exc)
+                    failure_diagnostics = self._worker_failure_diagnostics(exc, execution)
                 else:
+                    failure_diagnostics = None
                     if self.product_runner is not None:
                         status, reason = self._reconcile_product_result(result)
                     else:
@@ -240,6 +245,7 @@ class ExecutionService:
                     terminal_recorded_at=datetime.now(timezone.utc),
                     status=status.value,
                     status_reason=reason,
+                    failure_diagnostics=failure_diagnostics,
                 )
                 self.catalog.update_execution(terminal)
                 if status is ProductExecutionStatus.SUCCEEDED and self.delivery_service is not None:
@@ -249,7 +255,13 @@ class ExecutionService:
                         # Runtime success remains authoritative; DeliveryService
                         # exposes the unavailable delivery through its own errors.
                         pass
-                self._snapshots[execution_id] = ExecutionSnapshot(terminal, status, reason, terminal=True)
+                self._snapshots[execution_id] = ExecutionSnapshot(
+                    terminal,
+                    status,
+                    reason,
+                    terminal=True,
+                    failure_diagnostics=failure_diagnostics,
+                )
             except BaseException:
                 # A persistence failure must not strand the global capacity slot.
                 if execution_id not in self._snapshots:
@@ -303,6 +315,33 @@ class ExecutionService:
         if isinstance(error, ProductFabricTaskContractError):
             return "task_contract_resolution_failed"
         return "worker_exception"
+
+    def _worker_failure_diagnostics(self, error: BaseException, execution: ExecutionRecord) -> dict[str, Any]:
+        """Persist only safe, allowlisted details for an early worker failure."""
+        from .fabric import ProductFabricTaskContractError
+
+        owner = "RUNNER" if isinstance(error, ProductFabricTaskContractError) else "UNKNOWN"
+        redactor = getattr(getattr(self.controller, "storage", None), "redactor", None)
+
+        def safe_text(value: str) -> str:
+            text = redactor.redact_text(value) if redactor is not None else value
+            return re.sub(
+                r"(?i)(api[_ -]?key|authorization|bearer|password|secret|token)\s*[:=]\s*[^\s,;]+",
+                r"\1=[REDACTED]",
+                text,
+            )
+
+        return {
+            "exception_type": type(error).__name__,
+            "safe_message": safe_text(str(error).strip() or "worker failed"),
+            "failure_phase": owner,
+            "owner_layer": owner,
+            "execution_id": execution.execution_id,
+            "run_id": execution.run_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "technical_reason": self._worker_failure_reason(error),
+            "traceback": safe_text("".join(traceback.format_exception(error))),
+        }
 
     def _authoritative_success(self, state: RunState, report: FinalReport) -> bool:
         storage = getattr(self.controller, "storage", None)

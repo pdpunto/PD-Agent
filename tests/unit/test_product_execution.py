@@ -18,6 +18,7 @@ from pd_agent.product import (
 )
 from pd_agent.reporting import FinalReport
 from pd_agent.reporting import RunEvent, RunEventType, RunStorage
+from pd_agent.product import EvidenceService
 
 
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
@@ -177,6 +178,39 @@ def test_worker_exception_releases_capacity_and_is_failed(tmp_path: Path) -> Non
         assert persisted.terminal_recorded_at is not None
         assert service._active_execution_id is None
     finally:
+        service.shutdown()
+
+
+def test_immediate_worker_failure_persists_safe_technical_diagnostics(tmp_path: Path) -> None:
+    secret = "SECRET_TEST_VALUE"
+    controller = ControlledController(error=RuntimeError(f"failure token={secret}"))
+    service, catalog, _project_id, task_id = _service(tmp_path, controller)
+    storage = RunStorage(tmp_path / "runs")
+    try:
+        snapshot = service.start(task_id)
+        assert controller.started.wait(timeout=2)
+        controller.release.set()
+        for _ in range(100):
+            if service.get(snapshot.execution_id).terminal:
+                break
+            Event().wait(0.01)
+
+        result = service.get(snapshot.execution_id)
+        persisted = catalog.get_execution(snapshot.execution_id)
+        assert result.status is ProductExecutionStatus.FAILED
+        assert result.reason == "worker_exception"
+        assert result.failure_diagnostics is not None
+        assert result.failure_diagnostics["exception_type"] == "RuntimeError"
+        assert secret not in str(result.failure_diagnostics)
+        assert persisted.failure_diagnostics == result.failure_diagnostics
+        assert persisted.failure_diagnostics["safe_message"] == "failure token=[REDACTED]"
+
+        technical = EvidenceService(storage, service).technical_evidence(snapshot.execution_id)
+        assert technical.failure_classification == "worker_exception"
+        assert technical.failure_diagnostics == result.failure_diagnostics
+        assert secret not in str(technical.to_dict())
+    finally:
+        controller.release.set()
         service.shutdown()
 
 
