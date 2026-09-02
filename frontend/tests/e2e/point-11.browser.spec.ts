@@ -120,6 +120,9 @@ test.describe("Point 11 deterministic UX acceptance", () => {
     await expect(page.getByText(/Delivery \/ JAR/)).toBeVisible();
     await page.getByRole("button", { name: /Ver ejecuci/ }).click();
     await expect(page).toHaveURL(new RegExp(`/executions/${executionId}\\?project=${projectId}$`));
+    await expect(page.getByRole("link", { name: "Descargar JAR" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Abrir carpeta" })).toBeVisible();
+    await expect(page.getByText(/La entrega aparecer/)).toHaveCount(0);
 
     await page.route(`**/api/v1/executions/${executionId}/evidence/technical`, async (route) => {
       await route.fulfill({ json: {
@@ -134,7 +137,6 @@ test.describe("Point 11 deterministic UX acceptance", () => {
         evidence_refs: ["evidence-1"],
       } });
     });
-    await page.goto(`/executions/${executionId}`);
     await page.getByRole("button", { name: /Informaci.*cnica/ }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText(executionId);

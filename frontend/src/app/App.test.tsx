@@ -515,6 +515,7 @@ describe("frontend route and state foundations", () => {
   });
   it("keeps success copy authoritative and delivery conditional", async () => {
     window.history.replaceState({}, "", "/executions/e");
+    vi.spyOn(api, "findDelivery").mockResolvedValue(undefined);
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
       status: 200,
@@ -525,7 +526,31 @@ describe("frontend route and state foundations", () => {
     expect(
       screen.queryByRole("link", { name: /Descargar JAR/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/entrega aparecer/)).toBeInTheDocument();
+    expect(await screen.findByText(/entrega aparecer/)).toBeInTheDocument();
+  });
+  it("does not claim delivery is absent while its lookup is loading", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    vi.spyOn(api, "findDelivery").mockReturnValue(new Promise(() => {}));
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...running, status: "SUCCEEDED", terminal: true }),
+    } as Response);
+    render(<App />);
+    await screen.findByText("Comprobando la entrega...");
+    expect(screen.queryByText(/entrega aparecer/)).not.toBeInTheDocument();
+  });
+  it("does not describe a failed delivery lookup as pending", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    vi.spyOn(api, "findDelivery").mockRejectedValue(new Error("offline"));
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...running, status: "SUCCEEDED", terminal: true }),
+    } as Response);
+    render(<App />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se pudo comprobar la entrega.");
+    expect(screen.queryByText(/entrega aparecer/)).not.toBeInTheDocument();
   });
   it("prioritizes terminal snapshots without a sequence over active progress", async () => {
     window.history.replaceState({}, "", "/executions/e");

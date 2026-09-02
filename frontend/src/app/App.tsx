@@ -21,14 +21,17 @@ type Load<T> = {
   error?: string;
 };
 const routeFor = (path: string): Route => {
-  const p = path.split("/").filter(Boolean);
+  const parsed = new URL(path, window.location.origin);
+  if (!parsed.search && path === window.location.pathname)
+    parsed.search = window.location.search;
+  const p = parsed.pathname.split("/").filter(Boolean);
   if (p[0] === "projects" && p[1]) return { name: "project", id: p[1] };
   if (p[0] === "projects") return { name: "projects" };
   if (p[0] === "executions" && p[1]) {
     return {
       name: "execution",
       id: p[1],
-      projectId: new URLSearchParams(window.location.search).get("project") ?? undefined,
+      projectId: parsed.searchParams.get("project") ?? undefined,
     };
   }
   if (p[0] === "settings") return { name: "settings" };
@@ -566,7 +569,7 @@ function ExecutionPage({
             className={`execution-panel ${item.status === "REPAIRING" ? "repairing" : ""}`}
           >
             {item.status === "SUCCEEDED" ? (
-              <SuccessState executionId={executionId} />
+              <SuccessState executionId={executionId} projectId={projectId} />
             ) : terminalFailure ? (
               <FailureState status={item.status} reason={item.reason} />
             ) : (
@@ -611,21 +614,28 @@ function WorkingState({ snapshot }: { snapshot: Execution }) {
     </div>
   );
 }
-function SuccessState({ executionId }: { executionId: string }) {
-  const [delivery, setDelivery] = useState<Delivery>();
+function SuccessState({ executionId, projectId }: { executionId: string; projectId?: string }) {
+  const [delivery, setDelivery] = useState<Load<Delivery>>({ status: "loading" });
   const [revealing, setRevealing] = useState(false);
   const [message, setMessage] = useState("");
   useEffect(() => {
     let active = true;
-    api.findDelivery(executionId).then((found) => active && setDelivery(found)).catch(() => active && setDelivery(undefined));
+    const load = projectId
+      ? api.getHistory(projectId).then((history) =>
+          history.deliveries.find((item) => item.execution_id === executionId),
+        )
+      : api.findDelivery(executionId);
+    load
+      .then((found) => active && setDelivery({ status: "ready", data: found }))
+      .catch((error) => active && setDelivery({ status: "error", error: safeError(error).message }));
     return () => { active = false; };
-  }, [executionId]);
+  }, [executionId, projectId]);
   const reveal = async () => {
-    if (!delivery) return;
+    if (!delivery.data) return;
     setRevealing(true);
     setMessage("");
     try {
-      const result = await api.reveal(delivery.delivery_id);
+      const result = await api.reveal(delivery.data.delivery_id);
       setMessage(result.revealed ? "Carpeta abierta." : "La entrega está lista para abrir.");
     } catch (error) {
       setMessage(safeError(error).message);
@@ -637,10 +647,14 @@ function SuccessState({ executionId }: { executionId: string }) {
     <div className="terminal-state success-state">
       <strong>¡Todo listo!</strong>
       <span>PD Agent ha creado y verificado tu mod.</span>
-      {delivery && <div className="delivery-actions"><a className="primary-action" href={api.artifactUrl(delivery.delivery_id)}>Descargar JAR</a><button className="quiet-action" onClick={reveal} disabled={revealing}>{revealing ? "Abriendo..." : "Abrir carpeta"}</button>{message && <small role="status">{message}</small>}</div>}
-      {!delivery && (
+      {delivery.data && <div className="delivery-actions"><a className="primary-action" href={api.artifactUrl(delivery.data.delivery_id)}>Descargar JAR</a><button className="quiet-action" onClick={reveal} disabled={revealing}>{revealing ? "Abriendo..." : "Abrir carpeta"}</button>{message && <small role="status">{message}</small>}</div>}
+      {delivery.status === "loading" && (
+        <small role="status">Comprobando la entrega...</small>
+      )}
+      {delivery.status === "ready" && !delivery.data && (
         <small>La entrega aparecerá cuando el backend la confirme.</small>
       )}
+      {delivery.status === "error" && <small role="alert">No se pudo comprobar la entrega.</small>}
     </div>
   );
 }
