@@ -52,6 +52,8 @@ class ProductFabricTaskContractResolver:
         if len(mod_ids) != 1:
             raise ProductFabricTaskContractError("inspected workspace must expose exactly one Fabric mod id")
         target_mod_id = mod_ids[0]
+        lang_path = f"src/main/resources/assets/{target_mod_id}/lang/en_us.json"
+        recipe_path = f"src/main/resources/data/{target_mod_id}/recipe/server_core.json"
 
         requirements = (
             FabricRequirement(requirement_id="source-change", description="a relevant source change is required"),
@@ -67,10 +69,7 @@ class ProductFabricTaskContractResolver:
                 validation_requirement_id="validate-artifact",
                 requirement_ids=("validation-artifact", "resource-lang", "resource-recipe"),
                 kind="artifact",
-                spec={"required_paths": (
-                    "src/main/resources/assets/examplemod/lang/en_us.json",
-                    "src/main/resources/data/examplemod/recipe/server_core.json",
-                )},
+                spec={"required_paths": (lang_path, recipe_path)},
             ),
             FabricValidationRequirement(
                 validation_requirement_id="validate-minecraft",
@@ -128,8 +127,8 @@ class ProductFabricTaskContractResolver:
             ),),
             mutation_expectations=(
                 FabricMutationExpectation(expectation_id="mutation-source", role="source"),
-                FabricMutationExpectation(expectation_id="mutation-lang", role="resource", path="src/main/resources/assets/examplemod/lang/en_us.json"),
-                FabricMutationExpectation(expectation_id="mutation-recipe", role="resource", path="src/main/resources/data/examplemod/recipe/server_core.json"),
+                FabricMutationExpectation(expectation_id="mutation-lang", role="resource", path=lang_path),
+                FabricMutationExpectation(expectation_id="mutation-recipe", role="resource", path=recipe_path),
             ),
             environment_constraints=FabricEnvironmentConstraints(
                 **detected_versions,

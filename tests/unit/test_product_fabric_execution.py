@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -74,6 +75,39 @@ def test_resolver_preserves_product_task_and_builds_conditional_contract(tmp_pat
     assert contract.environment_constraints.extra["loom_version"] == "1.13.3"
     assert contract.environment_constraints.extra["mappings_namespace"] == "yarn"
     assert contract.mutation_expectations
+
+
+def test_resolver_derives_resource_paths_from_manifest_identity(tmp_path: Path) -> None:
+    project, task, snapshot = _records(tmp_path)
+
+    contract = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+    artifact = next(item for item in contract.validation_requirements if item.kind == "artifact")
+    assert artifact.spec["required_paths"] == [
+        "src/main/resources/assets/examplemod/lang/en_us.json",
+        "src/main/resources/data/examplemod/recipe/server_core.json",
+    ]
+    assert [item.path for item in contract.mutation_expectations if item.role == "resource"] == list(
+        artifact.spec["required_paths"]
+    )
+
+
+def test_resolver_uses_a_different_manifest_identity_without_hardcoding(tmp_path: Path) -> None:
+    project, task, snapshot = _records(tmp_path)
+    alternate = snapshot.fabric_manifests[0]
+    alternate_snapshot = replace(
+        snapshot,
+        fabric_manifests=(replace(alternate, mod_id="othermod"),),
+    )
+
+    contract = ProductFabricTaskContractResolver().resolve(project, task, alternate_snapshot)
+
+    artifact = next(item for item in contract.validation_requirements if item.kind == "artifact")
+    assert artifact.spec["required_paths"] == [
+        "src/main/resources/assets/othermod/lang/en_us.json",
+        "src/main/resources/data/othermod/recipe/server_core.json",
+    ]
+    assert all("examplemod" not in (item.path or "") for item in contract.mutation_expectations)
 
 
 def test_resolver_rejects_unsupported_or_wrong_owner(tmp_path: Path) -> None:
