@@ -487,7 +487,8 @@ function ExecutionPage({
       try {
         const next = await api.getExecution(executionId);
         const sequence = next.latest_sequence ?? 0;
-        if (sequence >= latest.current) {
+        // Terminal state is authoritative even when it has no event sequence.
+        if (next.terminal || sequence >= latest.current) {
           latest.current = sequence;
           hasSnapshot.current = true;
           setSnapshot({ status: "ready", data: next });

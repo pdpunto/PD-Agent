@@ -508,6 +508,34 @@ describe("frontend route and state foundations", () => {
       screen.queryByRole("link", { name: /Descargar JAR/i }),
     ).not.toBeInTheDocument();
   });
+  it("prioritizes terminal snapshots without a sequence over active progress", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    const terminal = { ...running, status: "SUCCEEDED", terminal: true, latest_sequence: null };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...running, latest_sequence: 99 }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => terminal } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [project] } as Response)
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...history, deliveries: [{ delivery_id: "delivery-1", project_id: "project-1", task_id: "t", execution_id: "e", artifact_sha256: "sha", created_at: "2026-01-01" }] }),
+      } as Response);
+    render(<App />);
+    expect(await screen.findByText(/Todo listo/, {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(screen.getByText(/Completado/)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Descargar JAR" })).toHaveAttribute("href", "/api/v1/deliveries/delivery-1/artifact");
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+  });
+  it("prioritizes terminal failures without a sequence over active progress", async () => {
+    window.history.replaceState({}, "", "/executions/e");
+    const terminal = { ...running, status: "FAILED", terminal: true, latest_sequence: null };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ...running, latest_sequence: 99 }) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => terminal } as Response);
+    render(<App />);
+    expect(await screen.findByText(/No he podido completar/, {}, { timeout: 2500 })).toBeInTheDocument();
+    expect(screen.getByText(/Detenido/)).toBeInTheDocument();
+  });
   it("exposes download and reveal actions only for a real delivery", async () => {
     window.history.replaceState({}, "", "/executions/e");
     vi.mocked(fetch).mockResolvedValue({ ok: true, status: 200, json: async () => ({ ...running, status: "SUCCEEDED", terminal: true }) } as Response);
