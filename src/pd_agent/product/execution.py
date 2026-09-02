@@ -135,7 +135,7 @@ class ExecutionService:
                         projected = EvidenceService(storage).snapshot(execution_id)
                     except (FileNotFoundError, OSError, ValueError):
                         projected = None
-                    if projected is not None:
+                    if projected is not None and not projected.terminal:
                         return ExecutionSnapshot(
                             snapshot.execution,
                             projected.status,

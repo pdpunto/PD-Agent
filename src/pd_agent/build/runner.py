@@ -344,7 +344,7 @@ class GradleBuildRunner:
             stdout_path = Path("builds") / f"{attempt:03d}.stdout.log"
             stderr_path = Path("builds") / f"{attempt:03d}.stderr.log"
             return BuildLogPaths(stdout=stdout_path, stderr=stderr_path)
-        paths = self.reporting.paths_for(run_id)
+        paths = self.reporting.ensure_paths(run_id)
         stdout_path = paths.builds_dir / f"{attempt:03d}.stdout.log"
         stderr_path = paths.builds_dir / f"{attempt:03d}.stderr.log"
         stdout_path.write_text(stdout_text, encoding="utf-8", newline="\n")

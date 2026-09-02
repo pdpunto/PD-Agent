@@ -107,6 +107,26 @@ def test_active_get_projects_real_runtime_milestones_from_storage(tmp_path: Path
         service.shutdown()
 
 
+def test_product_polling_before_runtime_claim_is_read_only(tmp_path: Path) -> None:
+    controller = ControlledController()
+    storage = RunStorage(tmp_path / "runs")
+    controller.storage = storage
+    service, _catalog, _project_id, task_id = _service(tmp_path, controller)
+    try:
+        snapshot = service.start(task_id)
+        assert controller.started.wait(timeout=2)
+        run_root = storage.paths_for(snapshot.run_id).root
+        assert not run_root.exists()
+
+        assert service.get(snapshot.execution_id).status is ProductExecutionStatus.RUNNING
+        assert not run_root.exists()
+
+        controller.release.set()
+    finally:
+        controller.release.set()
+        service.shutdown()
+
+
 def test_one_capacity_no_queue_and_release_after_success(tmp_path: Path) -> None:
     controller = ControlledController()
     service, _catalog, _project_id, task_id = _service(tmp_path, controller)

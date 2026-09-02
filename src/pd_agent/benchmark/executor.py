@@ -527,6 +527,7 @@ class BenchmarkExecutor:
 
             context_manager = self.context_manager_factory(config.brain_enabled)
             runtime_storage = RunStorage(run_root / "runtime")
+            runtime_storage.storage_root.mkdir(parents=True, exist_ok=True)
             execution_limits = _benchmark_execution_limits(config)
             runtime_mod_dependency_resolution_error: RuntimeModDependencyResolutionError | None = None
             if self.gradle_environment is not None:

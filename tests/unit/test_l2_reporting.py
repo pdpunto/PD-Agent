@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 
+import pytest
+
 from pd_agent.core import ArtifactResult, BuildResult, RunState, RunStatus, generate_run_id
 from pd_agent.reporting import (
     FinalReport,
@@ -68,6 +70,20 @@ def test_events_can_be_reloaded_with_timestamps() -> None:
         assert len(events) == 1
         assert events[0].timestamp == original.timestamp
         assert events[0].event_type == original.event_type
+
+
+def test_read_paths_and_missing_run_state_are_side_effect_free() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        storage = RunStorage(Path(temp_dir))
+        run_id = generate_run_id()
+
+        paths = storage.paths_for(run_id)
+        assert not paths.root.exists()
+        with pytest.raises(FileNotFoundError):
+            storage.read_run_state(run_id)
+        assert not paths.root.exists()
+        assert not paths.evidence_dir.exists()
+        assert not paths.builds_dir.exists()
 
 
 def test_run_state_round_trip_via_run_json() -> None:

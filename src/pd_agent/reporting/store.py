@@ -62,6 +62,11 @@ class RunStorage:
         self.large_payload_threshold = large_payload_threshold
 
     def paths_for(self, run_id: str) -> RunPaths:
+        """Resolve run paths without creating filesystem state."""
+        return RunPaths(self.storage_root / run_id)
+
+    def ensure_paths(self, run_id: str) -> RunPaths:
+        """Resolve and materialize the directories required by a writer."""
         run_root = self.storage_root / run_id
         paths = RunPaths(run_root)
         paths.run_dir.mkdir(parents=True, exist_ok=True)
@@ -70,7 +75,7 @@ class RunStorage:
         return paths
 
     def event_writer(self, run_id: str) -> JsonlEventWriter:
-        paths = self.paths_for(run_id)
+        paths = self.ensure_paths(run_id)
         return JsonlEventWriter(
             jsonl_path=paths.events_jsonl,
             evidence_dir=paths.evidence_dir,
@@ -79,7 +84,7 @@ class RunStorage:
         )
 
     def write_run_state(self, run_state: RunState) -> Path:
-        paths = self.paths_for(run_state.run_id)
+        paths = self.ensure_paths(run_state.run_id)
         payload = self.redactor.redact_data(run_state.to_dict())
         paths.run_json.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
@@ -123,7 +128,7 @@ class RunStorage:
         )
 
     def write_final_report(self, report: FinalReport) -> tuple[Path, Path]:
-        paths = self.paths_for(report.run_id)
+        paths = self.ensure_paths(report.run_id)
         json_payload = self.redactor.redact_data(report.to_dict(self.redactor))
         paths.final_report_json.write_text(
             json.dumps(json_payload, ensure_ascii=False, indent=2, sort_keys=True),
@@ -147,7 +152,7 @@ class RunStorage:
         payload: Any,
         sequence: int = 1,
     ) -> Path:
-        paths = self.paths_for(run_id)
+        paths = self.ensure_paths(run_id)
         evidence_name = f"{sequence:04d}-{name}.json"
         evidence_path = paths.evidence_dir / evidence_name
         evidence_path.write_text(

@@ -209,6 +209,11 @@ def test_fabric_orchestrator_persists_supplied_identity_and_rejects_collision(tm
     )
     supplied = str(uuid4())
 
+    assert not storage.paths_for(supplied).root.exists()
+    with pytest.raises(FileNotFoundError):
+        storage.read_run_state(supplied)
+    assert not storage.paths_for(supplied).root.exists()
+
     result = orchestrator.run(contract, snapshot.project_root, brain_enabled=False, run_id=supplied)
 
     assert result.run_id == supplied
