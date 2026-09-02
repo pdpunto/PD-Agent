@@ -233,7 +233,7 @@ Not every imaginable custom behavior should require a predefined capability type
 1. [x] Definir qué significa exactamente `PD Agent Alpha`
 2. [x] Auditar capacidades reales actuales tras v0.9
 3. [x] Definir catálogo mínimo de capacidades Fabric para Alpha
-4. [ ] Definir estrategia de assets: texturas, modelos, sonidos y generación visual
+4. [x] Definir estrategia de assets: texturas, modelos, sonidos y generación visual
 5. [ ] Definir estrategia multi-versión Minecraft/Fabric
 6. [ ] Definir evolución necesaria del Minecraft Brain
 7. [ ] Definir evolución de validación, Test Harness y CompletionGate
@@ -249,7 +249,111 @@ Not every imaginable custom behavior should require a predefined capability type
 
 ## 7. Assets strategy
 
-Status: `PENDING / NOT YET DECIDED`
+Status: `ACCEPTED`
+
+### Core principle — Vanilla-First Asset Strategy
+
+PD Agent must not default to generating a new visual asset whenever the user requests new content. It must first determine whether Minecraft already contains a semantically and visually similar asset that can be reused or adapted.
+
+Canonical decision order:
+
+`REUSE → DERIVE → GENERATE`
+
+1. `REUSE`: use an appropriate existing vanilla asset/reference when no meaningful visual transformation is required.
+2. `DERIVE`: start from the closest appropriate vanilla asset or coherent vanilla asset family and apply deterministic transformations.
+3. `GENERATE`: invoke visual generation only when reuse/derivation is insufficient for the requested concept.
+
+Examples:
+
+- tin/metal content may derive from an appropriate vanilla metal family;
+- ruby/gem content may derive from an appropriate vanilla gemstone such as emerald;
+- strawberry cake may derive from vanilla cake;
+- ruby equipment may derive from the corresponding vanilla equipment silhouettes and be transformed consistently;
+- a new ore may derive from an appropriate vanilla ore texture/pattern;
+- a new wood family should prefer transforming a coherent vanilla wood family instead of independently inventing every related asset;
+- a mob variant may reuse a compatible vanilla model/behavior and derive its texture when that satisfies the request.
+
+The LLM must not be the sole source of truth for asset similarity. The future Brain/asset layer should expose a version-aware vanilla asset catalog/index with enough semantic metadata to select suitable source assets and families reproducibly.
+
+### Deterministic Asset Toolkit — MUST Alpha
+
+The productive runtime must gain safe workspace-contained binary/asset operations sufficient to:
+
+- read/write/copy PNG assets;
+- move/rename supported assets where needed;
+- preserve and validate alpha/transparency;
+- validate image format and dimensions;
+- recolor and palette-map textures;
+- perform simple deterministic pixel-art transformations;
+- crop/compose/mask where required by supported Alpha tasks;
+- preserve nearest-neighbor/pixel-art characteristics where resizing or transformation requires it;
+- produce assets at the correct namespace/path;
+- verify that required assets are packaged in the delivered JAR.
+
+Deterministic operations should be preferred when they can satisfy the user's intent because they are cheaper, faster, more reproducible and more likely to remain visually coherent with Minecraft.
+
+### Visual generation — MUST capability, fallback path
+
+Alpha must have a model-agnostic visual-generation boundary for basic genuinely novel assets when deterministic derivation is insufficient. The final interface name is deferred, but conceptually it may resemble an `AssetGenerationProvider`.
+
+The product must not depend on one image model/provider. Managed routing can choose the concrete provider later.
+
+Visual generation is a fallback, not the default path. Generated output must still pass the same Minecraft-aware processing and validation pipeline before it can become part of a completed task.
+
+### Minecraft-aware asset planning
+
+Asset work must be planned according to its Minecraft role, rather than treating every asset as a generic image. The pipeline must understand at least the supported Alpha categories required by the capability catalog, including item, block, equipment and basic entity textures, and their related models/blockstates/resource references.
+
+The planner should also reason about coherent asset families so a multi-part request produces visually consistent related assets.
+
+### Models and blockstates
+
+MUST Alpha:
+
+- item models required by supported Alpha content;
+- block models required by supported Alpha content;
+- blockstates required by supported Alpha content;
+- simple/basic entity model reuse or adaptation sufficient for the accepted basic mob/entity scope;
+- correct linkage between models, textures, namespaces and generated resources.
+
+Complex custom 3D modelling and advanced animations are POST-ALPHA.
+
+### Sounds
+
+For Alpha:
+
+- referencing/reusing appropriate vanilla sounds is MUST where supported content requires sound behavior;
+- safely incorporating a user-provided compatible sound is SHOULD;
+- arbitrary AI-generated original audio is POST-ALPHA and must not block Alpha.
+
+### Validation and evidence
+
+An asset is not complete merely because a file exists.
+
+For supported Alpha assets, validation must be able to prove as applicable:
+
+- file exists and is a valid supported format;
+- expected dimensions/alpha constraints are satisfied;
+- path and namespace are correct;
+- model/blockstate/resource references resolve correctly;
+- the asset is packaged into the current delivered JAR;
+- Minecraft/build/runtime does not reject the resulting resource set.
+
+PD Agent must not claim that an asset "looks correct" solely from structural validation. Genuine visual correctness requires separate visual evidence such as a render/screenshot plus appropriate analysis when that capability exists.
+
+### Provenance and safety
+
+Asset operations must preserve provenance sufficient to distinguish reused, deterministically derived, generated and user-provided assets. The implementation must not assume that arbitrary external assets can legally or safely be downloaded/repackaged. Exact licensing/distribution policy is a later implementation requirement and must be researched before enabling external asset acquisition.
+
+### Multi-Agent boundary
+
+No dedicated Image/Asset Agent is approved by this decision.
+
+Alpha first defines the capability/tool/provider boundary:
+
+`Fabric planning/runtime → Asset Pipeline → deterministic tools and/or visual-generation provider`
+
+Whether this responsibility should later become a specialized agent remains explicitly deferred to roadmap Point 8. The asset architecture must not prevent that future separation.
 
 ## 8. Multi-version Minecraft/Fabric strategy
 
