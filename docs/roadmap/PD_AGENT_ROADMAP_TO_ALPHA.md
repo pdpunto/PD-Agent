@@ -249,7 +249,7 @@ Not every imaginable custom behavior should require a predefined capability type
 5. [x] Definir estrategia multi-versión Minecraft/Fabric
 6. [x] Definir evolución necesaria del Minecraft Brain
 7. [x] Definir evolución de validación, Test Harness y CompletionGate
-8. [ ] Evaluar dónde Multi-Agent aporta valor real
+8. [x] Evaluar dónde Multi-Agent aporta valor real
 9. [ ] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
 10. [ ] Definir requisitos Product/UI restantes para Alpha
 11. [ ] Definir benchmarks y Alpha Acceptance Suite
@@ -649,6 +649,70 @@ A version being detectable or buildable is not enough to claim product support.
 Alpha intentionally supports a small explicit set of targets rather than attempting every Fabric-compatible Minecraft release.
 
 New versions should be added by extending the support registry/data/adapters and passing the same validation/acceptance gates, not by forking the runtime.
+
+## Point 8. Multi-Agent decision
+
+Status: `ACCEPTED`
+
+R75 audit verdict:
+
+`PD_AGENT_R75_ALPHA_SPECIALIZED_TOOLS_ROUTING_RECOMMENDED`
+
+The audit was performed against baseline
+`8aaf3d5a7f256f7913db4b6249a20b08de0aaf66` with no repository, provider,
+Minecraft, benchmark, Product Execution or ledger side effects.
+
+### Canonical Alpha decision
+
+`ALPHA_SINGLE_AGENT_WITH_SPECIALIZED_TOOLS_AND_MODEL_ROUTING`
+
+Alpha continues with one productive agent/runtime. Specialization comes from
+deterministic components, specialized tools, scoped context, Minecraft Brain,
+Capability Planner, Asset Pipeline, validators, Test Harness, Semantic Repair,
+version-specific adapters and provider/model routing where useful.
+
+Model routing does not require multiple models in every run. Multi-model,
+parallel execution and specialized components are not Multi-Agent.
+
+Multi-Agent is `NOT_REQUIRED_FOR_ALPHA`. No Manager, Architect, Planner,
+Developer, Repair, Brain/Research, Asset, QA or version-specialist agents,
+consensus/voting, or agent orchestration framework is approved for Alpha.
+A reviewer agent remains a post-Alpha experiment only if future evidence
+justifies it.
+
+### Alpha boundaries
+
+- Capability Planner remains deterministic/code-first, with LLM assistance for
+  intent interpretation only when needed; it is not a separate agent.
+- Asset Pipeline keeps `REUSE -> DERIVE -> GENERATE`, using deterministic
+  tools, same-agent reasoning and an optional specialized generation provider.
+- Correctness remains authoritative through `ArtifactValidator`, Test Harness,
+  normalized evidence, `TaskProgressLedger` and `CompletionGate`.
+- Semantic Repair remains a phase of the same runtime; Brain remains the
+  knowledge boundary; version differences remain data, adapters and probes.
+- Future deterministic workers may provide parallelism without introducing
+  Multi-Agent infrastructure.
+
+Context specialization must be attempted with scoped context, selectors,
+contracts, structured evidence, summaries, budgeting and retained repair
+evidence before creating separate agents. Provider/model specialization may
+be added where useful, but provider specialization is not agent specialization.
+
+Historical step exhaustion, ineffective repair, Harness failures, Brain gaps
+and planning gaps do not demonstrate that another agent would have fixed their
+root causes. Multi-Agent must not be added without evidence of a repeated
+problem, insufficiency of the single-agent/tool architecture, a clear
+non-overlapping boundary, structured input/output, ownership and recovery,
+and no parallel authority to `CompletionGate`.
+
+### Post-Alpha reopening rule
+
+Multi-Agent may be reconsidered only after comparative evidence demonstrates
+material benefit in quality/success, cost, latency, recovery and complexity.
+The evidence must include a favorable benchmark against the single-agent
+architecture and show acceptable reliability, security and ownership costs.
+
+This decision does not start Point 9 or v0.10 work.
 
 ## 9. Minecraft Brain evolution
 
