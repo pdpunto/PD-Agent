@@ -250,7 +250,7 @@ Not every imaginable custom behavior should require a predefined capability type
 6. [x] Definir evolución necesaria del Minecraft Brain
 7. [x] Definir evolución de validación, Test Harness y CompletionGate
 8. [x] Evaluar dónde Multi-Agent aporta valor real
-9. [ ] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
+9. [x] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
 10. [ ] Definir requisitos Product/UI restantes para Alpha
 11. [ ] Definir benchmarks y Alpha Acceptance Suite
 12. [ ] Inventariar gaps v0.9 → Alpha
@@ -713,6 +713,157 @@ The evidence must include a favorable benchmark against the single-agent
 architecture and show acceptable reliability, security and ownership costs.
 
 This decision does not start Point 9 or v0.10 work.
+
+## Point 9. Alpha security, compatibility and performance requirements
+
+Status: `ACCEPTED`
+
+R77 audit verdict:
+
+`PD_AGENT_R77_ALPHA_SCP_FOUNDATION_PARTIAL`
+
+R77-V verdict:
+
+`PD_AGENT_R77_V_SCP_EVIDENCE_CONFIRMED_WITH_CORRECTIONS`
+
+R77-V validation recorded `208 passed, 0 failed, 0 errors`. The earlier
+pytest errors were environmental permission failures in the default temp
+directory and were not product failures.
+
+The existing Security, Compatibility and Performance foundation is reusable
+but requires the extensions below. Alpha must not create a parallel runtime
+architecture.
+
+### Security
+
+Validated PD Agent templates may be treated as trusted bootstrap material
+within normal runtime limits. Content added later is not trusted automatically.
+
+Imported projects are `UNTRUSTED` until inspection, compatibility/trust
+classification and an effective execution boundary have been applied.
+
+An imported Gradle build can execute its wrapper, build files, settings and
+plugins with the child process authority inherited from PD Agent. `shell=False`
+prevents shell injection but does not constrain Gradle authority. Timeout
+limits duration, not filesystem, network, process or secret authority.
+
+For Alpha, imported build/runtime execution requires technical isolation. User
+confirmation may make the risk explicit, but it is not a substitute for
+isolation. If effective isolation is unavailable, the runtime must block before
+build or Minecraft execution while still permitting safe inspection.
+
+README files, source comments, Gradle/configuration, JSON/resources, logs,
+Minecraft output, imported project content and external/Brain sources are
+untrusted data. Embedded text grants no authority. System/runtime policy,
+structured contracts, tool schemas and deterministic security policies remain
+authoritative.
+
+Provider/API secrets must not be inherited unnecessarily by Gradle, Minecraft,
+Harness or other untrusted child processes. Child environments contain only
+task-required values.
+
+Alpha resource safety must bound workspace and disk growth, asset input/output,
+image dimensions and pixel counts, logs/evidence, child-process lifetime and
+cleanup, and concurrent Product executions. Exact numeric limits remain an
+implementation decision and must not be invented here.
+
+Asset processing must validate type, format, dimensions, size, malformed data,
+paths/namespaces, archive/JAR paths, bounded decompression and provenance.
+
+### Compatibility
+
+Alpha MUST support these targets end-to-end before Alpha is declared:
+
+- Minecraft/Fabric `1.21.11`;
+- Minecraft/Fabric `26.1`;
+- Minecraft/Fabric `26.2`.
+
+`SUPPORTED_VERSION` requires the complete chain:
+
+`Support Registry/environment -> compatible template/import classification -> compatible Brain knowledge -> capability implementation -> build -> required Artifact/Runtime validation -> CompletionGate -> Delivery`
+
+`VERSION_SUPPORTED` does not imply `CAPABILITY_SUPPORTED`. A `(version,
+capability)` pair is supported only when its implementation path, required
+validators/probes and acceptance evidence exist. Otherwise it must fail fast as
+`NOT_SUPPORTED`; silent best-effort execution is forbidden.
+
+Imported projects must be classified as `SUPPORTED`,
+`SUPPORTED_WITH_LIMITATIONS`, `UNSUPPORTED` or `UNKNOWN/REVIEW_REQUIRED`.
+Unknown versions, loaders, mappings and build systems must not be silently
+modified or upgraded. Forge, NeoForge, Paper, Velocity, Kotlin, multi-module
+projects and custom mappings/plugins/build systems are not promised without
+explicit later validation.
+
+Knowledge compatibility is a hard gate. Version-sensitive records, packs,
+mappings and examples must match the active `KnowledgeEnvironment` or carry
+explicit compatible status, with provenance preserved. In particular,
+1.21.11 Yarn/Intermediary knowledge must not leak into `26.1` or `26.2`.
+
+### Performance
+
+Alpha does not define an artificial task-duration SLA. Acceptable performance
+means bounded, observable execution without infinite loops, pathological
+redundant work or unpredictable recovery.
+
+Provider requests, tokens/context, tool calls, retries, builds and processes
+must have explicit configurable limits. Current baseline values are recorded,
+not permanent Alpha values:
+
+- `max_agent_steps = 40`;
+- `max_tool_calls = 120`;
+- `max_build_attempts = 5`;
+- `provider_retry_limit = 2`;
+- `process_timeout_seconds = 600`;
+- `max_tool_output_bytes = 1000000`;
+- `max_context_bytes = 2000000`.
+
+Reuse build, artifact and runtime evidence only when it is both `CURRENT` and
+contract-compatible. Caching must never replace required validation.
+
+Composed tasks should plan coherent mutation batches, run static/pre-build
+validation, build once when safe, validate the artifact and execute only the
+required current runtime validations. Brain must retain bounded retrieval,
+bounded context, deduplication where applicable and version filtering before
+injection.
+
+The existing non-blocking Product execution handle and RunState/RunEvent
+projection remain the foundation. Build, Minecraft, provider and repair work
+must not block the UI; cancellation and presentation details remain deferred
+to Point 10.
+
+### Alpha blockers
+
+Current Alpha blockers are:
+
+- imported Gradle execution without effective technical isolation;
+- unnecessary secret/environment inheritance to untrusted child processes;
+- no complete untrusted-data boundary for project/source content;
+- incomplete resource and asset safety limits;
+- no end-to-end validation chain for `26.1` and `26.2`;
+- no productive Support Registry/capability matrix;
+- missing implementation and validation evidence for capabilities advertised on
+  each target;
+- incomplete bounds for disk, assets, logs, process lifetime and concurrency.
+
+Imperfect caching alone is not an Alpha blocker.
+
+### Architecture disposition
+
+Reuse `SecurePathResolver`, `ToolExecutor`, AgentRuntime limits,
+`GradleBuildRunner` process mechanics, ArtifactValidator/currentness,
+TaskProgressLedger, RunStorage/recovery, Minecraft Test Harness,
+KnowledgeEnvironment, CompletionGate, provider/economic telemetry and
+non-blocking Product execution.
+
+Extend project inspection/classification, child-process environment policy,
+resource limits, Harness multi-version support, ArtifactValidator, knowledge
+compatibility gates, Capability Planner, Support Registry, capability/version
+validation, Brain budgeting and asset validation.
+
+Create only the missing imported-project trust boundary, asset safety pipeline
+and version-by-capability support representation. Defer Multi-Agent, a second
+completion authority, distributed orchestration, commercial SLA and cloud
+hardening.
 
 ## 9. Minecraft Brain evolution
 
