@@ -121,6 +121,32 @@ class ExecutionService:
         with self._lock:
             snapshot = self._snapshots.get(execution_id)
             if snapshot is not None:
+                if snapshot.terminal:
+                    return snapshot
+                storage = getattr(self.controller, "storage", None)
+                if storage is not None:
+                    try:
+                        # Project active progress from append-only runtime evidence.
+                        from .evidence import EvidenceService
+
+                        projected = EvidenceService(storage).snapshot(execution_id)
+                    except (FileNotFoundError, OSError, ValueError):
+                        projected = None
+                    if projected is not None:
+                        return ExecutionSnapshot(
+                            snapshot.execution,
+                            projected.status,
+                            snapshot.reason,
+                            runtime_state=(
+                                projected.runtime_state.value
+                                if projected.runtime_state is not None
+                                else None
+                            ),
+                            current_milestone=projected.current_milestone,
+                            current_activity=projected.current_activity,
+                            terminal=projected.terminal,
+                            latest_sequence=projected.latest_sequence,
+                        )
                 return snapshot
             execution = self.catalog.get_execution(execution_id)
             if execution.terminal_recorded_at is None:

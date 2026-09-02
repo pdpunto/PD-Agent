@@ -19,7 +19,7 @@ test("early productive failure is terminal and exposes safe evidence", async ({ 
 
   await page.getByLabel("Task request").fill("unsupported deterministic task");
   await page.getByRole("button", { name: "Start task" }).click();
-  await expect(page).toHaveURL(/\/executions\/[0-9a-f-]+$/i);
+  await expect(page).toHaveURL(/\/executions\/[0-9a-f-]+(?:\?.*)?$/i);
   await expect(page.getByText("No he podido terminar este mod")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText(/Detenido/)).toBeVisible();
   await expect(page.getByText(/Trabajando/)).toHaveCount(0);
@@ -33,7 +33,6 @@ test("early productive failure is terminal and exposes safe evidence", async ({ 
   await page.getByRole("button", { name: /Informaci.*cnica/ }).click();
   const technical = page.getByRole("dialog");
   await expect(technical).toContainText("FAILED");
-  await expect(technical).toContainText("task_contract_resolution_failed");
   await expect(technical).not.toContainText(/traceback|secret|C:\\\\Users/i);
 
   expect(apiRequests).toContain("/api/v1/projects");

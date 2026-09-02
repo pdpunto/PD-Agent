@@ -10,10 +10,13 @@ import pytest
 
 from pd_agent.minecraft import (
     MinecraftObservationType,
+    MinecraftObservationStatus,
     MinecraftTestRunner,
+    MinecraftTestResult,
     MinecraftTestSpec,
     MinecraftTestStatus,
     MinecraftTestValidationError,
+    ObservationRequest,
 )
 from tests.fixtures.artifact_projects import write_jar, write_manifest_jar
 
@@ -270,6 +273,67 @@ def test_run_propagates_runtime_mod_jars_to_launch_plan_and_command(tmp_path: Pa
     assert all(item["source"] is None for item in runtime_dependency_records)
     assert result.runtime_evidence is not None
     assert result.runtime_evidence.metadata["runtime_mod_dependencies"] == runtime_dependency_records
+
+
+def test_run_preserves_contract_observation_with_runtime_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _make_jar(tmp_path)
+    dependency = _make_runtime_mod_jar(tmp_path, "mods/dependency.jar", mod_id="dependency")
+    runner = _runner(tmp_path)
+    spec = MinecraftTestSpec(
+        target_jar=Path("build/libs/target.jar"),
+        target_mod_id="pdagentl11",
+        minecraft_version="1.21.11",
+        loader_version="0.19.3",
+        test_id="validate-minecraft",
+        timeout_seconds=30,
+        runtime_mod_jars=(Path("mods/dependency.jar"),),
+        observation_requests=(ObservationRequest(
+            observation_id="server-core-registry",
+            observation_type=MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+            profile="registry_entry",
+            selector={"kind": "registry", "identifier": "pdagentl11:server_core"},
+            expected={"present": True},
+        ),),
+    )
+    run_id = "run-observation-with-dependency"
+    actual_sha = runner.validate_target(spec, java_version="21").sha256
+
+    def fake_run_command(self, command, *, cwd, timeout_seconds):  # noqa: ANN001
+        return _fake_process(
+            root=self.project_root,
+            run_id=run_id,
+            payload={
+                "schema_version": 1,
+                "test_id": "validate-minecraft",
+                "target_mod_id": "pdagentl11",
+                "target_loaded": True,
+                "target_origin_resolved": True,
+                "runtime_target_path": str(tmp_path / "build" / "libs" / "target.jar"),
+                "runtime_target_sha256": actual_sha,
+                "target_sha_match": True,
+                "server_started": True,
+                "functional_test_result": "PASS",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "registry_kind": "block",
+                "observed_identifier": "pdagentl11:server_core",
+                "reason": "target verified",
+                "shutdown_requested": True,
+            },
+        )
+
+    monkeypatch.setattr(MinecraftTestRunner, "_run_command", fake_run_command)
+
+    result = runner.run(spec, run_id=run_id, java_version="21", authorized_runtime_roots=(tmp_path,))
+
+    assert result.status is MinecraftTestStatus.PASS
+    assert len(result.observations) == 1
+    observation = result.observations[0]
+    assert observation.observation_id == "server-core-registry"
+    assert observation.status is MinecraftObservationStatus.PASS
+    assert observation.evidence_refs[0].ref == "harness-result.json"
+    persisted = MinecraftTestResult.from_dict(json.loads(result.evidence_paths.result_json.read_text(encoding="utf-8")))
+    assert persisted.observations == result.observations
+    assert persisted.metadata["runtime_mod_dependencies"][0]["path"] == dependency.resolve().as_posix()
 
 
 @pytest.mark.parametrize(

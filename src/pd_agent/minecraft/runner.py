@@ -714,6 +714,7 @@ class MinecraftTestRunner:
                 finished_at=final_result.finished_at,
                 duration_seconds=final_result.duration_seconds,
                 target_failure_reason=final_result.target_failure_reason,
+                observations=final_result.observations,
                 metadata={
                     **dict(final_result.metadata),
                     "runtime_mod_dependencies": list(runtime_dependency_records),

@@ -17,6 +17,7 @@ from pd_agent.product import (
     ProjectService,
 )
 from pd_agent.reporting import FinalReport
+from pd_agent.reporting import RunEvent, RunEventType, RunStorage
 
 
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
@@ -67,6 +68,39 @@ def test_start_persists_before_nonblocking_dispatch_and_maps_identity(tmp_path: 
         assert controller.calls[0][2] == snapshot.execution_id
         assert catalog.get_execution(snapshot.execution_id).run_id == snapshot.execution_id
         assert service.get(snapshot.execution_id).status is ProductExecutionStatus.RUNNING
+    finally:
+        controller.release.set()
+        service.shutdown()
+
+
+def test_active_get_projects_real_runtime_milestones_from_storage(tmp_path: Path) -> None:
+    controller = ControlledController()
+    storage = RunStorage(tmp_path / "runs")
+    controller.storage = storage
+    service, _catalog, _project_id, task_id = _service(tmp_path, controller)
+    try:
+        snapshot = service.start(task_id)
+        assert controller.started.wait(timeout=2)
+        state = RunState(
+            run_id=snapshot.run_id,
+            project_root=tmp_path / "workspace",
+            task="do work",
+            state=RunStatus.EDITING,
+        )
+        storage.write_run_state(state)
+        storage.append_event(RunEvent(run_id=snapshot.run_id, event_type=RunEventType.FILE_CHANGED))
+        editing = service.get(snapshot.execution_id)
+        assert editing.status is ProductExecutionStatus.RUNNING
+        assert editing.current_milestone == "Editando"
+        assert editing.latest_sequence == 1
+
+        state.state = RunStatus.BUILDING
+        storage.write_run_state(state)
+        storage.append_event(RunEvent(run_id=snapshot.run_id, event_type=RunEventType.BUILD_STARTED))
+        building = service.get(snapshot.execution_id)
+        assert building.status is ProductExecutionStatus.RUNNING
+        assert building.current_milestone == "Compilando"
+        assert building.latest_sequence == 2
     finally:
         controller.release.set()
         service.shutdown()
