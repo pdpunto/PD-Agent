@@ -22,8 +22,9 @@ Accepted post-v0.9 evidence:
 
 - `V0_9_R67_RUBY_TOOLS_CAPABILITY_GAP`
 - `PD_AGENT_R68_POST_V0_9_CAPABILITY_INVENTORY_READY`
+- `PD_AGENT_R70_MULTI_VERSION_FOUNDATION_PARTIAL`
 
-R67 established that the proposed Ruby Tools task is outside the current productive capability envelope. R68 confirmed that the main generalization boundary is the productive request/capability/contract resolution layer, while much of the underlying runtime infrastructure is already reusable.
+R67 established that the proposed Ruby Tools task is outside the current productive capability envelope. R68 confirmed that the main generalization boundary is the productive request/capability/contract resolution layer, while much of the underlying runtime infrastructure is already reusable. R70 confirmed that the codebase is already partially version-aware and that multi-version support must extend existing environment/compatibility infrastructure rather than replace it.
 
 ## 2. Accepted definition of PD Agent Alpha
 
@@ -44,7 +45,7 @@ Alpha must support:
 - using Brain/Knowledge when needed;
 - validating requirements through real evidence rather than model self-assertion;
 - delivering the JAR and understandable evidence;
-- supporting multiple Fabric/Minecraft versions inside an Alpha support range still to be defined;
+- supporting multiple Fabric/Minecraft versions inside an Alpha support range;
 - passing diverse benchmarks without task-specific hardcodes.
 
 Alpha does **not** mean:
@@ -59,12 +60,15 @@ Ruby Tools should eventually become a normal task inside the Alpha envelope, but
 
 ## 3. Audited post-v0.9 capability state
 
-Status: `AUDITED — R68`
+Status: `AUDITED — R68 + R70`
 
 ### Productive infrastructure already present
 
 - Product project creation and continuity over existing workspaces;
 - Minecraft Brain retrieval, selection, injection and provenance;
+- version-aware `KnowledgeEnvironment` and environment resolution;
+- Fabric project/version inspection;
+- Brain compatibility/version filtering;
 - textual workspace mutation tools;
 - Build/Debug pipeline;
 - Semantic Repair;
@@ -84,8 +88,8 @@ Status: `AUDITED — R68`
 4. Minecraft validators/probes remain mostly controlled rather than arbitrary/general.
 5. Agent mutation tools are text-oriented and lack general binary operations.
 6. No productive visual asset generation/transformation/validation pipeline.
-7. Single-version Fabric/Minecraft support.
-8. No general workspace/mod bootstrap from a template.
+7. Productive support currently materializes only the 1.21.11 environment end-to-end.
+8. No general workspace/mod bootstrap catalog by supported target version.
 9. Brain knowledge does not automatically become an executable contract.
 10. Benchmark infrastructure measures capabilities but does not itself make them productive.
 
@@ -97,7 +101,15 @@ R68 confirms R67:
 - binary PNG read/write is not supported;
 - deterministic texture recoloring is not supported.
 
-The correct interpretation is not that the runtime lacks all reusable primitives. The limiting boundary is predominantly the productive request → planning/capability → requirements/validation path.
+R70 additionally confirms:
+
+- `KnowledgeEnvironment`, `KnowledgeEnvironmentResolver`, `FabricInspector`, Brain compatibility/retrieval/provenance and the Build/Artifact base are reusable;
+- Build/Artifact/Storage are largely version-neutral;
+- the Harness already transports version context but currently validates only the supported 1.21.11 environment by default;
+- no parallel environment/profile architecture should be introduced;
+- no existing core version-aware component requires replacement.
+
+The correct interpretation is not that the runtime lacks all reusable primitives. The limiting boundary is predominantly the productive request → planning/capability → requirements/validation path plus the lack of a productive multi-version support matrix.
 
 ## 4. Fabric Alpha Capability Catalog
 
@@ -234,7 +246,7 @@ Not every imaginable custom behavior should require a predefined capability type
 2. [x] Auditar capacidades reales actuales tras v0.9
 3. [x] Definir catálogo mínimo de capacidades Fabric para Alpha
 4. [x] Definir estrategia de assets: texturas, modelos, sonidos y generación visual
-5. [ ] Definir estrategia multi-versión Minecraft/Fabric
+5. [x] Definir estrategia multi-versión Minecraft/Fabric
 6. [ ] Definir evolución necesaria del Minecraft Brain
 7. [ ] Definir evolución de validación, Test Harness y CompletionGate
 8. [ ] Evaluar dónde Multi-Agent aporta valor real
@@ -357,7 +369,112 @@ Whether this responsibility should later become a specialized agent remains expl
 
 ## 8. Multi-version Minecraft/Fabric strategy
 
-Status: `PENDING / NOT YET DECIDED`
+Status: `ACCEPTED`
+
+R70 verdict:
+
+`PD_AGENT_R70_MULTI_VERSION_FOUNDATION_PARTIAL`
+
+### Reuse-first architecture decision
+
+PD Agent must **reuse** the existing version-aware foundation:
+
+- `KnowledgeEnvironment`;
+- `KnowledgeEnvironmentResolver`;
+- `FabricInspector`;
+- Brain compatibility/version filtering;
+- provenance/retrieval/cache infrastructure;
+- version context already transported by the Minecraft Harness;
+- version-neutral Build/Artifact/Storage components.
+
+Do **not** introduce a parallel `FabricEnvironmentProfile` or second environment model unless a future audited requirement proves that the existing environment abstraction cannot be extended safely.
+
+### Alpha supported targets
+
+Alpha MUST support the following Fabric/Minecraft targets end-to-end:
+
+- Minecraft `1.21.11` — legacy/obfuscated baseline already used by the current productive stack;
+- Minecraft `26.1` — first modern deobfuscated-generation target and an important architectural boundary;
+- Minecraft `26.2` — primary modern/recommended Alpha target.
+
+This is an explicit support matrix, not a promise to support every historical Minecraft version.
+
+### Two technical environment families
+
+The implementation must account for the ecosystem boundary between:
+
+- `LEGACY_OBFUSCATED`: Minecraft `<= 1.21.11`;
+- `MODERN_UNOBFUSCATED`: Minecraft `>= 26.1`.
+
+These are compatibility/environment families, not separate agents or separate PD Agent runtimes.
+
+The same product/runtime architecture remains authoritative. Version-specific differences belong in version-aware data, adapters, templates, knowledge and Harness/probe compatibility where necessary.
+
+### Productive version selection
+
+Canonical flow:
+
+`request/project → detect/resolve version → KnowledgeEnvironment → support matrix → compatible knowledge/template/capabilities → build → compatible Harness → CompletionGate → Delivery`
+
+Rules:
+
+- If the user explicitly requests a supported target version, PD Agent uses that target.
+- If the user does not specify a version for a newly created mod, PD Agent uses the current recommended Alpha target, initially `26.2`.
+- For an imported project, PD Agent detects the existing environment and preserves it when supported.
+- Unsupported imported/project versions must fail clearly as `UNSUPPORTED_VERSION` or equivalent; PD Agent must not silently migrate or change the target version.
+- Explicit migration between supported versions may be added later, but it is not required to silently occur during normal task execution.
+
+### Version-aware support registry
+
+PD Agent needs a small canonical support registry/matrix that complements — not replaces — `KnowledgeEnvironment`.
+
+Conceptually it maps a supported target/environment to the resources required to prove support, including as applicable:
+
+- validated bootstrap/template materialization;
+- Brain knowledge sources/packs;
+- mapping/deobfuscation mode;
+- compatible Loader/Fabric API/Loom/Java/Gradle constraints;
+- capability compatibility;
+- Harness/probe compatibility;
+- Alpha acceptance evidence.
+
+The registry must not become a monolithic duplicate of the existing environment/knowledge system.
+
+### Brain isolation across versions
+
+Version-sensitive knowledge must not leak across incompatible environments.
+
+Especially:
+
+- legacy Yarn/Intermediary-oriented knowledge must not be injected into modern deobfuscated targets unless explicitly compatible;
+- source packs, mappings, examples and compatibility claims must be selected against the resolved `KnowledgeEnvironment`;
+- provenance must preserve the exact source/version used.
+
+### Templates and capabilities
+
+Supported versions must use validated version-aware bootstrap/template materialization rather than ad-hoc copies.
+
+Capability contracts should remain version-neutral where possible. Version-specific implementation details belong behind compatibility/adaptation boundaries rather than multiplying capability types by Minecraft version.
+
+Example principle:
+
+`TOOL(type=SWORD, material=RUBY, ...)`
+
+should remain one conceptual capability even if the generated implementation differs between `1.21.11` and `26.2`.
+
+### Validation rule for advertised support
+
+PD Agent may advertise a Minecraft/Fabric target as Alpha-supported only when the relevant end-to-end chain is validated for that target:
+
+`template/bootstrap → Brain/context → capability planning → mutation → build → artifact → Minecraft Harness/probes → CompletionGate → Delivery`
+
+A version being detectable or buildable is not enough to claim product support.
+
+### Scope control
+
+Alpha intentionally supports a small explicit set of targets rather than attempting every Fabric-compatible Minecraft release.
+
+New versions should be added by extending the support registry/data/adapters and passing the same validation/acceptance gates, not by forking the runtime.
 
 ## 9. Minecraft Brain evolution
 
