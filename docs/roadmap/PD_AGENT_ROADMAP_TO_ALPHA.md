@@ -247,7 +247,7 @@ Not every imaginable custom behavior should require a predefined capability type
 3. [x] Definir catálogo mínimo de capacidades Fabric para Alpha
 4. [x] Definir estrategia de assets: texturas, modelos, sonidos y generación visual
 5. [x] Definir estrategia multi-versión Minecraft/Fabric
-6. [ ] Definir evolución necesaria del Minecraft Brain
+6. [x] Definir evolución necesaria del Minecraft Brain
 7. [ ] Definir evolución de validación, Test Harness y CompletionGate
 8. [ ] Evaluar dónde Multi-Agent aporta valor real
 9. [ ] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
@@ -258,6 +258,86 @@ Not every imaginable custom behavior should require a predefined capability type
 14. [ ] Asignar versiones v0.10 → Alpha
 15. [ ] Definir dependencias y orden de ejecución
 16. [ ] Publicar Roadmap to Alpha canónico
+
+## 6. Minecraft Brain evolution
+
+Status: `ACCEPTED`
+
+R71 verdict:
+
+`PD_AGENT_R71_ALPHA_BRAIN_FOUNDATION_PARTIAL`
+
+The existing Minecraft Brain is a valid Alpha foundation and must be evolved
+through reuse and extension, not replaced by a second Brain or parallel
+environment model.
+
+### Reuse-first decision
+
+Preserve and reuse:
+
+- `KnowledgeEnvironment` and `KnowledgeEnvironmentResolver`;
+- canonical Knowledge records and frozen Knowledge Packs;
+- provenance, integrity and version-sensitive compatibility gates;
+- SQLite/index, retrieval, selection and `ContextSource`/provider boundary;
+- `KnowledgeTrace` and Semantic Repair foundation.
+
+No central Brain component has evidence requiring replacement.
+
+### Knowledge strategy
+
+Alpha knowledge SHALL use:
+
+`STRUCTURED / VERSIONED SOURCES + SMALL HIGH-VALUE CURATED KNOWLEDGE`
+
+Structured/versioned sources should provide symbols/API, Vanilla registries
+and data, materials, recipes, entities, worldgen, assets and relationships,
+compatibility, mappings and version changes. Curated knowledge should remain
+focused on patterns, workflows, high-value conceptual relationships and
+failure/diagnostic knowledge that structured sources do not express well.
+
+PD Agent must not grow a manually maintained dictionary of all Minecraft
+content.
+
+### Vanilla and Fabric coverage
+
+The Brain evolution must extend knowledge coverage for the Alpha MUST
+capabilities: items, blocks, recipes, tags/loot, food/components, tools and
+materials, armor, interactions/events, effects, commands, entities/mobs,
+attributes, spawning, Vanilla behavior reuse, worldgen, resources, models,
+blockstates and version-sensitive Fabric knowledge.
+
+Alpha also requires a versioned Vanilla semantic catalog/index covering
+registries, content relationships, materials, behaviors, worldgen and asset
+metadata. Yarn/mappings alone do not provide that semantic layer.
+
+### Multi-version knowledge
+
+Use the existing `KnowledgeEnvironment`, compatibility filtering,
+version-sensitive records, frozen packs and provenance. Alpha targets are
+Minecraft `1.21.11`, `26.1` and `26.2`; legacy and modern mappings require
+different compatible sources/adapters, not duplicated Brain runtimes.
+
+A version is not supported merely because it can be represented or detected.
+It requires populated compatible knowledge and later end-to-end validation.
+Cross-version leakage must remain fail-closed.
+
+### Ownership boundaries
+
+- Brain: facts, knowledge, compatibility, provenance, retrieval and injection.
+- Capability Planner: intent to capabilities, requirements and expectations.
+- Fabric Agent Runtime: code/resource mutations.
+- Asset Pipeline: asset reuse, derivation, generation and transformation.
+- Build/Debug: build evidence and repair.
+- Test Harness: Minecraft runtime evidence.
+- CompletionGate: requirement satisfaction and completion.
+
+No Asset Agent is created by this decision.
+
+### Implementation timing
+
+No independent Brain DESIGN/RFC/IMP is created yet. Roadmap completion must
+first establish the grouping and dependencies between Brain evolution,
+Capability Planner, Multi-Version, Asset Pipeline and Validation/Harness.
 
 ## 7. Assets strategy
 
