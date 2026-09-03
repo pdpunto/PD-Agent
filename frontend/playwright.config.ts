@@ -18,6 +18,8 @@ process.env.PD_AGENT_I12_D_TEMP_ROOT = isolatedRoot;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // R15 has its own deterministic server composition and config.
+  testIgnore: ["tests/e2e/r15-r1.spec.ts"],
   globalTeardown: "./playwright.global-teardown.ts",
   fullyParallel: false,
   workers: 1,

@@ -13,7 +13,7 @@ test("integrated productive success uses Brain, repair, gate and delivery", asyn
   const task = "Añade un bloque utilitario craftable llamado Server Core, incluyendo su block item, recursos en_us y receta, preservando el mod y los entrypoints existentes.";
   await page.getByLabel("Task request").fill(task);
   await page.getByRole("button", { name: "Start task" }).click();
-  await expect(page).toHaveURL(/\/executions\/[0-9a-f-]+$/i);
+  await expect(page).toHaveURL(/\/executions\/[0-9a-f-]+\?project=[0-9a-f-]+$/i);
   await expect(page.getByText("¡Todo listo!")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("link", { name: "Descargar JAR" })).toBeVisible();
   await page.getByRole("button", { name: "Ver detalles" }).click();
@@ -29,7 +29,7 @@ test("integrated productive success uses Brain, repair, gate and delivery", asyn
   expect(download.ok()).toBeTruthy();
   const downloadedBody = await download.body();
   expect(downloadedBody.length).toBeGreaterThan(0);
-  const runId = page.url().split("/").pop()!;
+  const runId = new URL(page.url()).pathname.split("/").pop()!;
   const runRoot = join(process.env.PD_AGENT_R15_R1_ROOT!, "runs", runId);
   const run = JSON.parse(readFileSync(join(runRoot, "run.json"), "utf8"));
   const traces = readdirSync(join(runRoot, "evidence"))
@@ -47,6 +47,6 @@ test("integrated productive success uses Brain, repair, gate and delivery", asyn
   expect(delivery).toBeDefined();
   expect(createHash("sha256").update(downloadedBody).digest("hex")).toBe(delivery.artifact_sha256);
   await page.getByRole("button", { name: /Open project/ }).click();
-  await page.getByRole("button", { name: /R15-R1 integrated project/ }).click();
+  await expect(page.getByRole("heading", { name: "R15-R1 integrated project" })).toBeVisible();
   await expect(page.getByText(/Server Core/)).toBeVisible();
 });

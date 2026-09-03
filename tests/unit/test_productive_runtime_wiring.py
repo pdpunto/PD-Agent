@@ -194,6 +194,48 @@ def test_productive_boundary_records_runtime_failure(tmp_path: Path) -> None:
     assert state.progress_ledger is not None and state.progress_ledger.failures
 
 
+def test_productive_boundary_reconciles_runtime_failure_in_runtime_id_domain(tmp_path: Path) -> None:
+    contract = _contract()
+    validation = contract.validation_requirements[0]
+    contract = replace(
+        contract,
+        fingerprint=None,
+        validation_requirements=(replace(
+            validation,
+            spec={**validation.spec, "observations": [{**validation.spec["observations"][0], "requirement_ids": [validation.validation_requirement_id]}]},
+        ),),
+    )
+    artifact = _artifact(tmp_path)
+    state = _state(contract, artifact)
+    state.build_identities = (BuildAttemptIdentity(
+        build_attempt_id="build-1",
+        source_revision=compute_source_revision(tmp_path).revision,
+        contract_identity=contract.identity(),
+        result_ref="builds/1",
+        success=True,
+    ),)
+    validator = ProductiveMinecraftFunctionalValidator(
+        contract=contract,
+        runner=_Runner(MinecraftObservationStatus.FAIL),
+    )
+    validator.bind_run_state(state)
+
+    first = validator.validate(tmp_path, artifact, contract, state.run_id)
+    assert first.status is ValidationStatus.REPAIRABLE_FAIL
+    assert state.progress_ledger is not None
+    assert state.progress_ledger.failures[0].requirement_ids == validation.requirement_ids
+
+    validator.runner = _Runner(MinecraftObservationStatus.PASS)
+    second = validator.validate(tmp_path, artifact, contract, state.run_id)
+
+    assert second.status is ValidationStatus.PASS
+    latest = {item.failure_id: item for item in state.progress_ledger.failures}
+    assert latest[f"runtime-failure-{state.runtime_identities[0].runtime_attempt_id}"].status is FailureFactStatus.RESOLVED
+    completion = CompletionGate().evaluate(contract, state.progress_ledger, state)
+    assert not completion.active_failure_ids
+    assert completion.complete, repr((completion.pending_requirement_ids, completion.missing_validation_requirement_ids, completion.stale_validation_requirement_ids, completion.invalid_blocking_validation_refs, completion.missing_completion_criteria, state.source_revision, state.artifact_identity, state.build_identities, state.runtime_identities))
+
+
 def test_invalid_observation_mapping_has_structured_violation_message(tmp_path: Path) -> None:
     contract = _contract()
     artifact = _artifact(tmp_path)

@@ -218,30 +218,56 @@ class ProductiveMinecraftFunctionalValidator:
                 self.gradle_user_home,
             ) if self.gradle_user_home is not None else (Path(project_root),),
         )
+        if outcome.runtime_identity is not None and self._run_state.progress_ledger is not None:
+            # Runtime observations may carry validation IDs; the ledger and gate use task IDs.
+            runtime_ids = set(outcome.runtime_identity.requirement_ids)
+            task_ids = tuple(dict.fromkeys(requirement.requirement_ids))
+            if runtime_ids != set(task_ids):
+                normalized_identity = replace(outcome.runtime_identity, requirement_ids=task_ids)
+                self._run_state.runtime_identities = (*self._run_state.runtime_identities[:-1], normalized_identity)
+                ledger = self._run_state.progress_ledger
+                normalized_failures = tuple(
+                    replace(failure, requirement_ids=task_ids, fingerprint=None)
+                    if runtime_ids.intersection(failure.requirement_ids)
+                    else failure
+                    for failure in ledger.failures
+                )
+                self._run_state.progress_ledger = replace(ledger, failures=normalized_failures)
+                outcome = replace(outcome, runtime_identity=normalized_identity)
         self.last_runtime_result = outcome.runtime_result
         result = outcome.validation_result or ValidationResult(stage=ValidationStage.RUNTIME, status=ValidationStatus.BLOCKED, summary="runtime validation did not produce a result")
         if result.status is ValidationStatus.PASS and self._run_state.progress_ledger is not None:
             requirement_ids = tuple(dict.fromkeys(requirement.requirement_ids))
             ledger = self._run_state.progress_ledger
             satisfied = tuple(dict.fromkeys((*ledger.satisfied_requirement_ids, *requirement_ids)))
-            self._run_state.progress_ledger = replace(ledger, satisfied_requirement_ids=satisfied)
             if outcome.runtime_identity is not None:
                 from pd_agent.runtime.repair import FailureReconciler
 
                 reconciler = FailureReconciler()
+                runtime_requirement_ids = tuple(outcome.runtime_identity.requirement_ids)
+                evidence = dict(ledger.evidence_by_requirement)
+                runtime_refs = tuple(dict.fromkeys(result.evidence_refs))
+                for requirement_id in requirement_ids:
+                    evidence[requirement_id] = tuple(dict.fromkeys((*evidence.get(requirement_id, ()), *runtime_refs)))
+                for validation_id in set(runtime_requirement_ids) - set(requirement_ids):
+                    evidence.pop(validation_id, None)
+                ledger = replace(ledger, satisfied_requirement_ids=satisfied, evidence_by_requirement=evidence)
+                self._run_state.progress_ledger = ledger
                 for failure in tuple(self._run_state.progress_ledger.failures):
                     if failure.status.value != "ACTIVE":
                         continue
-                    if not set(failure.requirement_ids).intersection(requirement_ids):
+                    if not set(failure.requirement_ids).intersection(runtime_requirement_ids):
                         continue
                     reconciler.reconcile_runtime(
                         self._run_state,
                         failure,
                         runtime=outcome,
                         artifact=artifact_identity,
-                        requirement_ids=requirement_ids,
+                        requirement_ids=runtime_requirement_ids,
                         validation_revision=outcome.runtime_identity.validation_revision,
                     )
+            else:
+                self._run_state.progress_ledger = replace(ledger, satisfied_requirement_ids=satisfied)
         self.last_results = (result,)
         return result
 
