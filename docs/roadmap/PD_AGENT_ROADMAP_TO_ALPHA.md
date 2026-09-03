@@ -255,7 +255,7 @@ Not every imaginable custom behavior should require a predefined capability type
 11. [x] Definir benchmarks y Alpha Acceptance Suite
 12. [x] Inventariar gaps v0.9 → Alpha
 13. [x] Agrupar gaps en milestones mínimos
-14. [ ] Asignar versiones v0.10 → Alpha
+14. [x] Asignar versiones v0.10 → Alpha
 15. [ ] Definir dependencias y orden de ejecución
 16. [ ] Publicar Roadmap to Alpha canónico
 
@@ -1350,6 +1350,81 @@ framework, Alpha Multi-Agent framework or security/tool policy.
 
 This grouping is ready for Point 14. It does not assign `v0.10`, `v0.11` or
 any other version, and it does not define Point 15.
+
+## Point 14. Roadmap version assignment
+
+Status: `ACCEPTED`
+
+R85 audit verdict: `PD_AGENT_R85_VERSION_ASSIGNMENT_READY_WITH_CORRECTIONS`
+
+The canonical roadmap closure-gate assignment is:
+
+| Roadmap label | Primary closure milestone |
+|---|---|
+| `v0.10` | M1 - General Fabric Task Foundation |
+| `v0.11` | M2 - Versioned Fabric Platform and Brain |
+| `v0.12` | M3 - Alpha Fabric Capabilities and Assets |
+| `v0.13` | M4 - Generalized Validation, Repair and Runtime |
+| `v0.14` | M5 - Secure Product Alpha |
+| `Alpha` | M6 - Alpha Acceptance and Release Candidate |
+
+`v0.10` through `v0.14` identify the **primary closure gate** of each
+milestone. They do not define a rigid waterfall and do not mean that all
+related work can occur only inside that label. M3 and M4 remain co-development;
+security, Product integration, acceptance/evidence, telemetry/economics,
+currentness, CompletionGate authority and `(version, capability)` evidence
+remain continuous concerns.
+
+### Roadmap labels and package versions
+
+The labels `v0.10` through `v0.14` are roadmap/milestone labels. They do not
+replace or automatically change:
+
+- Python package version: `0.1.0`;
+- frontend package version: `0.1.0`;
+- schema versions;
+- benchmark, dataset or task versions;
+- Minecraft/Fabric versions.
+
+Package/software version evolution will be decided explicitly when required;
+there is no artificial synchronization with roadmap labels.
+
+### Alpha semantics
+
+Alpha is not `v0.15`. No `v0.15` is introduced without a future decision and
+real need. `v0.14 CLOSED/PASS` is not Alpha; after M5 closes, M6 must complete
+the Alpha certification.
+
+Alpha may be declared only after M6 satisfies its hard gates, including
+Product E2E, held-out acceptance, advertised version-by-capability evidence,
+three-version support evidence, security/resource gates,
+repair/negative/adversarial gates, Managed Reference Configuration, frozen RC,
+CompletionGate-authoritative campaign and valid Delivery/JAR.
+
+### Preserved milestone meaning
+
+Point 13 remains unchanged:
+
+- M1: General Fabric Task Foundation;
+- M2: Versioned Fabric Platform and Brain;
+- M3: Alpha Fabric Capabilities and Assets;
+- M4: Generalized Validation, Repair and Runtime;
+- M5: Secure Product Alpha;
+- M6: Alpha Acceptance and Release Candidate.
+
+No gap is moved, split or fused, and no primary ownership changes.
+
+### Rationale and scope boundary
+
+R85 found no collision with previous PD Agent versions, no conflicting Git
+tags, no prior Alpha=v1.0 commitment and no incompatible Alpha definition.
+One conceptual milestone per primary closure gate is coherent, and no
+evidence requires `v0.15` before Alpha. The labels do not invalidate
+co-development or continuous concerns.
+
+Point 14 does not define the technical dependency graph, implementation
+batches, internal order, prerequisites, overlap schedule or critical path.
+Those decisions belong to Point 15.
 
 ## 9. Minecraft Brain evolution
 
