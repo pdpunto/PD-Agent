@@ -256,7 +256,7 @@ Not every imaginable custom behavior should require a predefined capability type
 12. [x] Inventariar gaps v0.9 → Alpha
 13. [x] Agrupar gaps en milestones mínimos
 14. [x] Asignar versiones v0.10 → Alpha
-15. [ ] Definir dependencias y orden de ejecución
+15. [x] Definir dependencias y orden de ejecución
 16. [ ] Publicar Roadmap to Alpha canónico
 
 ## 6. Minecraft Brain evolution
@@ -1425,6 +1425,175 @@ co-development or continuous concerns.
 Point 14 does not define the technical dependency graph, implementation
 batches, internal order, prerequisites, overlap schedule or critical path.
 Those decisions belong to Point 15.
+
+## Point 15. Alpha dependency graph and execution order
+
+Status: ACCEPTED
+
+Source audit: R87 - Dependency Graph & Execution Order Audit
+
+Verdict: `PD_AGENT_R87_EXECUTION_ORDER_READY_WITH_CORRECTIONS`
+
+Decision: `POINT_15_ACCEPTED`
+
+This point defines dependency semantics and execution order only. It does not
+implement a milestone, create a new milestone, or start Point 16.
+
+### Closure gate order
+
+The canonical closure gates remain:
+
+`v0.10 / M1 CLOSED/PASS` -> `v0.11 / M2 CLOSED/PASS` ->
+`v0.12 / M3 CLOSED/PASS` -> `v0.13 / M4 CLOSED/PASS` ->
+`v0.14 / M5 CLOSED/PASS` -> `PD Agent Alpha`.
+
+Each gate owns the closure of its primary milestone. This is a closure order,
+not a technical waterfall: foundations and continuous concerns belonging to
+later milestones may begin earlier when required.
+
+### Hard dependencies
+
+- M1 usable is prerequisite for serious M3 breadth.
+- M2 platform support sufficient for a target is prerequisite for claiming
+  that target's capability.
+- Early M4 validation foundation is prerequisite for serious M3 breadth.
+- Real M3 capability slices are necessary to generalize and close M4.
+- M3 and M4 contracts and capability evidence are necessary for M5 Product
+  breadth closure.
+- M4 CLOSED/PASS and M5 CLOSED/PASS are both prerequisites for M6.
+- M1-M5 CLOSED/PASS are prerequisites for Alpha certification.
+
+M1 has no hard dependency on M2 CLOSED or M4 CLOSED. M1 may close its
+  planner, schema, composition, dependency representation, requirement
+  decomposition, and validation-requirement contracts through deterministic
+  tests and representative composition on the existing foundation. The
+  minimum evidence compatibility observed by R87 must not become a circular
+  M1 -> M2/M4 -> M1 closure dependency.
+
+### Early foundations
+
+Before serious M3 breadth, the project must have:
+
+1. M1 usable planner/composition foundations.
+2. M2 minimum platform foundations: Support Registry, version-aware
+   bootstrap/template, project identity, per-target KnowledgeEnvironment,
+   Fabric/Loom/API/mappings adapters, and leakage controls.
+3. Early M4 foundations: productive 1-to-N validation, structural artifact
+   expectations, parameterized probes, normalized observations, and
+   CompletionGate/currentness integration.
+4. Security guardrails appropriate to every new execution path.
+
+These foundations must not be deferred until v0.13 or v0.14.
+
+### M3/M4 co-development
+
+The required capability-slice loop is:
+
+`capability slice` -> `artifact expectations` -> `validator/probe` -> `build`
+-> `runtime/Harness evidence when applicable` -> `repair/revalidation when
+applicable` -> `CompletionGate` -> `next capability slice`.
+
+M3 must close MUST_ALPHA breadth, assets, and capability/version-specific
+evidence. M4 must subsequently close generalized, parameterized, reusable,
+multi-version N validation/repair/runtime foundations. M3 and M4 therefore do
+not mean implementing all capabilities first and validating everything at the
+end; v0.12 may close before v0.13 without turning M4 into post-hoc QA.
+
+### Multi-version strategy
+
+1. Use validated 1.21.11 as the initial baseline for common abstractions.
+2. Introduce 26.1 early, before substantial M3 breadth, because it is the
+   first MODERN_UNOBFUSCATED boundary.
+3. Make the first cross-family test a simple, parameterized, composable
+   capability through request -> plan -> mutation -> build -> artifact ->
+   validation on both 1.21.11 and 26.1.
+4. Introduce 26.2 during M2/M3 and before M3 closure.
+5. Keep one conceptual capability with version-aware adapters and
+   expectations where necessary.
+6. Treat `(version, capability)` as the unit of support and evidence.
+
+Do not implement all capabilities in 1.21.11 and port them at the end.
+
+### Continuous concerns and sequencing
+
+Security, Product integration, Acceptance/Evidence, Telemetry/Economics,
+Currentness, and CompletionGate authority are transversal concerns, not new
+milestones.
+
+Security guardrails must precede relevant execution paths: protected-path and
+workspace boundaries, archive validation, imported-Gradle prohibition until
+trust/isolation, child-environment policy, provider-secret sanitization,
+timeouts, cleanup, resource bounds, duplicate-execution protection, and
+cancel/reconciliation foundations before Product exposure. No milestone may
+introduce a known-insecure path with a promise to fix it in v0.14.
+
+Product integration is incremental: M1 request/capability status and honest
+unsupported rejection; M2 project identity, target version, and compatibility;
+M3 composed capabilities, assets, and meaningful support states; M4
+validation, repair, currentness, and CompletionGate projection; M5 New/Import/
+Continue, trust/isolation, intervention, cancel, recovery, History, Delivery,
+JAR, and Product Alpha breadth. M5 does not start Product from zero.
+
+Acceptance/evidence hooks are incremental: M1 schemas/requirement IDs/scenario
+metadata; M2 version/project/bootstrap manifests; M3 capability/composition
+scenarios, assets, and `(version, capability)` evidence; M4 validation,
+repair, runtime, artifact, and CompletionGate evidence; M5 Product E2E and
+security/recovery hooks; M6 RC freeze, held-out campaign, Managed Reference
+Configuration, and certification. M6 must not discover fundamental M1-M5
+failures for the first time.
+
+### Internal technical path
+
+`M1 planner/composition` -> `M2 platform/Brain/bootstrap baseline` +
+`early M4 validation foundation` -> `M3 <-> M4 capability/validation slices`
+-> `M4 generalized validation/repair/runtime closure` -> `M5 secure Product
+closure` -> `M6 frozen RC + held-out certification`.
+
+M1 and M2 may overlap, as may M2 and early M4. M3 and M4 are iterative.
+Product, Security, and Acceptance evolve throughout the applicable work.
+
+### Parallelism and anti-patterns
+
+Conceptually parallel work includes M1 <-> M2, M2 <-> early M4, M3 <-> M4,
+M3/M4 <-> Product integration, M1-M5 <-> acceptance hooks, and Security
+guardrails alongside applicable execution areas. This does not require
+multiple agents; Codex may execute sequentially while preserving these
+semantics.
+
+Prohibited ordering includes: M1 then all M3 then M4; late porting from
+1.21.11; deferring Security or Product until M5; deferring acceptance hooks
+until M6; claiming support without `(version, capability)` evidence; declaring
+Alpha because v0.14 closed; or creating parallel frameworks for sequencing.
+
+Mitigations are small vertical slices, validator/probe per capability, early
+26.1 and pre-closure 26.2, guardrails before new execution paths, incremental
+Product projections, incremental evidence scenarios, explicit contracts/
+manifests/identities/Gate, and verifiable boundary-sized commits.
+
+### Per-gate conditions
+
+- **v0.10 / M1:** starts from v0.9 contracts/runtime; closes general
+  planner/schema/composition/requirements/validation requirements; makes no
+  Alpha breadth, full multi-version, or Alpha claim.
+- **v0.11 / M2:** may start while M1 progresses; closes versioned Platform,
+  Brain, and New Project bootstrap for M2 Alpha targets; makes no full
+  MUST_ALPHA breadth claim.
+- **v0.12 / M3:** starts with usable M1, sufficient M2 target support, early
+  M4 foundation, and security guardrails; closes MUST_ALPHA breadth, assets,
+  and required version/capability evidence; does not close generalized
+  validation, Product Alpha, or certification.
+- **v0.13 / M4:** starts from real capability slices; closes generalized,
+  reusable, multi-version N validation, ArtifactValidator, probes, Harness,
+  repair/runtime, and CompletionGate authority; does not close Product Alpha
+  or certification.
+- **v0.14 / M5:** starts from stable backend capability/version contracts;
+  closes New/Import/Continue, trust/isolation/resources, Product Alpha
+  breadth, and recovery/cancel requirements; does not certify Alpha.
+- **Alpha / M6:** starts after M1-M5 CLOSED/PASS and RC freeze; closes held-out
+  Product E2E, version-by-capability evidence, security, repair/adversarial
+  validation, Managed Reference Configuration, Delivery/JAR, and the final
+  CompletionGate-authoritative campaign. It makes no claim outside the
+  announced support matrix.
 
 ## 9. Minecraft Brain evolution
 
