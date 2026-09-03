@@ -48,6 +48,12 @@ from .canonical import (
 from .precode import FirstEditTracker, PreCodeDerivation, PreCodeKnowledgeNeedDeriver, PreCodePhase
 from .semantic_repair import SemanticRepairDerivation, SemanticRepairKnowledgeNeedDeriver
 from .orchestration import BrainOrchestrationResult, BrainTrigger, FabricBrainOrchestrator
+from .selection import (
+    KnowledgeSourceSelection,
+    knowledge_service_for_environment,
+    select_knowledge_sources_for_environment,
+    select_knowledge_sources_for_platform,
+)
 from .frozen import (
     EXPECTED_FROZEN_SOURCE_IDS,
     FROZEN_PACK_REVISION,
@@ -108,6 +114,10 @@ __all__ = [
     "BrainOrchestrationResult",
     "BrainTrigger",
     "FabricBrainOrchestrator",
+    "KnowledgeSourceSelection",
+    "knowledge_service_for_environment",
+    "select_knowledge_sources_for_environment",
+    "select_knowledge_sources_for_platform",
     "FROZEN_PACK_REVISION",
     "EXPECTED_FROZEN_SOURCE_IDS",
     "FrozenKnowledgePackSource",
