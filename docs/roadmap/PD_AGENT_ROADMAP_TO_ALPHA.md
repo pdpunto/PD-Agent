@@ -254,7 +254,7 @@ Not every imaginable custom behavior should require a predefined capability type
 10. [x] Definir requisitos Product/UI restantes para Alpha
 11. [x] Definir benchmarks y Alpha Acceptance Suite
 12. [x] Inventariar gaps v0.9 → Alpha
-13. [ ] Agrupar gaps en milestones mínimos
+13. [x] Agrupar gaps en milestones mínimos
 14. [ ] Asignar versiones v0.10 → Alpha
 15. [ ] Definir dependencias y orden de ejecución
 16. [ ] Publicar Roadmap to Alpha canónico
@@ -1185,6 +1185,171 @@ The inventory is sufficiently complete to begin Point 13. Point 13 must group
 these gaps into the minimum coherent milestone set and must not map one gap to
 one milestone automatically. No milestones, versions or ordering are defined
 by Point 12.
+
+## Point 13. Alpha milestone grouping
+
+Status: `ACCEPTED`
+
+R83 audit verdict: `PD_AGENT_R83_SIX_MILESTONE_GROUPING_READY_WITH_CORRECTIONS`
+
+The minimum coherent Alpha grouping is six conceptual milestones. They are
+not a rigid waterfall, do not assign release versions and do not replace the
+v0.9 architecture. `GAPS != MILESTONES`.
+
+### M1 - General Fabric Task Foundation
+
+Primary closure: `GAP-PLANNER-001`, `GAP-COMPOSE-001`.
+
+Foundation for `GAP-CAP-001`. Establish a general, parameterized,
+composable, version-aware path:
+
+`request -> capability schema -> planning -> dependency/composition ->
+requirements -> validation requirements`.
+
+Reuse `FabricTaskContract`, `TaskProgressLedger`, `CompletionGate` and the
+existing runtime/orchestration. No second runtime or orchestrator.
+
+Exit capability: representable Fabric requests become capability and
+validation plans without Server Core hardcoding. This does not promise full
+capability breadth, three supported versions, Product Alpha or release
+readiness.
+
+### M2 - Versioned Fabric Platform and Brain
+
+Primary closure: `GAP-VERSION-001`, `GAP-BRAIN-001`, `GAP-PROJECT-001`.
+
+Foundation for `GAP-CAP-001` and `GAP-ASSET-001`. Establish Support Registry,
+version-aware templates/bootstrap, own project identity, mod/package/metadata
+handling, populated versioned Brain packs, semantic catalog foundation and
+correct Fabric environment adapters for `1.21.11`, `26.1` and `26.2`.
+
+Detection or configurability is not support. Exit capability is a clean
+identity-bearing project with the correct platform and knowledge environment
+for each Alpha target, not complete capability breadth.
+
+### M3 - Alpha Fabric Capabilities and Assets
+
+Primary closure: `GAP-CAP-001`, `GAP-ASSET-001`.
+
+`GAP-ASSET-002` is explicitly `POST_ALPHA / DEFER`. Implement the MUST_ALPHA
+capability breadth with general primitives, composition and the asset boundary
+`REUSE -> DERIVE -> GENERATE`.
+
+Every capability batch must include implementation, required validators or
+probes, artifact expectations and tests/evidence. `(version, capability)` is
+the real support/evidence unit. Advanced subjective visual generation is not
+an Alpha blocker.
+
+Exit capability: MUST_ALPHA breadth is implemented with deterministic asset
+operations and corresponding evidence, without fixture-specific hardcoding.
+
+### M4 - Generalized Validation, Repair and Runtime
+
+Primary closure: `GAP-VALID-001`, `GAP-VALID-002`, `GAP-HARNESS-001`,
+`GAP-REPAIR-001`.
+
+Extend the existing Harness, ArtifactValidator, Semantic Repair,
+ledger/currentness and CompletionGate. Add 1-to-N validation, structural
+artifact expectations, parameterized probes, multi-version runtime evidence,
+build/resource/runtime repair, rebuild/revalidation and reconciliation.
+
+M3 and M4 are mandatory co-development. M4 is not deferred QA and must not
+create a second validation or evidence system.
+
+Exit capability: Alpha capabilities can produce reproducible, version-aware,
+repairable evidence through the authoritative CompletionGate.
+
+### M5 - Secure Product Alpha
+
+Primary closure: `GAP-IMPORT-001`, `GAP-SEC-001`, `GAP-SEC-002`,
+`GAP-PRODUCT-001`, `GAP-PRODUCT-002`.
+
+Close New, Import, Continue, compatibility/trust/capability states, composed
+task and asset UX, Intervention, safe Cancel, reopen/recovery, imported
+execution isolation, child environment/secrets policy, resource bounds,
+cleanup and concurrency boundaries.
+
+Security is a continuous concern from M1. No M1-M4 execution path may be
+introduced without the applicable safety guardrails. Product integration is
+also continuous through M1-M4; M5 closes Product Alpha breadth rather than
+starting Product work.
+
+Exit capability: a non-programmer can use Alpha capabilities through the real
+Product with truthful states and Alpha security guarantees.
+
+### M6 - Alpha Acceptance and Release Candidate
+
+Primary closure: `GAP-PRODUCT-003`, `GAP-BENCH-001`, `GAP-EVIDENCE-001`.
+
+Certify, rather than discover for the first time, capability breadth,
+composition, consecutive tasks, New/Import, assets, repair/negative,
+security, Product E2E, all three targets, version-by-capability evidence,
+held-out acceptance, Managed Reference Configuration, frozen RC, hard gates,
+Delivery/JAR and CompletionGate authority.
+
+Acceptance/evidence hooks evolve incrementally: M1 schemas, M2
+version/project manifests, M3 capability/composition/assets scenarios, M4
+validation/repair/runtime/gate evidence and M5 Product/security E2E hooks.
+M6 uses the existing catalog, manifests, hashes, workspaces, scheduler,
+executor, collector and telemetry; it does not create a parallel benchmark
+framework.
+
+Exit capability: a frozen RC demonstrates the Alpha hard gates over the
+immutable held-out set and can be declared PD Agent Alpha.
+
+### Primary gap ownership
+
+Each gap has one primary closure owner:
+
+- `GAP-PLANNER-001` -> M1; `GAP-COMPOSE-001` -> M1.
+- `GAP-VERSION-001` -> M2; `GAP-BRAIN-001` -> M2;
+  `GAP-PROJECT-001` -> M2.
+- `GAP-CAP-001` -> M3; `GAP-ASSET-001` -> M3;
+  `GAP-ASSET-002` -> POST_ALPHA.
+- `GAP-VALID-001` -> M4; `GAP-VALID-002` -> M4;
+  `GAP-HARNESS-001` -> M4; `GAP-REPAIR-001` -> M4.
+- `GAP-IMPORT-001` -> M5; `GAP-SEC-001` -> M5;
+  `GAP-SEC-002` -> M5; `GAP-PRODUCT-001` -> M5;
+  `GAP-PRODUCT-002` -> M5.
+- `GAP-PRODUCT-003` -> M6; `GAP-BENCH-001` -> M6;
+  `GAP-EVIDENCE-001` -> M6.
+
+There are 20 consolidated gaps, 19 with an Alpha closure milestone, and 18
+Alpha blockers. `GAP-ASSET-002` is explicitly deferred to POST_ALPHA.
+
+### Continuous concerns and dependencies
+
+Security, Product integration, acceptance/evidence, telemetry/economics,
+currentness and CompletionGate authority remain cross-cutting concerns, not
+additional milestones.
+
+Hard conceptual dependencies are:
+
+`M1 -> M3`, `M2 -> M3`, `M2 -> M4`, `M3 + M4 -> Product capability breadth`,
+`M4 -> M6`, `M5 -> M6`, and `M1-M5 -> M6`.
+
+Co-development overlaps are `M3 <-> M4`, `M2 <-> M3`, `M4 <-> M5` and
+`M5 <-> M6`. These notes justify grouping only; they do not define the
+canonical execution order of Point 15.
+
+### Alternatives and disposition
+
+- Four milestones: rejected as too coarse and authority-mixing.
+- Six milestones: accepted as the minimum coherent grouping.
+- Seven or eight milestones: rejected for fragmenting work that must be
+  co-developed.
+
+M3, M5 and M6 are intentionally large but remain coherent. No split or merge
+is justified at this stage.
+
+### Duplication prohibitions
+
+Do not create a second Brain, CompletionGate, ledger/evidence system,
+Minecraft Harness, BuildRunner, Product execution model, scheduler, benchmark
+framework, Alpha Multi-Agent framework or security/tool policy.
+
+This grouping is ready for Point 14. It does not assign `v0.10`, `v0.11` or
+any other version, and it does not define Point 15.
 
 ## 9. Minecraft Brain evolution
 
