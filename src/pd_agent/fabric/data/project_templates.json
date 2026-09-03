@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "templates": [
+    {
+      "schema_version": 1,
+      "template_id": "fabric-legacy-default",
+      "template_revision": "1",
+      "platform_ids": ["fabric-minecraft-1.21.11"],
+      "seed_identity": null,
+      "evidence": [
+        "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md",
+        "docs/validation/PD_AGENT_V0.8_I15_BUILD_ARTIFACT_READINESS.md"
+      ]
+    }
+  ]
+}

@@ -37,12 +37,15 @@ class FabricBootstrapStatus(str):
 
 @dataclass(frozen=True, slots=True)
 class PinnedFabricVersions:
+    """Legacy compatibility adapter for callers without an explicit profile."""
+
     minecraft: str = "1.21.11"
     loader: str = "0.19.3"
     fabric_api: str = "0.141.6+1.21.11"
-    yarn: str = "1.21.11+build.6"
+    yarn: str | None = "1.21.11+build.6"
     java: int = 21
     loom: str = "1.13.3"
+    mapping_family: str = "OBFUSCATED_REMAPPED"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -67,6 +70,9 @@ class FabricBootstrapResult:
     manifest_path: Path
     inspection_status: str
     versions: PinnedFabricVersions
+    platform_id: str | None = None
+    template_id: str | None = None
+    template_revision: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -81,6 +87,9 @@ class FabricBootstrapResult:
             "manifest_path": str(self.manifest_path),
             "inspection_status": self.inspection_status,
             "versions": self.versions.to_dict(),
+            "platform_id": self.platform_id,
+            "template_id": self.template_id,
+            "template_revision": self.template_revision,
         }
 
 
@@ -138,6 +147,8 @@ class FabricBootstrap:
         expected_seed_identity: str | None = None,
         wrapper_source_root: Path | None = None,
         reporting: RunStorage | None = None,
+        platform_profile: Any | None = None,
+        project_template: Any | None = None,
     ) -> FabricBootstrapResult:
         workspace = Path(workspace)
         if workspace.exists():
@@ -149,6 +160,30 @@ class FabricBootstrap:
         package = _validate_package(package)
         if mod_name is not None and (not isinstance(mod_name, str) or not mod_name.strip()):
             raise FabricBootstrapError("invalid mod_name")
+
+        profile = None
+        template = None
+        effective_versions = self.versions
+        if platform_profile is not None or project_template is not None:
+            from pd_agent.fabric import FabricPlatformProfile, FabricProjectTemplate
+
+            if not isinstance(platform_profile, FabricPlatformProfile) or not isinstance(project_template, FabricProjectTemplate):
+                raise FabricBootstrapError("platform_profile and project_template must be supplied together")
+            if platform_profile.platform_id not in project_template.platform_ids:
+                raise FabricBootstrapError("template platform mismatch")
+            profile = platform_profile
+            template = project_template
+            effective_versions = PinnedFabricVersions(
+                minecraft=profile.minecraft_version,
+                loader=profile.loader_version,
+                fabric_api=profile.fabric_api_version,
+                yarn=profile.mappings_version,
+                java=int(profile.java_version),
+                loom=profile.loom_version,
+                mapping_family=profile.mapping_family.value,
+            )
+            if template.seed_identity is not None and expected_seed_identity != template.seed_identity:
+                raise FabricBootstrapError("template seed identity mismatch")
 
         seed_identity = None
         if expected_seed_identity is not None and seed_root is None:
@@ -165,7 +200,12 @@ class FabricBootstrap:
             workspace.mkdir(parents=True, exist_ok=False)
 
         resolver = SecurePathResolver(workspace)
-        files: dict[str, str | bytes] = self._project_files(mod_id, package, mod_name or mod_id)
+        files: dict[str, str | bytes] = self._project_files(
+            mod_id,
+            package,
+            mod_name or mod_id,
+            versions=effective_versions,
+        )
         if wrapper_source_root is not None:
             files.update(self._wrapper_files(Path(wrapper_source_root)))
         else:
@@ -175,7 +215,7 @@ class FabricBootstrap:
         fingerprint_payload = {
             "mod_id": mod_id,
             "package": package,
-            "versions": self.versions.to_dict(),
+            "versions": effective_versions.to_dict(),
             "seed_identity": seed_identity,
             "files": [(path, _fingerprint_value(files[path])) for path in relative_paths],
         }
@@ -187,12 +227,20 @@ class FabricBootstrap:
             "workspace_identity": fingerprint,
             "mod_id": mod_id,
             "package": package,
-            "pinned_versions": self.versions.to_dict(),
+            "pinned_versions": effective_versions.to_dict(),
             "created_files": list(relative_paths) + ["bootstrap-manifest.json"],
             "seed_identity": seed_identity,
             "project_fingerprint": fingerprint,
             "timestamp": None,
         }
+        if profile is not None and template is not None:
+            manifest.update({
+                "platform_id": profile.platform_id,
+                "platform_identity": profile.identity,
+                "template_id": template.template_id,
+                "template_revision": template.template_revision,
+            })
+            manifest["mapping_family"] = profile.mapping_family.value
         files["bootstrap-manifest.json"] = json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
         created: list[Path] = []
@@ -234,7 +282,10 @@ class FabricBootstrap:
             seed_identity=seed_identity,
             manifest_path=workspace / "bootstrap-manifest.json",
             inspection_status=snapshot.status.value,
-            versions=self.versions,
+            versions=effective_versions,
+            platform_id=profile.platform_id if profile is not None else None,
+            template_id=template.template_id if template is not None else None,
+            template_revision=template.template_revision if template is not None else None,
         )
         if reporting is not None:
             reporting.append_event(
@@ -245,7 +296,7 @@ class FabricBootstrap:
                         "workspace_identity": fingerprint,
                         "mod_id": mod_id,
                         "package": package,
-                        "pinned_versions": self.versions.to_dict(),
+                        "pinned_versions": effective_versions.to_dict(),
                         "seed_identity": seed_identity,
                         "manifest_ref": "bootstrap-manifest.json",
                         "inspection_status": snapshot.status.value,
@@ -254,8 +305,15 @@ class FabricBootstrap:
             )
         return result
 
-    def _project_files(self, mod_id: str, package: str, mod_name: str) -> dict[str, str | bytes]:
-        v = self.versions
+    def _project_files(
+        self,
+        mod_id: str,
+        package: str,
+        mod_name: str,
+        *,
+        versions: PinnedFabricVersions | None = None,
+    ) -> dict[str, str | bytes]:
+        v = versions or self.versions
         package_path = package.replace(".", "/")
         initializer = f"""package {package};
 
@@ -269,6 +327,11 @@ public final class {self._class_name(mod_id)} implements ModInitializer {{
     }}
 }}
 """
+        mappings_dependency = (
+            '    mappings("net.fabricmc:yarn:${property("mappings_version")}:v2")\n'
+            if v.mapping_family == "OBFUSCATED_REMAPPED" else ""
+        )
+        mappings_property = "mappings_version=" + str(v.yarn) + "\n" if v.mapping_family == "OBFUSCATED_REMAPPED" else ""
         return {
             "settings.gradle.kts": f'pluginManagement {{ repositories {{ gradlePluginPortal(); maven("https://maven.fabricmc.net/") }} }}\nrootProject.name = "{mod_id}"\n',
             "build.gradle.kts": f'''plugins {{
@@ -281,14 +344,14 @@ repositories {{ mavenCentral(); maven("https://maven.fabricmc.net/") }}
 
 dependencies {{
     minecraft("com.mojang:minecraft:${{property("minecraft_version")}}")
-    mappings("net.fabricmc:yarn:${{property("mappings_version")}}:v2")
+{mappings_dependency.rstrip()}
     modImplementation("net.fabricmc:fabric-loader:${{property("loader_version")}}")
     modImplementation("net.fabricmc.fabric-api:fabric-api:${{property("fabric_api_version")}}")
 }}
 
 java {{ toolchain {{ languageVersion.set(JavaLanguageVersion.of({v.java})) }} }}
 ''',
-            "gradle.properties": f"minecraft_version={v.minecraft}\nmappings_version={v.yarn}\nloader_version={v.loader}\nfabric_api_version={v.fabric_api}\nloom_version={v.loom}\n",
+            "gradle.properties": f"minecraft_version={v.minecraft}\n{mappings_property}loader_version={v.loader}\nfabric_api_version={v.fabric_api}\nloom_version={v.loom}\n",
             "src/main/resources/fabric.mod.json": json.dumps({
                 "schemaVersion": 1,
                 "id": mod_id,

@@ -19,6 +19,7 @@ from .platform import (
     knowledge_environment_from_constraints,
     knowledge_environment_from_profile,
 )
+from .templates import FabricProjectTemplate, FabricProjectTemplateError, load_project_templates
 
 __all__ = [
     "FabricNormalOrchestrator", "FabricOrchestrationResult", "FabricOrchestrationStatus", "NormalFabricOrchestrator",
@@ -29,4 +30,5 @@ __all__ = [
     "fabric_environment_constraints_from_profile",
     "knowledge_environment_from_constraints",
     "knowledge_environment_from_profile",
+    "FabricProjectTemplate", "FabricProjectTemplateError", "load_project_templates",
 ]
