@@ -257,7 +257,7 @@ Not every imaginable custom behavior should require a predefined capability type
 13. [x] Agrupar gaps en milestones mínimos
 14. [x] Asignar versiones v0.10 → Alpha
 15. [x] Definir dependencias y orden de ejecución
-16. [ ] Publicar Roadmap to Alpha canónico
+16. [x] Publicar Roadmap to Alpha canónico
 
 ## 6. Minecraft Brain evolution
 
@@ -1098,7 +1098,7 @@ These are extensions or rework, not replacement architecture:
 | GAP-BENCH-001 | Alpha Benchmark Campaign | ACCEPTANCE_BLOCKER | YES | Breadth, composition, consecutive, versions, New/Import, assets, repair, negative and held-out campaign |
 | GAP-EVIDENCE-001 | Version x Capability Evidence | ACCEPTANCE_BLOCKER | YES | Evidence for every advertised supported `(version, capability)` pair |
 
-Count: **20 consolidated gaps**, including **18 Alpha blockers**. Gaps are
+Count: **20 consolidated gaps**, including **19 Alpha blockers**. Gaps are
 not milestones; Point 13 must group them into the minimum coherent set.
 
 The semantic catalog and metadata needed for `REUSE -> DERIVE` are Alpha
@@ -1314,7 +1314,7 @@ Each gap has one primary closure owner:
 - `GAP-PRODUCT-003` -> M6; `GAP-BENCH-001` -> M6;
   `GAP-EVIDENCE-001` -> M6.
 
-There are 20 consolidated gaps, 19 with an Alpha closure milestone, and 18
+There are 20 consolidated gaps, 19 with an Alpha closure milestone, and 19
 Alpha blockers. `GAP-ASSET-002` is explicitly deferred to POST_ALPHA.
 
 ### Continuous concerns and dependencies
@@ -1595,46 +1595,29 @@ manifests/identities/Gate, and verifiable boundary-sized commits.
   CompletionGate-authoritative campaign. It makes no claim outside the
   announced support matrix.
 
-## 9. Minecraft Brain evolution
+## Publication record
 
-Status: `PENDING / NOT YET DECIDED`
+Status: `PD_AGENT_ROADMAP_TO_ALPHA_CANONICAL`
 
-## 10. Validation / Test Harness / CompletionGate evolution
+Publication record: R90
 
-Status: `PENDING / NOT YET DECIDED`
+Canonical roadmap scope:
 
-## 11. Multi-Agent decision
+`PD Agent v0.9 CLOSED/PASS` -> `v0.10` -> `v0.11` -> `v0.12` -> `v0.13`
+-> `v0.14` -> `PD Agent Alpha`.
 
-Status: `PENDING / NOT YET DECIDED`
+Milestone closure mapping:
 
-## 12. Alpha security / compatibility / performance requirements
+- `v0.10` -> M1 - General Fabric Task Foundation
+- `v0.11` -> M2 - Versioned Fabric Platform and Brain
+- `v0.12` -> M3 - Alpha Fabric Capabilities and Assets
+- `v0.13` -> M4 - Generalized Validation, Repair and Runtime
+- `v0.14` -> M5 - Secure Product Alpha
+- `Alpha` -> M6 - Alpha Acceptance and Release Candidate
 
-Status: `PENDING / NOT YET DECIDED`
-
-## 13. Product/UI requirements remaining for Alpha
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 14. Benchmarks and Alpha Acceptance Suite
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 15. Gap inventory v0.9 → Alpha
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 16. Milestone grouping
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 17. Version assignment v0.10 → Alpha
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 18. Dependency/order plan
-
-Status: `PENDING / NOT YET DECIDED`
-
-## 19. Final roadmap publication
-
-Status: `PENDING / NOT YET DECIDED`
+This roadmap is the canonical Direction authority for the path from v0.9 to
+PD Agent Alpha. Each milestone must subsequently follow DESIGN -> RFC -> IMP
+-> Codex pre-implementation audit -> implementation -> validation -> closure.
+The roadmap does not replace milestone-specific DESIGN/RFC/IMP documents.
+Future changes require an explicit proposal, justification, evidence and
+roadmap/checklist update; no decision may be changed silently.
