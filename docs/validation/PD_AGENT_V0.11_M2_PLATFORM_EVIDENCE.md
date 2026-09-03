@@ -1,0 +1,147 @@
+# PD Agent v0.11 M2 Platform Evidence
+
+## Baseline
+
+- Baseline: `8ca84cdf58a81956e1d6a3cb2a1c8ae053c04375`
+- R116 scope: Lot I only
+- External provider/API requests: 0
+- Minecraft launches: 0
+- Benchmark runs: 0
+- Product executions: 0
+
+## Evidence Gate
+
+`FabricPlatformProfile.evidence_gate_passes` requires the following required
+evidence kinds for `SUPPORTED`:
+
+- `PROFILE_DEFINITION`
+- `INSPECTION_RESOLUTION`
+- `CONTRACT_WIRING`
+- `BRAIN_COMPATIBILITY`
+- `OFFLINE_BUILD`
+
+The model also defines `BOOTSTRAP` and `IMPORT`; these are reported below when
+there is concrete evidence for them. No evidence kind was weakened or bypassed.
+
+## Platform Matrix
+
+| Platform | Profile | Inspection | Contract | Brain | Bootstrap | Import | Offline build | Final status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Fabric 1.21.11 | PASS | PASS | PASS | PASS | PASS | PASS | NOT_AVAILABLE | SUPPORTED profile, build gate pending |
+| Fabric 26.1.2 | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | TARGET / not supported |
+| Fabric 26.2 | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | TARGET / not supported |
+
+The legacy profile is the only source-controlled `SUPPORTED` profile. Since
+`OFFLINE_BUILD` was not available in this environment, no new promotion was
+performed. Modern platforms were not promoted.
+
+## Legacy 1.21.11
+
+Profile pins are declarative in
+`src/pd_agent/fabric/data/platform_profiles.json`:
+
+- Minecraft: `1.21.11`
+- Fabric Loader: `0.19.3`
+- Fabric API: `0.141.6+1.21.11`
+- Loom: `1.13.3`
+- Java: `21`
+- Mappings: Yarn `1.21.11+build.6`
+- Mapping family: `OBFUSCATED_REMAPPED`
+- Mapping namespace: `yarn`
+- Support status: `SUPPORTED`
+
+Offline evidence already present in the repository:
+
+- profile loading and exact adapter tests in `tests/unit/test_fabric_platform_support.py`;
+- bootstrap and profile/template pairing in `tests/unit/test_r113_bootstrap_templates.py`;
+- Product inspection, resolution and exact contract environment in
+  `tests/unit/test_productive_contract_preflight.py`;
+- imported workspace inspection without bootstrap provenance in
+  `tests/unit/test_r115_imported_project_currentness.py`;
+- Brain environment adaptation in `tests/unit/test_fabric_platform_support.py`
+  and `tests/unit/test_r115_imported_project_currentness.py`.
+
+The real build command attempted for this gate was:
+
+```text
+gradlew.bat --offline --no-daemon --console=plain compileJava
+```
+
+It used Java 21 and fresh temporary roots:
+
+- workspace: `C:\dev\pruebas\pd-agent-r116-legacy-build-02f315e9e73e4d898511ef8d160070b1`
+- `GRADLE_USER_HOME`: `C:\dev\pruebas\pd-agent-r116-gradle-home-43593299c8334e0da567cf76f3de411d`
+
+The wrapper distribution was not present in the isolated Gradle home. The
+wrapper reported an attempted download of `gradle-8.14.3-bin.zip`; therefore
+the strict offline build could not complete and no artifact or SHA was
+produced. This is `OFFLINE_BUILD=NOT_AVAILABLE`, not a build PASS claim.
+
+## Modern Pins
+
+The approved pre-implementation audit records that exact local pins for
+Minecraft, Loader, Fabric API, Loom and the required modern environment were
+not verified. The local cache/repository audit found no approved exact pin set
+for either `26.1.2` or `26.2`.
+
+Consequently:
+
+- no modern profile was created or promoted;
+- no Yarn or mappings value was invented;
+- `UNOBFUSCATED` remains the intended modern family only where a future
+  evidence-backed profile is defined;
+- no modern Brain compatibility claim was made;
+- no modern bootstrap or build claim was made;
+- Product must continue to fail closed for modern target-shaped environments.
+
+Existing tests demonstrate the declarative modern rendering shape without
+claiming support in `tests/unit/test_r113_bootstrap_templates.py` and the
+target/unsupported resolution behavior in
+`tests/unit/test_fabric_platform_support.py`.
+
+## Product Fail-Closed
+
+Current Product preflight resolves the current inspection through
+`FabricSupportRegistry` and accepts only `SUPPORTED`. `TARGET`, `RETIRED`,
+unsupported, unknown and conflicting observations do not produce an executable
+profile. R114/R115 tests demonstrate that failed currentness occurs before
+`ExecutionRecord` persistence and worker dispatch.
+
+Import origin and bootstrap provenance are not support authorities. The
+workspace is inspected again for every Product preflight.
+
+## Brain and Wrong-Pack Boundary
+
+The current Fabric contract is adapted to `KnowledgeEnvironment` before Brain
+preparation and repair wiring. A fixed legacy knowledge pack does not promote a
+modern platform: modern platforms have no supported profile and no compatible
+modern knowledge evidence. No modern pack was fabricated for this gate.
+
+## Tests and Validation
+
+Focal/regression command:
+
+```text
+\.venv-l0fix\Scripts\python.exe -m pytest -q tests/unit/test_fabric_platform_support.py tests/unit/test_fabric_bootstrap.py tests/unit/test_fabric_task_contract.py tests/unit/test_r112_brain_platform_selection.py tests/unit/test_r113_bootstrap_templates.py tests/unit/test_r114_product_platform_preflight.py tests/unit/test_r115_imported_project_currentness.py tests/unit/test_productive_contract_preflight.py tests/unit/test_product_fabric_execution.py tests/unit/test_product_application.py tests/unit/test_product_execution.py tests/unit/test_brain_orchestration.py tests/unit/test_l1_brain_environment.py tests/unit/test_productive_runtime_wiring.py --basetemp=C:\dev\pruebas\pd-agent-r116-focal-20260903 -p no:cacheprovider
+```
+
+Result: `165 passed` on the R109-R114 regression set before R116 evidence
+addition. The R115/R116-focused and related regression rerun is recorded in
+the final report for this commit.
+
+Static validation:
+
+- `python -m compileall src tests`: PASS
+- `git diff --check`: PASS
+
+## Non-Claims and Next Gate
+
+This document does not claim multi-platform support certification. The current
+classification is:
+
+`MULTI_PLATFORM_SUPPORT_NOT_YET_CERTIFIED`
+
+The exact next step is to provide an approved, locally materialized Gradle
+distribution and rerun the legacy strict offline build, then separately obtain
+approved exact pins and complete evidence for modern profiles. No Lot J work is
+started by this evidence gate.
