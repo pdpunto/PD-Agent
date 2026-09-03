@@ -9,7 +9,11 @@ import json
 from pathlib import Path
 import re
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from pd_agent.brain.models import KnowledgeEnvironment
+    from pd_agent.core import FabricEnvironmentConstraints
 
 
 PLATFORM_SCHEMA_VERSION = 1
@@ -414,6 +418,52 @@ def platform_observation_from_inspection(inspection: Any) -> FabricPlatformObser
     )
 
 
+def fabric_environment_constraints_from_profile(profile: FabricPlatformProfile) -> FabricEnvironmentConstraints:
+    """Adapt a resolved profile to the existing task environment contract."""
+    if not isinstance(profile, FabricPlatformProfile):
+        raise FabricPlatformModelError("profile must be FabricPlatformProfile")
+    from pd_agent.core import FabricEnvironmentConstraints
+
+    return FabricEnvironmentConstraints(
+        minecraft_version=profile.minecraft_version,
+        loader_version=profile.loader_version,
+        fabric_api_version=profile.fabric_api_version,
+        yarn_version=profile.mappings_version,
+        java_version=profile.java_version,
+        platform="fabric",
+        extra={
+            "loom_version": profile.loom_version,
+            "mapping_family": profile.mapping_family.value,
+            "mappings_namespace": profile.mappings_namespace,
+            "platform_id": profile.platform_id,
+        },
+    )
+
+
+def knowledge_environment_from_constraints(constraints: FabricEnvironmentConstraints) -> KnowledgeEnvironment:
+    """Adapt existing contract constraints to the sole Brain environment model."""
+    from pd_agent.core import FabricEnvironmentConstraints
+
+    if not isinstance(constraints, FabricEnvironmentConstraints):
+        raise FabricPlatformModelError("constraints must be FabricEnvironmentConstraints")
+    from pd_agent.brain.models import KnowledgeEnvironment
+
+    return KnowledgeEnvironment(
+        minecraft_version=constraints.minecraft_version,
+        loader_version=constraints.loader_version,
+        loom_version=constraints.extra.get("loom_version"),
+        mappings_namespace=constraints.extra.get("mappings_namespace"),
+        mappings_version=constraints.yarn_version,
+        fabric_api_version=constraints.fabric_api_version,
+        java_version=constraints.java_version,
+    )
+
+
+def knowledge_environment_from_profile(profile: FabricPlatformProfile) -> KnowledgeEnvironment:
+    """Adapt a profile to Brain without resolving support or inspecting files."""
+    return knowledge_environment_from_constraints(fabric_environment_constraints_from_profile(profile))
+
+
 def load_platform_profiles(path: Path) -> tuple[FabricPlatformProfile, ...]:
     """Load and validate a source-controlled JSON profile declaration."""
     try:
@@ -447,4 +497,7 @@ __all__ = [
     "load_platform_profiles",
     "load_platform_registry",
     "platform_observation_from_inspection",
+    "fabric_environment_constraints_from_profile",
+    "knowledge_environment_from_constraints",
+    "knowledge_environment_from_profile",
 ]

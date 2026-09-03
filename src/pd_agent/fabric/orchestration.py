@@ -29,6 +29,7 @@ from pd_agent.reporting import FinalReport, RunEvent, RunEventType, RunStorage
 from pd_agent.runtime import AgentRuntime
 from pd_agent.tools import ToolExecutor, create_filesystem_tools
 from pd_agent.validation import CompletionGate, CompletionResult, ProductiveMinecraftFunctionalValidator
+from pd_agent.fabric.platform import knowledge_environment_from_constraints
 
 
 class FabricOrchestrationStatus(StrEnum):
@@ -193,16 +194,7 @@ class FabricNormalOrchestrator:
 
     @staticmethod
     def _knowledge_environment(contract: FabricTaskContract) -> KnowledgeEnvironment:
-        constraints = contract.environment_constraints
-        return KnowledgeEnvironment(
-            minecraft_version=constraints.minecraft_version,
-            loader_version=constraints.loader_version,
-            loom_version=constraints.extra.get("loom_version"),
-            mappings_namespace=constraints.extra.get("mappings_namespace"),
-            mappings_version=constraints.yarn_version,
-            fabric_api_version=constraints.fabric_api_version,
-            java_version=constraints.java_version,
-        )
+        return knowledge_environment_from_constraints(contract.environment_constraints)
 
     def _reconcile_requirement_progress(self, state: RunState, contract: FabricTaskContract) -> None:
         """Bind objective files and validator identities to contract requirements."""

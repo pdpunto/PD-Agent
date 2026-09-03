@@ -13,9 +13,13 @@ from pd_agent.fabric import (
     FabricPlatformResolutionStatus,
     FabricPlatformSupportStatus,
     FabricSupportRegistry,
+    fabric_environment_constraints_from_profile,
     load_platform_registry,
+    knowledge_environment_from_constraints,
+    knowledge_environment_from_profile,
     platform_observation_from_inspection,
 )
+from pd_agent.core import FabricEnvironmentConstraints, FabricRequirement, FabricTaskContract
 from pd_agent.project.fabric import FabricInspector
 from tests.fixtures.fabric_projects import make_simple_fabric_project
 
@@ -248,3 +252,90 @@ def test_declarative_loader_rejects_bad_schema_and_identity(tmp_path) -> None:
     bad.write_text(json.dumps({"schema_version": 1, "profiles": [profile]}), encoding="utf-8")
     with pytest.raises(FabricPlatformModelError, match="identity"):
         load_platform_registry(bad)
+
+
+def test_legacy_profile_adapts_exact_contract_environment() -> None:
+    constraints = fabric_environment_constraints_from_profile(_profile())
+    assert isinstance(constraints, FabricEnvironmentConstraints)
+    assert constraints.to_dict() == {
+        "minecraft_version": "1.21.11",
+        "loader_version": "0.19.3",
+        "fabric_api_version": "0.141.6+1.21.11",
+        "yarn_version": "1.21.11+build.6",
+        "java_version": "21",
+        "platform": "fabric",
+        "extra": {
+            "loom_version": "1.13.3",
+            "mapping_family": "OBFUSCATED_REMAPPED",
+            "mappings_namespace": "yarn",
+            "platform_id": "fabric-legacy",
+        },
+    }
+
+
+def test_modern_profile_adapts_without_invented_mappings() -> None:
+    profile = _profile(
+        "fabric-modern",
+        family=FabricMappingFamily.UNOBFUSCATED,
+        status=FabricPlatformSupportStatus.TARGET,
+        minecraft_version="26.1.2",
+        loader_version="0.20.0",
+        fabric_api_version="0.200.0+26.1.2",
+        loom_version="1.15.0",
+    )
+    constraints = fabric_environment_constraints_from_profile(profile)
+    environment = knowledge_environment_from_profile(profile)
+    assert constraints.yarn_version is None
+    assert constraints.extra["mapping_family"] == "UNOBFUSCATED"
+    assert constraints.extra["mappings_namespace"] is None
+    assert environment.mappings_namespace is None
+    assert environment.mappings_version is None
+    assert environment.minecraft_version == "26.1.2"
+    assert environment.loom_version == "1.15.0"
+    assert environment.java_version == "21"
+
+
+def test_profile_adapters_are_deterministic_and_preserve_legacy_knowledge_fields() -> None:
+    first = fabric_environment_constraints_from_profile(_profile())
+    second = fabric_environment_constraints_from_profile(_profile())
+    assert first == second
+    assert knowledge_environment_from_profile(_profile()) == knowledge_environment_from_profile(_profile())
+    environment = knowledge_environment_from_constraints(first)
+    assert environment.mappings_namespace == "yarn"
+    assert environment.mappings_version == "1.21.11+build.6"
+    assert environment.fabric_api_version == "0.141.6+1.21.11"
+
+
+def test_profile_environment_changes_change_contract_fingerprint() -> None:
+    base = _profile()
+
+    def contract(profile: FabricPlatformProfile) -> FabricTaskContract:
+        return FabricTaskContract(
+            task_id="fabric.platform",
+            revision="1",
+            goal="platform-sensitive task",
+            requirements=(FabricRequirement(requirement_id="r1", description="feature"),),
+            environment_constraints=fabric_environment_constraints_from_profile(profile),
+        )
+
+    original = contract(base).fingerprint
+    for field, value in {
+        "minecraft_version": "1.21.12",
+        "loader_version": "0.19.4",
+        "fabric_api_version": "0.141.7+1.21.11",
+        "loom_version": "1.13.4",
+        "java_version": "22",
+        "mappings_version": "1.21.11+build.7",
+        "mappings_namespace": "intermediary",
+        "platform_id": "fabric-legacy-alt",
+    }.items():
+        assert contract(replace(base, **{field: value})).fingerprint != original
+
+
+def test_profile_adapters_reject_invalid_input_without_resolution_or_filesystem() -> None:
+    with pytest.raises(FabricPlatformModelError, match="profile"):
+        fabric_environment_constraints_from_profile(object())
+    with pytest.raises(FabricPlatformModelError, match="profile"):
+        knowledge_environment_from_profile(object())
+    with pytest.raises(FabricPlatformModelError, match="constraints"):
+        knowledge_environment_from_constraints(object())
