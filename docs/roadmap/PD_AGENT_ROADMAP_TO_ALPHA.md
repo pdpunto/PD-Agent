@@ -253,7 +253,7 @@ Not every imaginable custom behavior should require a predefined capability type
 9. [x] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
 10. [x] Definir requisitos Product/UI restantes para Alpha
 11. [x] Definir benchmarks y Alpha Acceptance Suite
-12. [ ] Inventariar gaps v0.9 → Alpha
+12. [x] Inventariar gaps v0.9 → Alpha
 13. [ ] Agrupar gaps en milestones mínimos
 14. [ ] Asignar versiones v0.10 → Alpha
 15. [ ] Definir dependencias y orden de ejecución
@@ -1036,6 +1036,155 @@ editor, dashboard/IDE and final mobile product.
 
 No new primary Product/UI architecture or visual direction is opened by this
 decision.
+
+## Point 12. Alpha gap inventory
+
+Status: `ACCEPTED`
+
+R81 audit verdict: `PD_AGENT_R81_ALPHA_GAP_INVENTORY_READY`
+
+The inventory below records the consolidated work required between v0.9 and
+Alpha. It is a planning input, not a milestone plan. No evidence justifies
+replacing the primary architecture. The strategy is `REUSE + EXTEND + NEW`
+where a capability is genuinely absent.
+
+### Foundations to reuse
+
+Preserve and extend, without duplicating:
+
+- `FabricTaskContract`, `TaskProgressLedger`, `CompletionGate` and `RunState`;
+- `RunStorage`, evidence/currentness and `Project -> Task -> Execution -> Delivery`;
+- `ProjectInspector`, BuildRunner, ArtifactValidator foundation and Minecraft Harness core;
+- `KnowledgeEnvironment`, Brain retrieval/selection/injection and provenance;
+- benchmark catalog, manifests, hashes, workspace preparation, scheduler,
+  executor and collector;
+- provider/economic telemetry, `SecurePathResolver`, tool policy and
+  non-blocking Product execution.
+
+### Rework and extension
+
+These are extensions or rework, not replacement architecture:
+
+- hardcoded Server Core resolver;
+- productive runtime first-match validation selection;
+- benchmark classification linkage to the authoritative CompletionGate;
+- capability, scenario and version schemas;
+- ArtifactValidator expectations and generalized probes;
+- multi-version support, Brain packs/catalog and Product Alpha states;
+- security and resource boundaries.
+
+### Consolidated gap register
+
+| ID | Area | Classification | Alpha blocker | Concrete gap |
+|---|---|---|---|---|
+| GAP-PLANNER-001 | Planning | FOUNDATIONAL_BLOCKER | YES | General capability planner/resolver, schema, version/capability support and requirement decomposition |
+| GAP-COMPOSE-001 | Composition | CAPABILITY_BLOCKER | YES | Multi-capability dependencies, composition and batching |
+| GAP-VERSION-001 | Version Matrix | FOUNDATIONAL_BLOCKER | YES | Complete 1.21.11/26.1/26.2 bootstrap-to-Delivery support chain |
+| GAP-BRAIN-001 | Brain Knowledge | FOUNDATIONAL_BLOCKER | YES | Populated versioned knowledge, vanilla semantic catalog, capability/assets relations and leakage evidence |
+| GAP-PROJECT-001 | New Project | PRODUCT_BLOCKER | YES | Version-aware clean-template bootstrap with own identity |
+| GAP-IMPORT-001 | Import/Trust | SECURITY_BLOCKER | YES | Compatibility/trust classification and safe imported execution boundary |
+| GAP-CAP-001 | Fabric Capability Catalog | CAPABILITY_BLOCKER | YES | General productive paths beyond Server Core |
+| GAP-ASSET-001 | Deterministic Assets | CAPABILITY_BLOCKER | YES | Binary-safe toolkit, semantic lookup and structural/reference/package validation |
+| GAP-ASSET-002 | Advanced Asset Generation | NON_BLOCKING_ALPHA | NO | Advanced/generative/subjective visual capability beyond deterministic Alpha requirements |
+| GAP-VALID-001 | Runtime Validation | VALIDATION_BLOCKER | YES | Execute all applicable 1-to-N runtime validation requirements |
+| GAP-VALID-002 | Artifact Validation | VALIDATION_BLOCKER | YES | General structural expectations for resources, classes, assets and references |
+| GAP-HARNESS-001 | Minecraft Harness | VALIDATION_BLOCKER | YES | General parameterized probes and multi-version Harness evidence |
+| GAP-REPAIR-001 | Repair | VALIDATION_BLOCKER | YES | Generalized compile/resource/runtime repair evidence across capabilities and versions |
+| GAP-SEC-001 | Imported Execution Isolation | SECURITY_BLOCKER | YES | Technical isolation for untrusted imported Gradle/build/runtime execution |
+| GAP-SEC-002 | Resources/Processes/Concurrency | SECURITY_BLOCKER | YES | Bounds for workspace, disk, assets, logs, secrets, cleanup and concurrency |
+| GAP-PRODUCT-001 | Product Project Flow | PRODUCT_BLOCKER | YES | General New, Import and Continue flows |
+| GAP-PRODUCT-002 | Product Capability/Version/Trust UX | PRODUCT_BLOCKER | YES | Truthful support states, trust, composition, assets and intervention |
+| GAP-PRODUCT-003 | Product E2E | ACCEPTANCE_BLOCKER | YES | Alpha breadth Product E2E beyond controlled Server Core |
+| GAP-BENCH-001 | Alpha Benchmark Campaign | ACCEPTANCE_BLOCKER | YES | Breadth, composition, consecutive, versions, New/Import, assets, repair, negative and held-out campaign |
+| GAP-EVIDENCE-001 | Version x Capability Evidence | ACCEPTANCE_BLOCKER | YES | Evidence for every advertised supported `(version, capability)` pair |
+
+Count: **20 consolidated gaps**, including **18 Alpha blockers**. Gaps are
+not milestones; Point 13 must group them into the minimum coherent set.
+
+The semantic catalog and metadata needed for `REUSE -> DERIVE` are Alpha
+blocking and belong to `GAP-ASSET-001` and/or `GAP-BRAIN-001`. Only advanced,
+generative or subjective visual quality remains `GAP-ASSET-002` and
+non-blocking.
+
+### Capability state
+
+`EXTEND`: items, blocks, block items, recipes, tags, loot/drops and the
+assets/models/lang foundation.
+
+`NEW` general productive path: food/components, tools, weapons, armor,
+materials/tiers, durability/damage/speed, interactions, events, effects,
+commands, mobs/entities, attributes, spawning, vanilla AI reuse and
+ores/worldgen.
+
+Filesystem mutation alone is not Product capability support.
+
+### Version state
+
+- `1.21.11`: validated foundation exists, with limited breadth.
+- `26.1`: not Alpha-supported.
+- `26.2`: not Alpha-supported.
+
+Configurability or model representation is not support. Support requires:
+
+`bootstrap -> Brain/environment -> capability implementation -> build ->
+validation -> CompletionGate -> Delivery -> acceptance evidence`.
+
+### Validation, security, product and acceptance state
+
+Reusable validation foundation includes declarative requirements,
+multi-requirement CompletionGate, ledger/currentness, ArtifactValidator base,
+registry observation and Semantic Repair. Alpha blockers are N runtime
+validation, structural artifact expectations, generalized and multi-version
+probes, generalized repair evidence and explicit benchmark-to-CompletionGate
+authority.
+
+Reusable security foundation includes path traversal and protected paths,
+ancestry/symlink checks, fixture contamination detection,
+redaction/evidence and process-timeout mechanics. Alpha blockers are imported
+execution isolation, child environment/secrets policy, bounded resources,
+asset/archive safety, cleanup/cancellation, concurrency and the complete
+untrusted-data authority boundary.
+
+The v0.9 Product architecture is reusable and Server Core Product E2E is
+validated. Alpha still requires general New/Import/Continue, version and
+capability states, trust, composition, assets, intervention, cancellation,
+recovery/reopen, Success/Delivery and broader Product E2E.
+
+Benchmark infrastructure is `REUSE + EXTEND`. Missing campaign evidence covers
+capability breadth, composition, consecutive tasks, real multi-version,
+held-out, New/Import, assets, repair/adversarial, Product E2E,
+version-by-capability, frozen RC, Managed Reference Configuration, hard gates
+and explicit CompletionGate authority.
+
+### Direct dependencies
+
+Dependencies are technical only and do not define milestone order:
+
+- Planner -> capability schema and version support data.
+- Composition -> planner, dependency representation and N validation.
+- New Project -> version registry, templates and identity generation.
+- Import -> inspector, compatibility, trust and isolation.
+- Brain -> populated versioned sources and semantic catalog.
+- Capability support -> planner, implementation tools and validation.
+- Multi-version -> bootstrap, Fabric environment, Brain, adapters and Harness.
+- Assets -> binary-safe tools, semantic metadata, validation and provenance.
+- Product Alpha -> backend capability/version/trust contracts.
+- Held-out/release campaign -> implementation readiness, frozen RC, manifests
+  and CompletionGate.
+
+### Duplication prohibitions
+
+Do not create a second Brain, CompletionGate, ledger/evidence system,
+Minecraft Harness, BuildRunner, Project/Task/Execution/Delivery model,
+scheduler, benchmark framework, Multi-Agent framework, non-blocking execution
+architecture or tool/security policy.
+
+### Point 13 readiness
+
+The inventory is sufficiently complete to begin Point 13. Point 13 must group
+these gaps into the minimum coherent milestone set and must not map one gap to
+one milestone automatically. No milestones, versions or ordering are defined
+by Point 12.
 
 ## 9. Minecraft Brain evolution
 
