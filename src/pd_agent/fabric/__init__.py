@@ -14,6 +14,7 @@ from .platform import (
     FabricSupportRegistry,
     load_platform_profiles,
     load_platform_registry,
+    platform_observation_from_inspection,
 )
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "FabricMappingFamily", "FabricPlatformEvidence", "FabricPlatformEvidenceKind", "FabricPlatformModelError",
     "FabricPlatformObservation", "FabricPlatformProfile", "FabricPlatformResolution", "FabricPlatformResolutionStatus",
     "FabricPlatformSupportStatus", "FabricSupportRegistry", "load_platform_profiles", "load_platform_registry",
+    "platform_observation_from_inspection",
 ]

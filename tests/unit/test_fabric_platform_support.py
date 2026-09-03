@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -13,7 +14,10 @@ from pd_agent.fabric import (
     FabricPlatformSupportStatus,
     FabricSupportRegistry,
     load_platform_registry,
+    platform_observation_from_inspection,
 )
+from pd_agent.project.fabric import FabricInspector
+from tests.fixtures.fabric_projects import make_simple_fabric_project
 
 
 EVIDENCE = tuple(
@@ -152,11 +156,58 @@ def test_target_and_retired_are_not_executable() -> None:
 
 def test_missing_facts_are_unknown_and_conflicts_are_conflict() -> None:
     registry = FabricSupportRegistry((_profile(),))
-    unknown = registry.resolve(_observation(java_version=None, missing_facts=("java_version",)))
+    unknown = registry.resolve(_observation(loader_version=None, missing_facts=("loader_version",)))
     assert unknown.status is FabricPlatformResolutionStatus.UNKNOWN
     conflict = registry.resolve(_observation(conflicts=("minecraft_version",)))
     assert conflict.status is FabricPlatformResolutionStatus.CONFLICT
     assert conflict.selected_profile is None
+
+
+def test_real_inspection_normalizes_observed_values_without_legacy_defaults(tmp_path, monkeypatch) -> None:
+    root = make_simple_fabric_project(tmp_path / "project")
+    inspected = FabricInspector().inspect(root)
+    observed = dict(inspected.detected_versions)
+    observed.update(
+        {
+            "minecraft": replace(observed["minecraft"], value="1.21.11"),
+            "loader": replace(observed["loader"], value="0.19.3"),
+            "fabric_api": replace(observed["fabric_api"], value="0.141.6+1.21.11"),
+            "loom": replace(observed["loom"], value="1.13.3"),
+            "mappings": replace(observed["mappings"], value="1.21.11+build.6"),
+        }
+    )
+    inspected = replace(inspected, detected_versions=observed)
+    observed = platform_observation_from_inspection(inspected)
+    assert observed.minecraft_version == "1.21.11"
+    assert observed.loader_version == "0.19.3"
+    assert observed.fabric_api_version == "0.141.6+1.21.11"
+    assert observed.loom_version == "1.13.3"
+    assert observed.mappings_version == "1.21.11+build.6"
+    assert observed.java_version is None
+    assert observed.mapping_family is None
+    assert observed.mappings_namespace is None
+    monkeypatch.setattr("pd_agent.bootstrap.PinnedFabricVersions", lambda: (_ for _ in ()).throw(AssertionError("legacy default used")))
+    assert FabricSupportRegistry((_profile(),)).resolve(observed).status is FabricPlatformResolutionStatus.SUPPORTED
+
+
+def test_inspection_missing_values_stay_missing_and_minor_issues_are_not_conflicts() -> None:
+    class Inspection:
+        detected_versions = {}
+        issues = ("optional metadata note",)
+
+    observed = platform_observation_from_inspection(Inspection())
+    assert observed.minecraft_version is None
+    assert "minecraft_version" in observed.missing_facts
+    assert observed.conflicts == ()
+
+
+def test_ambiguous_inspection_is_conflict() -> None:
+    class Inspection:
+        detected_versions = {}
+        issues = ("ambiguous Fabric subproject selection",)
+
+    observed = platform_observation_from_inspection(Inspection())
+    assert observed.conflicts == ("ambiguous Fabric subproject selection",)
 
 
 def test_observation_and_resolution_are_serializable() -> None:

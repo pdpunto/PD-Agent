@@ -373,10 +373,45 @@ class FabricSupportRegistry:
 
     @staticmethod
     def _missing_profile_facts(profile: FabricPlatformProfile, observation: FabricPlatformObservation) -> tuple[str, ...]:
-        required = ["minecraft_version", "loader_version", "fabric_api_version", "loom_version", "java_version"]
+        # Java and mapping-family metadata can be profile/evidence requirements
+        # even when the workspace inspector cannot observe them independently.
+        required = ["minecraft_version", "loader_version", "fabric_api_version", "loom_version"]
         if profile.mapping_family is FabricMappingFamily.OBFUSCATED_REMAPPED:
-            required.extend(("mappings_namespace", "mappings_version", "mapping_family"))
-        return tuple(name for name in required if name in observation.missing_facts or (name != "mapping_family" and getattr(observation, name) is None) or (name == "mapping_family" and observation.mapping_family is None))
+            required.append("mappings_version")
+        return tuple(name for name in required if name in observation.missing_facts or getattr(observation, name) is None)
+
+
+def platform_observation_from_inspection(inspection: Any) -> FabricPlatformObservation:
+    """Normalize one real Fabric inspection without inspecting the workspace again."""
+    required_attributes = ("detected_versions", "issues")
+    if not all(hasattr(inspection, name) for name in required_attributes):
+        raise FabricPlatformModelError("inspection result is required")
+    detected = inspection.detected_versions
+
+    def value(*keys: str) -> str | None:
+        for key in keys:
+            item = detected.get(key)
+            if item is not None:
+                return item.value
+        return None
+
+    versions = {
+        "minecraft_version": value("minecraft"),
+        "loader_version": value("loader"),
+        "fabric_api_version": value("fabric_api", "fabric_api_version"),
+        "loom_version": value("loom"),
+        "mappings_version": value("mappings", "yarn_version"),
+    }
+    missing = tuple(name for name, item in versions.items() if item is None)
+    issues = tuple(str(item) for item in inspection.issues)
+    material_tokens = ("ambiguous", "conflict", "contradict")
+    conflicts = tuple(sorted(set(item for item in issues if any(token in item.casefold() for token in material_tokens))))
+    return FabricPlatformObservation(
+        **versions,
+        missing_facts=missing,
+        conflicts=conflicts,
+        issues=issues,
+    )
 
 
 def load_platform_profiles(path: Path) -> tuple[FabricPlatformProfile, ...]:
@@ -411,4 +446,5 @@ __all__ = [
     "PLATFORM_SCHEMA_VERSION",
     "load_platform_profiles",
     "load_platform_registry",
+    "platform_observation_from_inspection",
 ]
