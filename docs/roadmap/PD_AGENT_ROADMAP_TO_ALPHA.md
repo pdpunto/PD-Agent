@@ -251,7 +251,7 @@ Not every imaginable custom behavior should require a predefined capability type
 7. [x] Definir evolución de validación, Test Harness y CompletionGate
 8. [x] Evaluar dónde Multi-Agent aporta valor real
 9. [x] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
-10. [ ] Definir requisitos Product/UI restantes para Alpha
+10. [x] Definir requisitos Product/UI restantes para Alpha
 11. [ ] Definir benchmarks y Alpha Acceptance Suite
 12. [ ] Inventariar gaps v0.9 → Alpha
 13. [ ] Agrupar gaps en milestones mínimos
@@ -864,6 +864,178 @@ Create only the missing imported-project trust boundary, asset safety pipeline
 and version-by-capability support representation. Defer Multi-Agent, a second
 completion authority, distributed orchestration, commercial SLA and cloud
 hardening.
+
+## Point 10. Product/UI requirements remaining for Alpha
+
+Status: `ACCEPTED`
+
+R79 audit verdict:
+
+`PD_AGENT_ALPHA_PRODUCT_UI_REQUIREMENTS_READY`
+
+The v0.9 product direction is extended into Alpha. It is not replaced by a
+new visual direction or a new Product/UI architecture.
+
+### Reuse-first product foundation
+
+Preserve these v0.9 contracts and product authorities:
+
+- `Project -> Task -> Execution -> Delivery`;
+- prompt-centered Home with attachments/assets and a clear CTA;
+- execution based on real persisted state;
+- navigation independent from execution;
+- authoritative Success and `CompletionGate`;
+- JAR as the primary Delivery;
+- Human Evidence and Technical Evidence;
+- persistent Projects and History;
+- Details as a secondary layer;
+- managed-first provider opacity;
+- minimal PD Agent/Minecraft visual identity;
+- functional accessibility baseline;
+- non-blocking execution handles and RunState/RunEvent projection.
+
+Do not introduce a permanent dashboard, permanent sidebar, IDE, terminal-first
+UX or a technical pipeline as the primary experience.
+
+### Canonical Alpha product flow
+
+`HOME -> NEW / IMPORT / CONTINUE -> target + compatibility + capability + trust resolution -> TASK -> EXECUTION -> optional INTERVENTION -> CompletionGate -> SUCCESS / FAILURE -> DELIVERY -> CONTINUE SAME PROJECT / HISTORY / REOPEN`
+
+`Project != Task != Execution` remains an invariant. A successful task may
+create the next Task on the same Project without reimport or reupload.
+
+### Home and project entry
+
+Home is extended, not redesigned. Its primary elements remain the prompt,
+attachments/assets and CTA, with Import, recent Projects and discreet examples.
+New, Import and Continue are Alpha requirements:
+
+- New creates a Project from a compatible template when no Project exists;
+- Import inspects the project, detects its environment and classifies
+  compatibility and trust;
+- Continue opens an existing Project and creates a new Task on it.
+
+No mandatory technical wizard is added. Imported Projects start as
+`UNTRUSTED`; inspection may be allowed while build/runtime remain blocked until
+the technical trust boundary is satisfied. User confirmation alone must never
+be presented as proof that arbitrary project code is safe.
+
+### Version and capability UX
+
+Alpha targets are `1.21.11`, `26.1` and `26.2`. Version resolution is automatic
+by default: New without an explicit version uses the recommended target
+`26.2`, explicit supported versions are respected, Import detects and
+preserves the project target, and Continue keeps the Project target. There is
+no silent upgrade and no mandatory technical version selector in Home.
+
+Capabilities expose truthful, human-readable states:
+
+- `SUPPORTED`;
+- `SUPPORTED_WITH_LIMITATIONS`;
+- `NOT_SUPPORTED`;
+- `REVIEW_REQUIRED`.
+
+Material limitations are communicated before promising a result. Unsupported
+work must not silently fall back to best effort.
+
+### Execution, intervention and recovery
+
+Execution shows understandable overall state, honest activity, Details and
+Intervention when needed, without exposing the complete technical pipeline or
+invented percentages. Brain, build, repair and Minecraft remain secondary
+unless a human-readable activity adds value.
+
+Safe Cancel is `MUST_ALPHA`: it must stop and reconcile the real Execution,
+including provider, build and Minecraft work, with an unequivocal persisted
+outcome. The implementation is not designed by this roadmap entry.
+
+Internal recoverable failures use `diagnose -> repair -> retry` without
+unnecessary user interruption. User action is required only for irreducible
+ambiguity, missing input/assets, trust/security decisions, incompatibility,
+provider configuration or recovery conflicts. Terminal failure explains what
+did not complete, what remains valid and the next useful action, without a
+traceback as the primary UX.
+
+Closing the browser must not cancel automatically. Alpha must reopen active
+Executions from persisted authority, represent Interrupted/Unknown honestly,
+prevent duplicate/conflicting execution and recover History/Delivery. General
+checkpoint/resume remains `POST_ALPHA`; contextual retry is `SHOULD_ALPHA` when
+a safe new operation exists.
+
+### Composed tasks and assets
+
+Composed tasks remain one objective and one CompletionGate evaluation, not a
+technical checklist. The UI may show an optional expandable summary by area,
+but partial results are never Success.
+
+Assets use the mostly automatic `REUSE -> DERIVE -> GENERATE` strategy and may
+accept user-provided assets. Activity such as asset creation may be shown;
+provenance distinguishes reused, derived, generated and user-provided assets.
+Asset previews are `SHOULD_ALPHA`; a graphics editor is `POST_ALPHA`.
+
+### Brain, managed AI and settings
+
+Brain and research remain mostly invisible. Human-readable research activity
+may appear, while sources and provenance belong in Details. There is no Alpha
+Knowledge Browser/dashboard.
+
+Managed-first remains the normal-user experience. Provider/model selectors,
+BYOK, API-key management, routing controls, token controls, billing and admin
+UX are `POST_ALPHA`; pricing and billing are not designed here.
+
+Settings stay minimal. A preferred Minecraft version is not an Alpha Settings
+requirement; automatic target resolution is the normal behavior. Preferences
+are added only when they have demonstrated Product value.
+
+### Success, Delivery, Projects and evidence
+
+Success keeps the JAR prominent and includes Project/mod name, Minecraft
+target, verified completion status, JAR, a short summary, Details and
+Continue modifying. Tokens, tool calls, Brain records, build counters and
+provider internals are not primary UX.
+
+Projects must be findable, openable and continuable. History preserves
+`Task -> Execution -> result/evidence -> Delivery`; the existing modal/layer
+pattern remains valid while usable and must not become a dashboard by default.
+
+Details exposes activity, result, target, validation, JAR and relevant
+intervention. Human Evidence summarizes requirements, changes, build, repairs,
+runtime validation, artifact and completion. Technical Evidence carries IDs,
+environment, files, attempts, validations, observations, SHA/currentness,
+failures/repairs, references and useful Brain provenance.
+
+### Accessibility and required states
+
+Alpha accessibility is desktop-first with reasonable responsiveness,
+keyboard operation, visible focus, semantic dialog behavior, Escape and focus
+restoration, semantic labels, readable contrast, non-color-only state, basic
+screen-reader support and reduced motion for meaningful movement.
+
+The product must represent truthful, actionable states for empty/loading,
+reopening, provider unavailable, unsupported version/project, compatibility
+limits, import trust, missing workspace, corrupt metadata, interrupted
+execution, missing/stale Delivery, unavailable network/API and internal error.
+
+### Alpha disposition
+
+`MUST_ALPHA` includes New/Import/Continue, consecutive tasks, multi-version
+automatic resolution, capability support states, import trust UX, asset
+strategy, composed tasks, real Intervention, safe Cancel, browser
+close/reopen, persistent recovery, conflict protection, History reopen, JAR
+Delivery, Human/Technical Evidence, required empty/loading/error states,
+accessibility baseline and non-blocking UI.
+
+`SHOULD_ALPHA` includes asset previews, contextual Retry, expandable composed
+task summaries, Brain provenance in Details and useful project defaults when
+evidence supports them.
+
+`POST_ALPHA` includes general checkpoint/resume, normal-user provider/model
+selection, full Local/BYOK UX, billing/credits, collaboration/cloud,
+advanced release management, project branches/version management, graphics
+editor, dashboard/IDE and final mobile product.
+
+No new primary Product/UI architecture or visual direction is opened by this
+decision.
 
 ## 9. Minecraft Brain evolution
 
