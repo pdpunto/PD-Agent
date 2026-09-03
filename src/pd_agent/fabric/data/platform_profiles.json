@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "schema_version": 1,
+      "platform_id": "fabric-minecraft-1.21.11",
+      "minecraft_version": "1.21.11",
+      "loader_version": "0.19.3",
+      "fabric_api_version": "0.141.6+1.21.11",
+      "loom_version": "1.13.3",
+      "java_version": "21",
+      "mapping_family": "OBFUSCATED_REMAPPED",
+      "mappings_namespace": "yarn",
+      "mappings_version": "1.21.11+build.6",
+      "support_status": "SUPPORTED",
+      "evidence": [
+        {"evidence_id": "brain", "kind": "BRAIN_COMPATIBILITY", "reference": "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md"},
+        {"evidence_id": "build", "kind": "OFFLINE_BUILD", "reference": "docs/validation/PD_AGENT_V0.8_I15_BUILD_ARTIFACT_READINESS.md"},
+        {"evidence_id": "contract", "kind": "CONTRACT_WIRING", "reference": "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md"},
+        {"evidence_id": "inspection", "kind": "INSPECTION_RESOLUTION", "reference": "docs/validation/PD_AGENT_V0.8_I15_BUILD_ARTIFACT_READINESS.md"},
+        {"evidence_id": "profile", "kind": "PROFILE_DEFINITION", "reference": "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md"}
+      ]
+    }
+  ]
+}
