@@ -12,7 +12,8 @@ from typing import Any, Callable
 from pd_agent.bootstrap import RuntimeBundle, build_runtime_bundle
 from pd_agent.brain import FrozenKnowledgePackSource, KnowledgeEnvironment, KnowledgeService, load_frozen_knowledge_pack
 from pd_agent.config import AppConfig, load_config
-from pd_agent.fabric import FabricNormalOrchestrator
+from pd_agent.fabric import FabricNormalOrchestrator, load_platform_registry
+from pd_agent.fabric.registry import foundation_capability_registry
 from pd_agent.experimental import LunaSharedBudgetSession
 
 from .catalog import ProductCatalog
@@ -107,7 +108,14 @@ def build_product_application(
         productive_knowledge = KnowledgeService((FrozenKnowledgePackSource(pack),))
     catalog = catalog or ProductCatalog(product_data_root or config.runs_dir.parent / "product-data")
     projects = ProjectService(catalog)
-    resolver = ProductFabricTaskContractResolver()
+    platform_registry = load_platform_registry(
+        Path(__file__).resolve().parents[1] / "fabric" / "data" / "platform_profiles.json"
+    )
+    capability_registry = foundation_capability_registry()
+    resolver = ProductFabricTaskContractResolver(
+        platform_registry=platform_registry,
+        capability_registry=capability_registry,
+    )
     effective_gradle_home = (
         Path(gradle_user_home)
         if gradle_user_home is not None

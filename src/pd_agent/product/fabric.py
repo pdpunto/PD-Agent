@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
-from pd_agent.bootstrap import PinnedFabricVersions
 from pd_agent.core import (
-    FabricEnvironmentConstraints,
     FabricKnowledgeSignal,
     FabricTaskContract,
 )
-from pd_agent.brain import YarnKnowledgeSource
-from pd_agent.fabric import FabricNormalOrchestrator, FabricOrchestrationResult
+from pd_agent.fabric import (
+    FabricNormalOrchestrator,
+    FabricOrchestrationResult,
+    FabricPlatformResolutionStatus,
+    FabricSupportRegistry,
+    fabric_environment_constraints_from_profile,
+    load_platform_registry,
+    platform_observation_from_inspection,
+)
 from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityInstance
 from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import foundation_capability_registry
@@ -33,6 +38,17 @@ class ProductFabricTaskContractError(ValueError):
 class ProductFabricTaskContractResolver:
     """Resolve the currently supported product Fabric task without benchmarks."""
 
+    def __init__(
+        self,
+        *,
+        platform_registry: FabricSupportRegistry | None = None,
+        capability_registry: object | None = None,
+    ) -> None:
+        self.platform_registry = platform_registry or load_platform_registry(
+            Path(__file__).resolve().parents[1] / "fabric" / "data" / "platform_profiles.json"
+        )
+        self.capability_registry = capability_registry or foundation_capability_registry()
+
     def resolve(self, project: ProjectRecord, task: TaskRecord, workspace: ProjectSnapshot) -> FabricTaskContract:
         if not isinstance(project, ProjectRecord) or not isinstance(task, TaskRecord):
             raise ProductFabricTaskContractError("project and task records are required")
@@ -44,8 +60,6 @@ class ProductFabricTaskContractResolver:
             raise ProductFabricTaskContractError("workspace inspection is not ready")
         if workspace.project_root.resolve() != Path(project.workspace_ref).resolve():
             raise ProductFabricTaskContractError("workspace does not match project")
-        if not self._is_supported_server_core_request(task.request):
-            raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
         if not workspace.fabric_manifests or not workspace.source_roots or not workspace.resource_roots:
             raise ProductFabricTaskContractError("inspected workspace lacks Fabric metadata")
         mod_ids = tuple(dict.fromkeys(
@@ -55,27 +69,48 @@ class ProductFabricTaskContractResolver:
         ))
         if len(mod_ids) != 1:
             raise ProductFabricTaskContractError("inspected workspace must expose exactly one Fabric mod id")
+        missing_versions = tuple(
+            name
+            for keys, name in (
+                (("minecraft", "minecraft_version"), "minecraft_version"),
+                (("loader", "loader_version", "fabric_loader_version"), "loader_version"),
+            )
+            if not any(key in workspace.detected_versions for key in keys)
+        )
+        if missing_versions:
+            raise ProductFabricTaskContractError(
+                "workspace missing required Fabric versions: " + ", ".join(missing_versions),
+                code="UNKNOWN_PLATFORM",
+            )
+        try:
+            resolution = self.platform_registry.resolve(platform_observation_from_inspection(workspace))
+        except Exception as exc:
+            raise ProductFabricTaskContractError(
+                "current Fabric platform profile is invalid",
+                code="INVALID_PLATFORM_PROFILE",
+            ) from exc
+        status_codes = {
+            FabricPlatformResolutionStatus.UNSUPPORTED: "UNSUPPORTED_PLATFORM",
+            FabricPlatformResolutionStatus.UNKNOWN: "UNKNOWN_PLATFORM",
+            FabricPlatformResolutionStatus.CONFLICT: "PLATFORM_CONFLICT",
+        }
+        if resolution.status is not FabricPlatformResolutionStatus.SUPPORTED or resolution.selected_profile is None:
+            code = status_codes.get(resolution.status, "INSUFFICIENT_PLATFORM_EVIDENCE")
+            raise ProductFabricTaskContractError(
+                f"current Fabric platform is not supported: {resolution.reason_code}",
+                code=code,
+            )
+        profile = resolution.selected_profile
+        if not self._is_supported_server_core_request(task.request):
+            raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
         target_mod_id = mod_ids[0]
         lang_path = f"src/main/resources/assets/{target_mod_id}/lang/en_us.json"
         recipe_path = f"src/main/resources/data/{target_mod_id}/recipe/server_core.json"
-        environment = workspace.detected_versions
-        detected_versions = {
-            "minecraft_version": self._detected(environment, "minecraft", "minecraft_version"),
-            "loader_version": self._detected(environment, "loader", "loader_version"),
-            "fabric_api_version": self._detected(environment, "fabric_api", "fabric_api_version"),
-            "yarn_version": self._detected(environment, "mappings", "yarn_version"),
-        }
-        loom_version = self._detected(environment, "loom", "loom_version")
-        if loom_version is None:
-            raise ProductFabricTaskContractError("workspace is missing required Fabric version: loom_version")
-        missing = tuple(
-            name for name in ("minecraft_version", "loader_version")
-            if detected_versions[name] is None
+        profile_constraints = fabric_environment_constraints_from_profile(profile)
+        environment_constraints = replace(
+            profile_constraints,
+            extra={**profile_constraints.extra, "project_root": str(workspace.project_root)},
         )
-        if missing:
-            raise ProductFabricTaskContractError(
-                "workspace is missing required Fabric versions: " + ", ".join(missing)
-            )
         block = CapabilityCandidate(
             definition_id="fabric.block",
             parameters={
@@ -110,7 +145,7 @@ class ProductFabricTaskContractResolver:
             definition_id="fabric.recipe",
             parameters={"output_instance_id": item_instance.identity, "ingredients": []},
         )
-        planner = CapabilityPlanner(foundation_capability_registry())
+        planner = CapabilityPlanner(self.capability_registry)
         plan = planner.plan((block, item, recipe))
         expansion = planner.expand_contract(
             plan,
@@ -126,18 +161,7 @@ class ProductFabricTaskContractResolver:
                 category="MAPPING",
                 required=False,
                 ),),
-                environment_constraints=FabricEnvironmentConstraints(
-                **detected_versions,
-                java_version=str(
-                    self._detected(environment, "java", "java_version")
-                    or PinnedFabricVersions().java
-                ),
-                extra={
-                    "project_root": str(workspace.project_root),
-                    "loom_version": loom_version,
-                    "mappings_namespace": YarnKnowledgeSource().mappings_namespace,
-                },
-                ),
+                environment_constraints=environment_constraints,
             ),
         )
         if not expansion.success or expansion.contract is None:
@@ -159,15 +183,6 @@ class ProductFabricTaskContractResolver:
         has_item_wiring = "block item" in normalized or "recursos en_us" in normalized
         has_recipe = "recipe" in normalized or "recet" in normalized
         return (english or spanish) and has_item_wiring and has_recipe
-
-    @staticmethod
-    def _detected(values, *keys: str) -> str | None:  # noqa: ANN001
-        for key in keys:
-            detected = values.get(key)
-            if detected is not None:
-                return detected.value
-        return None
-
 
 class ProductExecutionRunner(Protocol):
     """Product execution port used by a later application composition root."""

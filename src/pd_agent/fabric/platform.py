@@ -379,7 +379,7 @@ class FabricSupportRegistry:
     def _missing_profile_facts(profile: FabricPlatformProfile, observation: FabricPlatformObservation) -> tuple[str, ...]:
         # Java and mapping-family metadata can be profile/evidence requirements
         # even when the workspace inspector cannot observe them independently.
-        required = ["minecraft_version", "loader_version", "fabric_api_version", "loom_version"]
+        required = ["minecraft_version", "loader_version", "loom_version"]
         if profile.mapping_family is FabricMappingFamily.OBFUSCATED_REMAPPED:
             required.append("mappings_version")
         return tuple(name for name in required if name in observation.missing_facts or getattr(observation, name) is None)
@@ -400,8 +400,8 @@ def platform_observation_from_inspection(inspection: Any) -> FabricPlatformObser
         return None
 
     versions = {
-        "minecraft_version": value("minecraft"),
-        "loader_version": value("loader"),
+        "minecraft_version": value("minecraft", "minecraft_version"),
+        "loader_version": value("loader", "loader_version", "fabric_loader_version"),
         "fabric_api_version": value("fabric_api", "fabric_api_version"),
         "loom_version": value("loom"),
         "mappings_version": value("mappings", "yarn_version"),
