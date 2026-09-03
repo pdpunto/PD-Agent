@@ -77,7 +77,7 @@ def test_product_server_core_resolves_structured_runtime_requirement(tmp_path: P
         assert requirement.spec["target_mod_id"] == "pdagentl11"
         assert runtime_spec.observations[0].selector["identifier"] == "pdagentl11:server_core"
         assert runtime_spec.observations[0].observation_type.value == "REGISTRY_ENTRY_PRESENT"
-        assert runtime_spec.observation_requirements["server-core-registry"] == ("validation-minecraft",)
+        assert runtime_spec.observation_requirements["server-core-registry"] == (requirement.validation_requirement_id,)
     finally:
         application.shutdown()
 

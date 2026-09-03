@@ -84,26 +84,39 @@ def _definition(
 
 BLOCK_DEFINITION = _definition(
     "fabric.block",
-    parameter_schema={"namespace": {"type": "string"}, "name": {"type": "string"}},
-    requirements=({"key": "source", "description": "the block source declaration is present"},),
-    validations=({"key": "build", "kind": "build", "requirement_keys": ("source",)},),
+    parameter_schema={"namespace": {"type": "string"}, "name": {"type": "string"}, "runtime_spec": {"type": "object", "required": False}},
+    requirements=(
+        {"key": "source", "description": "a relevant source change is present for the block"},
+        {"key": "runtime", "description": "the block runtime declaration is present"},
+    ),
+    validations=(
+        {"key": "build", "kind": "build", "requirement_keys": ("source",)},
+        {"key": "minecraft", "kind": "minecraft", "requirement_keys": ("runtime",), "required_parameter": "runtime_spec", "spec": {"$parameter": "runtime_spec"}},
+    ),
     mutation_expectations=({"key": "source", "role": "source"},),
 )
 BLOCK_ITEM_DEFINITION = _definition(
     "fabric.block_item",
-    parameter_schema={"block_instance_id": {"type": "string"}, "namespace": {"type": "string"}},
+    parameter_schema={
+        "block_instance_id": {"type": "string"},
+        "namespace": {"type": "string"},
+        "artifact_spec": {"type": "object", "required": False},
+        "mutation_paths": {"type": "array", "required": False},
+    },
     prerequisites=({"capability": "fabric.block", "reference": "block_instance_id"},),
-    requirements=({"key": "source", "description": "the block item source declaration is present"},),
-    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("source",)},),
-    mutation_expectations=({"key": "source", "role": "source"},),
+    requirements=(
+        {"key": "resource-lang", "description": "the block language resource is present"},
+        {"key": "resource-recipe", "description": "the block recipe resource is present"},
+        {"key": "artifact", "description": "the produced artifact contains the declared resources"},
+    ),
+    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("resource-lang", "resource-recipe", "artifact"), "spec": {"$parameter": "artifact_spec"}},),
+    mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
     parameter_schema={"output_instance_id": {"type": "string"}, "ingredients": {"type": "array"}},
     prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
-    requirements=({"key": "source", "description": "the recipe source declaration is present"},),
-    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("source",)},),
-    mutation_expectations=({"key": "source", "role": "resource"},),
+    requirements=({"key": "recipe", "description": "the recipe capability is declared"},),
 )
 
 FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, RECIPE_DEFINITION)

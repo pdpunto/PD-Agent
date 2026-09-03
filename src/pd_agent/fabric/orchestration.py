@@ -244,29 +244,35 @@ class FabricNormalOrchestrator:
                 current_artifact = state.artifact_identity
         for requirement in contract.requirements:
             refs: tuple[str, ...] = ()
-            if requirement.requirement_id == "source":
-                if source is not None and source == current_source and state.changed_files:
+            validations = tuple(item for item in contract.validation_requirements if requirement.requirement_id in item.requirement_ids)
+            if (
+                source is not None
+                and source == current_source
+                and state.changed_files
+                and (requirement.requirement_id in {"source", "source-change"} or "source" in requirement.description.casefold())
+            ):
+                refs += tuple(state.changed_files)
+            for validation in validations:
+                kind = validation.kind.casefold()
+                if kind in {"build", "compilation"}:
+                    refs += tuple(item.result_ref for item in current_builds if item.result_ref)
+                elif kind in {"artifact", "jar"}:
+                    if "artifact" in requirement.description.casefold() and current_artifact is not None:
+                        refs += (f"artifacts/{current_artifact.artifact_identity}",)
+                    paths = validation.spec.get("required_paths", ())
+                    if state.project_root is not None:
+                        refs += tuple(str(path) for path in paths if (state.project_root / path).is_file())
+                elif kind in {"runtime", "minecraft", "observation"}:
+                    refs += tuple(ref for item in state.runtime_identities if item.status == "PASS" for ref in item.result_refs)
+            if not validations and source is not None and source == current_source:
+                description = requirement.description.casefold()
+                if "recipe" in description:
                     refs = tuple(state.changed_files)
-            elif requirement.requirement_id == "build":
-                refs = tuple(item.result_ref for item in current_builds if item.result_ref)
-            elif requirement.requirement_id == "artifact":
-                if current_artifact is not None:
-                    refs = (f"artifacts/{current_artifact.artifact_identity}",)
-            elif requirement.requirement_id == "source-change":
-                refs = tuple(state.changed_files)
-            elif requirement.requirement_id.startswith("resource-"):
-                validation = next((item for item in contract.validation_requirements if requirement.requirement_id in item.requirement_ids), None)
-                paths = validation.spec.get("required_paths", ()) if validation is not None else ()
-                present = tuple(str(path) for path in paths if (state.project_root / path).is_file()) if state.project_root is not None else ()
-                refs = present
-            elif requirement.requirement_id.startswith("validation-"):
-                if requirement.requirement_id == "validation-build":
+                elif requirement.requirement_id == "build":
                     refs = tuple(item.result_ref for item in current_builds if item.result_ref)
-                elif requirement.requirement_id == "validation-artifact" and state.artifact_identity is not None:
-                    if current_artifact is not None:
-                        refs = (f"artifacts/{current_artifact.artifact_identity}",)
-                elif requirement.requirement_id == "validation-minecraft":
-                    refs = tuple(ref for item in state.runtime_identities if item.status == "PASS" for ref in item.result_refs)
+                elif requirement.requirement_id == "artifact" and current_artifact is not None:
+                    refs = (f"artifacts/{current_artifact.artifact_identity}",)
+            refs = tuple(dict.fromkeys(refs))
             if refs:
                 satisfied.add(requirement.requirement_id)
                 evidence[requirement.requirement_id] = tuple(dict.fromkeys((*evidence.get(requirement.requirement_id, ()), *refs)))

@@ -20,6 +20,7 @@ NOISY_DIRS = {
     ".git",
     ".gradle",
     "__pycache__",
+    "bin",
     ".pytest_cache",
     ".mypy_cache",
     ".venv",

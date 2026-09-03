@@ -103,13 +103,23 @@ class ExecutionService:
                 raise ExecutionServiceError("EXECUTION_CAPACITY_REACHED", "one productive execution is already active")
             task = self._get_task(task_id, project_id)
             project = self.projects.get_project(task.project_id)
+            prepared_contract = None
+            preflight = getattr(self.product_runner, "preflight", None)
+            if callable(preflight):
+                try:
+                    prepared_contract = preflight(project, task)
+                except BaseException as exc:
+                    product_code = getattr(exc, "code", None)
+                    if isinstance(product_code, str) and product_code:
+                        raise ExecutionServiceError(product_code, str(exc)) from exc
+                    raise ExecutionServiceError("PRODUCT_PREFLIGHT_FAILED", "product task preflight failed") from exc
             execution = ExecutionRecord(task_id=task.task_id, created_at=datetime.now(timezone.utc))
             self.catalog.add_execution(execution)
             snapshot = ExecutionSnapshot(execution, ProductExecutionStatus.RUNNING)
             self._snapshots[execution.execution_id] = snapshot
             self._active_execution_id = execution.execution_id
             try:
-                future = self._executor.submit(self._run_worker, execution, task, project)
+                future = self._executor.submit(self._run_worker, execution, task, project, prepared_contract)
             except BaseException as exc:
                 self._active_execution_id = None
                 self._snapshots[execution.execution_id] = ExecutionSnapshot(
@@ -187,7 +197,7 @@ class ExecutionService:
         except CatalogError as exc:
             raise ExecutionServiceError(exc.code, str(exc)) from exc
 
-    def _run_worker(self, execution: ExecutionRecord, task: TaskRecord, project: Any) -> object:
+    def _run_worker(self, execution: ExecutionRecord, task: TaskRecord, project: Any, prepared_contract: Any = None) -> object:
         guard = getattr(getattr(self.controller, "provider", None), "budget_guard", None)
         owner_started = False
         if isinstance(guard, LunaBudgetGuard):
@@ -203,6 +213,8 @@ class ExecutionService:
             owner_started = True
         try:
             if self.product_runner is not None:
+                if prepared_contract is not None:
+                    return self.product_runner.run(execution, project, task, contract=prepared_contract)
                 return self.product_runner.run(execution, project, task)
             return self.controller.run(Path(project.workspace_ref), task.request, run_id=execution.execution_id)
         finally:

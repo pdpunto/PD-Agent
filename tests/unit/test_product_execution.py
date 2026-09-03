@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Barrier, Event, Thread
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -12,6 +13,7 @@ from pd_agent.product import (
     ExecutionRecord,
     ExecutionService,
     ExecutionServiceError,
+    ProductFabricTaskContractError,
     ProductCatalog,
     ProductExecutionStatus,
     ProjectService,
@@ -71,6 +73,69 @@ def test_start_persists_before_nonblocking_dispatch_and_maps_identity(tmp_path: 
         assert service.get(snapshot.execution_id).status is ProductExecutionStatus.RUNNING
     finally:
         controller.release.set()
+        service.shutdown()
+
+
+def test_product_preflight_rejects_before_execution_persistence(tmp_path: Path) -> None:
+    controller = ControlledController()
+    catalog = ProductCatalog(tmp_path / "data")
+    projects = ProjectService(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = projects.register_project("Demo", workspace)
+    task = projects.create_task(project.project_id, "invalid product task")
+
+    class Runner:
+        def preflight(self, _project, _task):  # noqa: ANN001
+            raise ProductFabricTaskContractError("unsupported capability", code="UNSUPPORTED_CAPABILITY")
+
+        def run(self, *_args, **_kwargs):  # noqa: ANN001
+            raise AssertionError("the worker must not run after preflight failure")
+
+    service = ExecutionService(catalog, controller, projects, product_runner=Runner())
+    try:
+        with pytest.raises(ExecutionServiceError, match="UNSUPPORTED_CAPABILITY"):
+            service.start(task.task_id)
+        assert catalog.snapshot()["executions"] == {}
+        assert service._active_execution_id is None
+    finally:
+        service.shutdown()
+
+
+def test_product_preflight_contract_is_reused_by_worker(tmp_path: Path) -> None:
+    controller = ControlledController()
+    catalog = ProductCatalog(tmp_path / "data")
+    projects = ProjectService(catalog)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = projects.register_project("Demo", workspace)
+    task = projects.create_task(project.project_id, "valid product task")
+    contract = object()
+    observed = {}
+    called = Event()
+
+    class Runner:
+        def preflight(self, _project, _task):  # noqa: ANN001
+            assert catalog.snapshot()["executions"] == {}
+            return contract
+
+        def run(self, execution, _project, _task, *, contract=None):  # noqa: ANN001
+            observed["contract"] = contract
+            called.set()
+            return SimpleNamespace(run_id=execution.run_id)
+
+    service = ExecutionService(
+        catalog,
+        SimpleNamespace(storage=RunStorage(tmp_path / "runs")),
+        projects,
+        product_runner=Runner(),
+    )
+    try:
+        started = service.start(task.task_id)
+        assert called.wait(timeout=2)
+        assert observed["contract"] is contract
+        assert started.execution_id == started.run_id
+    finally:
         service.shutdown()
 
 

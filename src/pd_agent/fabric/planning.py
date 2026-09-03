@@ -16,6 +16,7 @@ from .capabilities import (
 )
 from pd_agent.core.contracts import (
     FabricEnvironmentConstraints,
+    FabricKnowledgeSignal,
     FabricMutationExpectation,
     FabricRequirement,
     FabricTaskContract,
@@ -25,7 +26,7 @@ from .registry import CapabilityRegistry, UnsupportedCapabilityError
 
 
 _TYPE_NAMES = {"string", "integer", "number", "boolean", "array", "object"}
-SUPPORTED_VALIDATION_KINDS = frozenset({"build", "artifact"})
+SUPPORTED_VALIDATION_KINDS = frozenset({"build", "artifact", "minecraft"})
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -88,6 +89,7 @@ class FabricContractContext:
     environment_constraints: FabricEnvironmentConstraints = FabricEnvironmentConstraints()
     required_capabilities: tuple[str, ...] = ()
     completion_criteria: tuple[str, ...] = ()
+    knowledge_signals: tuple[FabricKnowledgeSignal, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -343,16 +345,20 @@ def expand_plan_to_contract(
                 if not isinstance(key, str) or not key or not isinstance(kind, str) or not kind.strip():
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation declaration is malformed")
                 normalized_kind = kind.casefold()
+                required_parameter = declaration.get("required_parameter")
+                if required_parameter is not None and required_parameter not in instance.parameters:
+                    continue
                 if normalized_kind not in SUPPORTED_VALIDATION_KINDS:
                     return _expansion_failure("UNSUPPORTED_VALIDATION", "required validation kind is not supported", kind=normalized_kind)
                 raw_keys = declaration.get("requirement_keys", tuple(local_requirements))
                 if not isinstance(raw_keys, (list, tuple)) or not raw_keys or any(key not in local_requirements for key in raw_keys):
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation has invalid requirement correlation")
                 correlated = tuple(local_requirements[key] for key in raw_keys)
-                spec = declaration.get("spec", {})
+                spec = _resolve_declaration_value(declaration.get("spec", {}), instance.parameters)
                 if not isinstance(spec, Mapping):
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation spec must be a mapping")
                 validation_id = f"validation:{derive_capability_output_id(instance, key)}"
+                spec = _bind_validation_id(spec, validation_id)
                 validations.append(FabricValidationRequirement(
                     validation_requirement_id=validation_id,
                     requirement_ids=correlated,
@@ -370,12 +376,17 @@ def expand_plan_to_contract(
                 role = declaration.get("role")
                 if not isinstance(key, str) or not key or not isinstance(role, str) or not role:
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation declaration is malformed")
-                mutations.append(FabricMutationExpectation(
-                    expectation_id=f"mutation:{derive_capability_output_id(instance, key)}",
-                    role=role,
-                    path=declaration.get("path"),
-                    required=bool(declaration.get("required", True)),
-                ))
+                paths_parameter = declaration.get("paths_parameter")
+                paths = instance.parameters.get(paths_parameter, ()) if paths_parameter else (declaration.get("path"),)
+                if paths_parameter and not isinstance(paths, (list, tuple)):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation paths must be a sequence")
+                for index, path in enumerate(paths):
+                    mutations.append(FabricMutationExpectation(
+                        expectation_id=f"mutation:{derive_capability_output_id(instance, key + ':' + str(index))}",
+                        role=role,
+                        path=path,
+                        required=bool(declaration.get("required", True)),
+                    ))
     except (CapabilityModelError, UnsupportedCapabilityError, ValueError) as exc:
         return _expansion_failure("INVALID_GENERATED_CONTRACT", str(exc))
 
@@ -387,6 +398,7 @@ def expand_plan_to_contract(
             requirements=tuple(requirements),
             required_capabilities=context.required_capabilities,
             completion_criteria=context.completion_criteria,
+            knowledge_signals=context.knowledge_signals,
             validation_requirements=tuple(validations),
             mutation_expectations=tuple(mutations),
             environment_constraints=context.environment_constraints,
@@ -398,6 +410,26 @@ def expand_plan_to_contract(
         capability_requirement_ids=tuple(requirement_trace),
         capability_validation_requirement_ids=tuple(validation_trace),
     )
+
+
+def _resolve_declaration_value(value: Any, parameters: Mapping[str, Any]) -> Any:
+    if isinstance(value, Mapping):
+        if set(value) == {"$parameter"}:
+            return parameters.get(value["$parameter"], {})
+        return {key: _resolve_declaration_value(item, parameters) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_declaration_value(item, parameters) for item in value]
+    return value
+
+
+def _bind_validation_id(value: Any, validation_id: str) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _bind_validation_id(item, validation_id) for key, item in value.items()}
+    if isinstance(value, list):
+        if value == ["$validation_id"]:
+            return [validation_id]
+        return [_bind_validation_id(item, validation_id) for item in value]
+    return value
 
 
 __all__ = [

@@ -87,12 +87,14 @@ def test_composed_plan_expands_to_correlated_fabric_contract() -> None:
     )
     assert expansion.success
     assert expansion.contract is not None
-    assert len(expansion.contract.requirements) == 3
-    assert len(expansion.contract.validation_requirements) == 3
+    assert len(expansion.contract.requirements) == 6
+    assert len(expansion.contract.validation_requirements) == 2
     requirement_ids = {item.requirement_id for item in expansion.contract.requirements}
     assert all(set(item.requirement_ids).issubset(requirement_ids) for item in expansion.contract.validation_requirements)
     assert all(expansion.requirements_for(instance.identity) for instance in plan.instances)
-    assert all(expansion.validations_for(instance.identity) for instance in plan.instances)
+    assert expansion.validations_for(plan.instances[0].identity)
+    assert expansion.validations_for(plan.instances[1].identity)
+    assert not expansion.validations_for(plan.instances[2].identity)
     assert expansion.contract.fingerprint == expansion.contract.from_dict(expansion.contract.to_dict()).fingerprint
 
 
