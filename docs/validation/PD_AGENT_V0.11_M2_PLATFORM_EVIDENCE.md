@@ -27,13 +27,12 @@ there is concrete evidence for them. No evidence kind was weakened or bypassed.
 
 | Platform | Profile | Inspection | Contract | Brain | Bootstrap | Import | Offline build | Final status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Fabric 1.21.11 | PASS | PASS | PASS | PASS | PASS | PASS | NOT_AVAILABLE | SUPPORTED profile, build gate pending |
+| Fabric 1.21.11 | PASS | PASS | PASS | PASS | PASS | PASS | PASS | SUPPORTED |
 | Fabric 26.1.2 | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | TARGET / not supported |
 | Fabric 26.2 | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | NOT_AVAILABLE | TARGET / not supported |
 
-The legacy profile is the only source-controlled `SUPPORTED` profile. Since
-`OFFLINE_BUILD` was not available in this environment, no new promotion was
-performed. Modern platforms were not promoted.
+The legacy profile is the only source-controlled `SUPPORTED` profile. Its
+offline build evidence is now revalidated. Modern platforms were not promoted.
 
 ## Legacy 1.21.11
 
@@ -72,10 +71,17 @@ It used Java 21 and fresh temporary roots:
 - workspace: `C:\dev\pruebas\pd-agent-r116-legacy-build-02f315e9e73e4d898511ef8d160070b1`
 - `GRADLE_USER_HOME`: `C:\dev\pruebas\pd-agent-r116-gradle-home-43593299c8334e0da567cf76f3de411d`
 
-The wrapper distribution was not present in the isolated Gradle home. The
-wrapper reported an attempted download of `gradle-8.14.3-bin.zip`; therefore
-the strict offline build could not complete and no artifact or SHA was
-produced. This is `OFFLINE_BUILD=NOT_AVAILABLE`, not a build PASS claim.
+The first isolated attempt used a Gradle home without the wrapper distribution
+and was not accepted as evidence. R117 recovered the existing local
+distribution from `%USERPROFILE%\\.gradle\\wrapper\\dists` and the persistent
+v0.8 seed, then ran the same build from a fresh temporary Gradle home. Result:
+`BUILD SUCCESSFUL`, exit code `0`, using Gradle `8.14.3` and Java `21.0.11`.
+
+Artifact evidence:
+
+- JAR: `C:\\dev\\pruebas\\pd-agent-r116-legacy-build-02f315e9e73e4d898511ef8d160070b1\\build\\libs\\examplemod.jar`
+- SHA-256: `2262C6B7747EE8C7CBDC58B92AEA697F4C2C8D1E70AF60E8A86366BA45209E26`
+- `OFFLINE_BUILD=PASS`
 
 ## Modern Pins
 
@@ -125,9 +131,7 @@ Focal/regression command:
 \.venv-l0fix\Scripts\python.exe -m pytest -q tests/unit/test_fabric_platform_support.py tests/unit/test_fabric_bootstrap.py tests/unit/test_fabric_task_contract.py tests/unit/test_r112_brain_platform_selection.py tests/unit/test_r113_bootstrap_templates.py tests/unit/test_r114_product_platform_preflight.py tests/unit/test_r115_imported_project_currentness.py tests/unit/test_productive_contract_preflight.py tests/unit/test_product_fabric_execution.py tests/unit/test_product_application.py tests/unit/test_product_execution.py tests/unit/test_brain_orchestration.py tests/unit/test_l1_brain_environment.py tests/unit/test_productive_runtime_wiring.py --basetemp=C:\dev\pruebas\pd-agent-r116-focal-20260903 -p no:cacheprovider
 ```
 
-Result: `165 passed` on the R109-R114 regression set before R116 evidence
-addition. The R115/R116-focused and related regression rerun is recorded in
-the final report for this commit.
+Result: `170 passed` on the R109-R116 focal/regression command.
 
 Static validation:
 
@@ -145,3 +149,63 @@ The exact next step is to provide an approved, locally materialized Gradle
 distribution and rerun the legacy strict offline build, then separately obtain
 approved exact pins and complete evidence for modern profiles. No Lot J work is
 started by this evidence gate.
+
+## R118 - Fabric 26.2 Materialization Audit
+
+The official Fabric example-mod `26.2` branch was audited on 2026-09-03. The
+following upstream files are the provenance for the modern reference pins:
+
+- `gradle.properties`: Minecraft `26.2`, Loader `0.19.3`, Loom `1.17-SNAPSHOT`,
+  Fabric API `0.158.0+26.2`.
+- `build.gradle`: `net.fabricmc.fabric-loom`, Java release/toolchain `25`.
+- `gradle/wrapper/gradle-wrapper.properties`: Gradle `9.5.1` binary wrapper.
+- `src/main/resources/fabric.mod.json`: Minecraft `~26.2`, Loader `>=0.19.3`,
+  Java `>=25`, and Fabric API dependency.
+
+Official references:
+
+- https://github.com/FabricMC/fabric-example-mod/tree/26.2
+- https://raw.githubusercontent.com/FabricMC/fabric-example-mod/26.2/gradle.properties
+- https://raw.githubusercontent.com/FabricMC/fabric-example-mod/26.2/build.gradle
+- https://raw.githubusercontent.com/FabricMC/fabric-example-mod/26.2/gradle/wrapper/gradle-wrapper.properties
+- https://raw.githubusercontent.com/FabricMC/fabric-example-mod/26.2/src/main/resources/fabric.mod.json
+- https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.158.0%2B26.2/
+
+The modern mapping semantics are `UNOBFUSCATED` with no Yarn dependency and no
+mapping namespace/version. The repository model already supports that shape,
+but there is no source-controlled 26.2 profile or template and no evidence was
+created to promote it.
+
+Local materialization audit:
+
+- The host has only `C:\Program Files\Eclipse Adoptium\jdk-21.0.11.10-hotspot`;
+  no JDK 25 installation is available.
+- Local Gradle wrapper distributions include `8.14.3`, `8.9` and `9.2.0`, but
+  not the official `9.5.1` distribution required by the 26.2 reference.
+- No approved local 26.2 Minecraft, Loader, Fabric API or Loom material was
+  found in the inspected Gradle caches or PD-Agent materialization roots.
+- Consequently no 26.2 bootstrap, online build, strict offline rebuild, JAR,
+  Inspector match, Brain compatibility proof, wrong-pack rejection, or
+  post-promotion Product proof is claimed.
+
+R118 decision:
+
+- Initial 26.2 profile: not added; the platform remains `TARGET` implicitly
+  unsupported by the source-controlled registry.
+- Template compatibility: declarative modern rendering is covered by the
+  existing target-only bootstrap test; no production template change was made.
+- Registry/Product: existing fail-closed TARGET behavior remains unchanged.
+- Brain: no 26.2 knowledge source or frozen pack was fabricated.
+- Required evidence: `PROFILE_DEFINITION`, `INSPECTION_RESOLUTION`,
+  `CONTRACT_WIRING`, `BRAIN_COMPATIBILITY` and `OFFLINE_BUILD` are not a
+  complete real 26.2 evidence set; promotion is forbidden.
+- 26.1.2: no new evidence was established.
+
+Classification: `FABRIC_26_2_SUPPORT_NOT_CERTIFIED`.
+
+Overall classification: `MULTI_PLATFORM_SUPPORT_NOT_YET_CERTIFIED`.
+
+The exact blocker is missing locally materialized Java 25 and the complete
+official 26.2 toolchain/cache set needed for a real online build followed by a
+strict offline rebuild. No product defect was demonstrated, no production code
+was changed, and Lot J was not started.
