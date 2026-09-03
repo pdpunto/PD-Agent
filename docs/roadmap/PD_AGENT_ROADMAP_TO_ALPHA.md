@@ -252,7 +252,7 @@ Not every imaginable custom behavior should require a predefined capability type
 8. [x] Evaluar dónde Multi-Agent aporta valor real
 9. [x] Definir requisitos de seguridad, compatibilidad y rendimiento para Alpha
 10. [x] Definir requisitos Product/UI restantes para Alpha
-11. [ ] Definir benchmarks y Alpha Acceptance Suite
+11. [x] Definir benchmarks y Alpha Acceptance Suite
 12. [ ] Inventariar gaps v0.9 → Alpha
 13. [ ] Agrupar gaps en milestones mínimos
 14. [ ] Asignar versiones v0.10 → Alpha
