@@ -88,7 +88,7 @@ BLOCK_ITEM_DEFINITION = _definition(
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
     parameter_schema={"output_instance_id": {"type": "string"}, "ingredients": {"type": "array"}},
-    prerequisites=({"reference": "output_instance_id"},),
+    prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
 )
 
 FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, RECIPE_DEFINITION)
