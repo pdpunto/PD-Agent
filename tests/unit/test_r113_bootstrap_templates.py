@@ -198,6 +198,10 @@ def test_modern_target_uses_unobfuscated_rendering_without_yarn(tmp_path: Path) 
     build = (result.workspace / "build.gradle.kts").read_text(encoding="utf-8")
     assert "mappings_version=" not in properties
     assert "net.fabricmc:yarn" not in build
+    assert 'id("net.fabricmc.fabric-loom") version "1.15.0"' in build
+    assert 'implementation("net.fabricmc:fabric-loader:${property("loader_version")}")' in build
+    assert 'implementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")' in build
+    assert 'modImplementation("net.fabricmc:fabric-loader' not in build
     assert result.platform_id == profile.platform_id
     assert profile.support_status is FabricPlatformSupportStatus.TARGET
 

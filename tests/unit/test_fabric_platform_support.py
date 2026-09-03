@@ -238,8 +238,12 @@ def test_multiple_supported_matches_are_conflict() -> None:
 
 def test_declarative_registry_loads_current_legacy_profile() -> None:
     registry = load_platform_registry(__import__("pathlib").Path("src/pd_agent/fabric/data/platform_profiles.json"))
-    assert [profile.platform_id for profile in registry.list_profiles()] == ["fabric-minecraft-1.21.11"]
+    assert [profile.platform_id for profile in registry.list_profiles()] == [
+        "fabric-minecraft-1.21.11",
+        "fabric-minecraft-26.2",
+    ]
     assert registry.list_profiles()[0].support_status is FabricPlatformSupportStatus.SUPPORTED
+    assert registry.list_profiles()[1].support_status is FabricPlatformSupportStatus.TARGET
 
 
 def test_declarative_loader_rejects_bad_schema_and_identity(tmp_path) -> None:

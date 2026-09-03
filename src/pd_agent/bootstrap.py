@@ -332,10 +332,12 @@ public final class {self._class_name(mod_id)} implements ModInitializer {{
             if v.mapping_family == "OBFUSCATED_REMAPPED" else ""
         )
         mappings_property = "mappings_version=" + str(v.yarn) + "\n" if v.mapping_family == "OBFUSCATED_REMAPPED" else ""
+        dependency_configuration = "modImplementation" if v.mapping_family == "OBFUSCATED_REMAPPED" else "implementation"
+        loom_plugin_id = "fabric-loom" if v.mapping_family == "OBFUSCATED_REMAPPED" else "net.fabricmc.fabric-loom"
         return {
             "settings.gradle.kts": f'pluginManagement {{ repositories {{ gradlePluginPortal(); maven("https://maven.fabricmc.net/") }} }}\nrootProject.name = "{mod_id}"\n',
             "build.gradle.kts": f'''plugins {{
-    id("fabric-loom") version "{v.loom}"
+    id("{loom_plugin_id}") version "{v.loom}"
 }}
 
 version = "1.0.0"
@@ -345,8 +347,8 @@ repositories {{ mavenCentral(); maven("https://maven.fabricmc.net/") }}
 dependencies {{
     minecraft("com.mojang:minecraft:${{property("minecraft_version")}}")
 {mappings_dependency.rstrip()}
-    modImplementation("net.fabricmc:fabric-loader:${{property("loader_version")}}")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:${{property("fabric_api_version")}}")
+    {dependency_configuration}("net.fabricmc:fabric-loader:${{property("loader_version")}}")
+    {dependency_configuration}("net.fabricmc.fabric-api:fabric-api:${{property("fabric_api_version")}}")
 }}
 
 java {{ toolchain {{ languageVersion.set(JavaLanguageVersion.of({v.java})) }} }}

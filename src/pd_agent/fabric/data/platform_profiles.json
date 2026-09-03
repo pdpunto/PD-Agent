@@ -20,6 +20,20 @@
         {"evidence_id": "inspection", "kind": "INSPECTION_RESOLUTION", "reference": "docs/validation/PD_AGENT_V0.8_I15_BUILD_ARTIFACT_READINESS.md"},
         {"evidence_id": "profile", "kind": "PROFILE_DEFINITION", "reference": "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md"}
       ]
+    },
+    {
+      "schema_version": 1,
+      "platform_id": "fabric-minecraft-26.2",
+      "minecraft_version": "26.2",
+      "loader_version": "0.19.3",
+      "fabric_api_version": "0.158.0+26.2",
+      "loom_version": "1.17-SNAPSHOT",
+      "java_version": "25",
+      "mapping_family": "UNOBFUSCATED",
+      "mappings_namespace": null,
+      "mappings_version": null,
+      "support_status": "TARGET",
+      "evidence": []
     }
   ]
 }

@@ -209,3 +209,99 @@ The exact blocker is missing locally materialized Java 25 and the complete
 official 26.2 toolchain/cache set needed for a real online build followed by a
 strict offline rebuild. No product defect was demonstrated, no production code
 was changed, and Lot J was not started.
+
+## R119 - 26.2 Toolchain and Build Gate
+
+R119 materialized the official toolchain in isolated roots. Temurin JDK 25 was
+downloaded from the Adoptium API as a portable ZIP and extracted without
+changing global `JAVA_HOME` or `PATH`:
+
+- Vendor/version: Eclipse Temurin `25.0.4.1+1`, Windows x64.
+- JDK root: `C:\dev\pruebas\pd-agent-r119-toolchain-ece20dc41dd2468fb29fcccdbf3377b1\jdk-25.0.4.1+1`.
+- `java -version`: `25.0.4.1`.
+- `javac -version`: `25.0.4.1`.
+- Archive SHA-256: `00C847D804F4A78E9F04F2683FAF14FED898535B177B7FC704486CB0284E9283`.
+- Official source: https://api.adoptium.net/v3/binary/latest/25/ga/windows/x64/jdk/hotspot/normal/eclipse
+
+The official Fabric example-mod branch `26.2` was checked out at commit
+`34080f0b6644dd726519d578f339f8e4e50ad331`. Its wrapper materialized Gradle
+`9.5.1`. The generated TARGET profile uses the exact R118 pins and the
+official wrapper files.
+
+The first generated Kotlin DSL build exposed two real bootstrap defects:
+
+1. Modern dependencies must use `implementation`, not legacy
+   `modImplementation`.
+2. Modern Loom uses plugin id `net.fabricmc.fabric-loom`, not the legacy
+   `fabric-loom` alias.
+
+The minimal conditional fix is in `src/pd_agent/bootstrap.py`; Legacy keeps its
+existing configuration. Regression assertions were added to
+`tests/unit/test_r113_bootstrap_templates.py`. The declarative 26.2 TARGET
+profile and template are in `src/pd_agent/fabric/data/platform_profiles.json`
+and `src/pd_agent/fabric/data/project_templates.json`.
+
+Bootstrap result: `PASS`, `READY`, with Minecraft `26.2`, Loader `0.19.3`,
+Fabric API `0.158.0+26.2`, Loom `1.17-SNAPSHOT`, Java `25`,
+`UNOBFUSCATED`, no Yarn and no `mappings_version`.
+
+Online build:
+
+```text
+gradlew.bat --no-daemon --console=plain build
+```
+
+Result: `BUILD SUCCESSFUL`, exit code `0`, workspace
+`C:\dev\pruebas\pd-agent-r119-26.2-online-final-6b8cf46a54064eceb68f3575d68f3b70`,
+isolated Gradle home
+`C:\dev\pruebas\pd-agent-r119-gradle-home-final-335e8c91702b485c9138f0645f3d5845`.
+
+Strict offline rebuild:
+
+```text
+gradlew.bat --offline --no-daemon --console=plain build
+```
+
+Result: `BUILD SUCCESSFUL`, exit code `0`, clean workspace
+`C:\dev\pruebas\pd-agent-r119-26.2-offline-c6c4b072e33a43628495790e622100c7`.
+
+Both artifacts are `modid-1.0.0.jar`, 1406 bytes, and have identical SHA-256:
+`40CC8F8210912B5E83A5E497235C912D6FB0F78573D169CCA1D2D0DD0317F5E3`.
+`OFFLINE_BUILD=PASS` is therefore established for the generated TARGET
+workspace.
+
+Inspector and resolution:
+
+- `FabricInspector`: `READY`; Minecraft, Loader, Fabric API and Loom observed.
+- Java and mapping family are not observed by the current Inspector; modern
+  mapping facts remain null/missing rather than receiving defaults.
+- Exact adapter: `FabricEnvironmentConstraints` and `KnowledgeEnvironment`
+  contain Java `25`, `UNOBFUSCATED`, and null mappings.
+- Registry result remains `UNSUPPORTED / NO_SUPPORTED_PROFILE` because the
+  profile is TARGET and the Inspector lacks all matching facts. Product
+  preflight therefore fails closed with zero record/worker/provider activity.
+
+Brain compatibility is not available for 26.2. Existing Yarn
+`1.21.11+build.6`, Fabric API `0.141.6+1.21.11`, and curated concept sources
+all return `INCOMPATIBLE`; no modern source or frozen pack was fabricated.
+Legacy knowledge is consequently rejected for the 26.2 environment.
+
+Evidence gate:
+
+| Evidence kind | 26.2 result |
+| --- | --- |
+| PROFILE_DEFINITION | PASS, TARGET declaration |
+| BOOTSTRAP | PASS |
+| INSPECTION_RESOLUTION | FAIL / incomplete modern facts |
+| CONTRACT_WIRING | PASS, exact adapter and null mappings |
+| BRAIN_COMPATIBILITY | FAIL, no compatible 26.2 source |
+| OFFLINE_BUILD | PASS |
+| IMPORT | NOT RUN, promotion prerequisite absent |
+
+Promotion: `NO`. 26.2 remains `TARGET`; no after-promotion Product,
+import-origin, currentness or Minecraft validation is claimed. Legacy remains
+SUPPORTED and its R117 offline evidence is unchanged.
+
+R119 tests: `40 passed` for the platform/bootstrap focal tests; prior
+R109-R116 regression evidence remains `170 passed`. `compileall`: PASS.
+`git diff --check`: PASS. API/provider, Minecraft and benchmark activity: `0`.

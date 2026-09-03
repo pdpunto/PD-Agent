@@ -11,6 +11,16 @@
         "docs/validation/PD_AGENT_V0.7_FINAL_CLOSURE.md",
         "docs/validation/PD_AGENT_V0.8_I15_BUILD_ARTIFACT_READINESS.md"
       ]
+    },
+    {
+      "schema_version": 1,
+      "template_id": "fabric-modern-26.2",
+      "template_revision": "1",
+      "platform_ids": ["fabric-minecraft-26.2"],
+      "seed_identity": null,
+      "evidence": [
+        "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"
+      ]
     }
   ]
 }
