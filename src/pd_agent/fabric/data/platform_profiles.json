@@ -32,8 +32,14 @@
       "mapping_family": "UNOBFUSCATED",
       "mappings_namespace": null,
       "mappings_version": null,
-      "support_status": "TARGET",
-      "evidence": []
+      "support_status": "SUPPORTED",
+      "evidence": [
+        {"evidence_id": "brain", "kind": "BRAIN_COMPATIBILITY", "reference": "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"},
+        {"evidence_id": "build", "kind": "OFFLINE_BUILD", "reference": "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"},
+        {"evidence_id": "contract", "kind": "CONTRACT_WIRING", "reference": "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"},
+        {"evidence_id": "inspection", "kind": "INSPECTION_RESOLUTION", "reference": "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"},
+        {"evidence_id": "profile", "kind": "PROFILE_DEFINITION", "reference": "docs/validation/PD_AGENT_V0.11_M2_PLATFORM_EVIDENCE.md"}
+      ]
     }
   ]
 }

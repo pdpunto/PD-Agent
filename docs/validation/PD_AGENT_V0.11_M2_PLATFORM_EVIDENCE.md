@@ -305,3 +305,79 @@ SUPPORTED and its R117 offline evidence is unchanged.
 R119 tests: `40 passed` for the platform/bootstrap focal tests; prior
 R109-R116 regression evidence remains `170 passed`. `compileall`: PASS.
 `git diff --check`: PASS. API/provider, Minecraft and benchmark activity: `0`.
+## R120 - Fabric 26.2 Certification Completion
+
+R120 closed the two certification blockers from R119 without provider, Minecraft,
+benchmark, or Product Execution activity.
+
+### Inspector and platform observation
+
+`FabricInspector` now observes project-declared Java from the Gradle toolchain,
+never from the Python/process JVM. It derives mapping family from the real Loom
+configuration: a Yarn/mappings declaration is `OBFUSCATED_REMAPPED` with the
+Yarn namespace; the modern `net.fabricmc.fabric-loom` configuration without a
+mapping declaration is `UNOBFUSCATED`. Modern null mappings are therefore
+intentional, not missing facts. Legacy 1.21.11 continues to observe Java 21,
+Yarn `1.21.11+build.6`, and the legacy family.
+
+Field classification:
+
+| Field | Classification |
+| --- | --- |
+| Minecraft, Loader, Fabric API, Loom | OBSERVABLE_FROM_WORKSPACE |
+| Java target | OBSERVABLE_FROM_WORKSPACE |
+| Mapping family | DERIVABLE_FROM_OBSERVED_FACT |
+| Mapping namespace/version | OBSERVABLE_FROM_WORKSPACE for Yarn; PROFILE_ONLY null for UNOBFUSCATED |
+
+The real R119 26.2 offline workspace resolves to `SUPPORTED` with no missing
+facts. A modern profile still requires Java and mapping-family facts; legacy
+synthetic callers remain compatible because their existing concrete pins are
+already sufficient.
+
+### Brain compatibility
+
+`FabricApiKnowledgeSource` is reused with explicit `0.158.0+26.2`, Minecraft
+`26.2`, Loader `0.19.3`, and an offline artifact. The existing curated concept
+source is now explicitly parameterized by the exact `KnowledgeEnvironment`; it
+is not a second Brain or a version-specific KnowledgeService. No Yarn source,
+legacy Fabric API source, or v0.7 frozen pack is selected for 26.2. The same
+KnowledgeService and deterministic source-selection path is used for both
+platforms. Semantic repair receives the same exact environment object.
+
+Selection evidence for 26.2: modern Fabric API and modern concept source are
+selected; legacy Yarn, legacy API, and legacy frozen pack are rejected as
+`INCOMPATIBLE`; duplicate source IDs remain rejected.
+
+### Evidence gate and promotion
+
+| Evidence kind | 26.2 result |
+| --- | --- |
+| PROFILE_DEFINITION | PASS |
+| INSPECTION_RESOLUTION | PASS |
+| CONTRACT_WIRING | PASS |
+| BRAIN_COMPATIBILITY | PASS |
+| OFFLINE_BUILD | PASS |
+| BOOTSTRAP | PASS |
+
+The 26.2 profile is promoted from `TARGET` to `SUPPORTED` with all five
+mandatory evidence kinds referencing this document. The generated official
+workspace used R119 pins: Minecraft `26.2`, Loader `0.19.3`, Fabric API
+`0.158.0+26.2`, Loom `1.17-SNAPSHOT`, Java 25, and `UNOBFUSCATED` mappings.
+No frozen 26.2 pack is required by the existing gate; the configured source
+set is selected through the existing KnowledgeService architecture.
+
+### Validation
+
+- R120 focal certification tests: PASS (`46 passed` before final regression rerun).
+- R109-R119 focal/regression tests plus R120: final rerun recorded below.
+- `python -m compileall src tests`: required final static gate.
+- `git diff --check`: required final static gate.
+- API/provider requests: `0`.
+- Minecraft live launches: `0`.
+- Benchmark live runs: `0`.
+
+Official modern source references: [Fabric example mod 26.2](https://github.com/FabricMC/fabric-example-mod/tree/26.2), [26.2 build configuration](https://raw.githubusercontent.com/FabricMC/fabric-example-mod/26.2/build.gradle), and [Fabric API Maven listing](https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/0.158.0%2B26.2/).
+
+Classification: `FABRIC_26_2_SUPPORT_CERTIFIED`.
+
+Overall classification: `MULTI_PLATFORM_SUPPORT_CERTIFIED`.

@@ -452,6 +452,31 @@ class FabricInspector:
                     match = re.search(pattern, text)
                     if match:
                         values[logical] = DetectedValue(match.group(1), f"{build_file}:{logical}")
+
+            if "java" not in values:
+                java_match = re.search(
+                    r"(?:JavaLanguageVersion\.of\s*\(|sourceCompatibility\s*[=:]|targetCompatibility\s*[=:])\s*['\"]?(\d+)",
+                    text,
+                )
+                if java_match:
+                    values["java"] = DetectedValue(java_match.group(1), f"{build_file}:java")
+
+            if "mapping_family" not in values:
+                has_modern_loom = bool(re.search(r"net\.fabricmc\.fabric-loom", text))
+                has_mapping_declaration = "mappings" in values or bool(
+                    re.search(r"\bmappings\s+[\"']", text)
+                )
+                if has_mapping_declaration:
+                    values["mapping_family"] = DetectedValue(
+                        "OBFUSCATED_REMAPPED", f"{build_file}:mappings"
+                    )
+                    values.setdefault(
+                        "mappings_namespace", DetectedValue("yarn", f"{build_file}:mappings")
+                    )
+                elif has_modern_loom:
+                    values["mapping_family"] = DetectedValue(
+                        "UNOBFUSCATED", f"{build_file}:loom-mapping-family"
+                    )
         return values
 
     def _load_properties(self, path: Path) -> dict[str, str]:

@@ -188,8 +188,8 @@ def test_real_inspection_normalizes_observed_values_without_legacy_defaults(tmp_
     assert observed.loom_version == "1.13.3"
     assert observed.mappings_version == "1.21.11+build.6"
     assert observed.java_version is None
-    assert observed.mapping_family is None
-    assert observed.mappings_namespace is None
+    assert observed.mapping_family is FabricMappingFamily.OBFUSCATED_REMAPPED
+    assert observed.mappings_namespace == "yarn"
     monkeypatch.setattr("pd_agent.bootstrap.PinnedFabricVersions", lambda: (_ for _ in ()).throw(AssertionError("legacy default used")))
     assert FabricSupportRegistry((_profile(),)).resolve(observed).status is FabricPlatformResolutionStatus.SUPPORTED
 
@@ -243,7 +243,7 @@ def test_declarative_registry_loads_current_legacy_profile() -> None:
         "fabric-minecraft-26.2",
     ]
     assert registry.list_profiles()[0].support_status is FabricPlatformSupportStatus.SUPPORTED
-    assert registry.list_profiles()[1].support_status is FabricPlatformSupportStatus.TARGET
+    assert registry.list_profiles()[1].support_status is FabricPlatformSupportStatus.SUPPORTED
 
 
 def test_declarative_loader_rejects_bad_schema_and_identity(tmp_path) -> None:

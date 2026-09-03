@@ -380,6 +380,8 @@ class FabricSupportRegistry:
         # Java and mapping-family metadata can be profile/evidence requirements
         # even when the workspace inspector cannot observe them independently.
         required = ["minecraft_version", "loader_version", "loom_version"]
+        if profile.mapping_family is FabricMappingFamily.UNOBFUSCATED:
+            required.extend(("java_version", "mapping_family"))
         if profile.mapping_family is FabricMappingFamily.OBFUSCATED_REMAPPED:
             required.append("mappings_version")
         return tuple(name for name in required if name in observation.missing_facts or getattr(observation, name) is None)
@@ -406,12 +408,34 @@ def platform_observation_from_inspection(inspection: Any) -> FabricPlatformObser
         "loom_version": value("loom"),
         "mappings_version": value("mappings", "yarn_version"),
     }
-    missing = tuple(name for name, item in versions.items() if item is None)
+    java_version = value("java", "java_version")
+    mapping_family_value = value("mapping_family")
+    mapping_namespace = value("mappings_namespace")
+    mapping_family = FabricMappingFamily(mapping_family_value) if mapping_family_value else None
+    if mapping_family is FabricMappingFamily.UNOBFUSCATED:
+        versions["mappings_version"] = None
+        mapping_namespace = None
+    missing = tuple(
+        name for name, item in versions.items()
+        if item is None and not (
+            mapping_family is FabricMappingFamily.UNOBFUSCATED
+            and name == "mappings_version"
+        )
+    )
+    if java_version is None:
+        missing += ("java_version",)
+    if mapping_family is None:
+        missing += ("mapping_family",)
+    elif mapping_family is FabricMappingFamily.OBFUSCATED_REMAPPED and mapping_namespace is None:
+        missing += ("mappings_namespace",)
     issues = tuple(str(item) for item in inspection.issues)
     material_tokens = ("ambiguous", "conflict", "contradict")
     conflicts = tuple(sorted(set(item for item in issues if any(token in item.casefold() for token in material_tokens))))
     return FabricPlatformObservation(
         **versions,
+        java_version=java_version,
+        mappings_namespace=mapping_namespace,
+        mapping_family=mapping_family,
         missing_facts=missing,
         conflicts=conflicts,
         issues=issues,

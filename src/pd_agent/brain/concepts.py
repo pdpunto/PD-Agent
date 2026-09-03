@@ -66,8 +66,20 @@ class FabricConceptPatternKnowledgeSource:
     artifact_coordinate = "fabric-docs:1.21.11-curated-1"
     artifact_url = "https://docs.fabricmc.net/"
 
-    def __init__(self, *, catalog: tuple[CuratedConcept, ...] = _CATALOG) -> None:
+    def __init__(
+        self,
+        *,
+        catalog: tuple[CuratedConcept, ...] = _CATALOG,
+        environment: KnowledgeEnvironment | None = None,
+    ) -> None:
         self.catalog = tuple(catalog)
+        self.environment = environment or _TARGET_ENVIRONMENT
+        self.artifact_version = (
+            "1.21.11-curated-1"
+            if self.environment == _TARGET_ENVIRONMENT
+            else f"{self.environment.minecraft_version}-curated-1"
+        )
+        self.artifact_coordinate = f"fabric-docs:{self.artifact_version}"
         self.artifact_checksum = hashlib.sha256(
             canonical_json([asdict(item) for item in self.catalog]).encode("utf-8")
         ).hexdigest()
@@ -79,13 +91,19 @@ class FabricConceptPatternKnowledgeSource:
     def compatibility(self, environment: KnowledgeEnvironment) -> CompatibilityStatus:
         if environment.minecraft_version is None or environment.fabric_api_version is None or environment.loader_version is None:
             return CompatibilityStatus.UNKNOWN
-        if environment.minecraft_version != _TARGET_ENVIRONMENT.minecraft_version:
+        expected = self.environment
+        if environment.minecraft_version != expected.minecraft_version:
             return CompatibilityStatus.INCOMPATIBLE
-        if environment.fabric_api_version != _TARGET_ENVIRONMENT.fabric_api_version or environment.loader_version != _TARGET_ENVIRONMENT.loader_version:
+        if environment.fabric_api_version != expected.fabric_api_version or environment.loader_version != expected.loader_version:
             return CompatibilityStatus.INCOMPATIBLE
-        if environment.mappings_namespace is None or environment.mappings_version is None:
-            return CompatibilityStatus.UNKNOWN
-        if environment.mappings_namespace != _TARGET_ENVIRONMENT.mappings_namespace or environment.mappings_version != _TARGET_ENVIRONMENT.mappings_version:
+        for field in ("loom_version", "java_version"):
+            expected_value = getattr(expected, field)
+            if expected_value is not None and getattr(environment, field) != expected_value:
+                return CompatibilityStatus.INCOMPATIBLE
+        if expected.mappings_namespace is not None and (
+            environment.mappings_namespace != expected.mappings_namespace
+            or environment.mappings_version != expected.mappings_version
+        ):
             return CompatibilityStatus.INCOMPATIBLE
         return CompatibilityStatus.COMPATIBLE
 
@@ -106,7 +124,7 @@ class FabricConceptPatternKnowledgeSource:
         return KnowledgeSourceResult(KnowledgeRetrievalStatus.SUCCESS, self.source_id, self.source_kind, need, items=items, provenance=(provenance,))
 
     def materialize_records(self, environment: KnowledgeEnvironment | None = None) -> tuple[KnowledgeRecord, ...]:
-        target = environment or _TARGET_ENVIRONMENT
+        target = environment or self.environment
         if self.compatibility(target) != CompatibilityStatus.COMPATIBLE:
             raise ValueError("concept materialization requires compatible environment")
         if self._records is not None:
