@@ -92,6 +92,13 @@ def canonical_capability_json(value: Any) -> str:
         raise CapabilityModelError("capability data is not canonical JSON") from exc
 
 
+def derive_capability_output_id(instance: "CapabilityInstance", local_output_key: str) -> str:
+    """Derive a stable data ID for one declared output of an instance."""
+    key = _validate_identifier(local_output_key, field_name="local_output_key")
+    payload = {"instance_id": instance.identity, "output_key": key}
+    return hashlib.sha256(canonical_capability_json(payload).encode("utf-8")).hexdigest()
+
+
 def _declaration_tuple(value: Any, *, field_name: str) -> tuple[Any, ...]:
     if value is None:
         return ()
@@ -237,5 +244,6 @@ __all__ = [
     "CapabilityModelError",
     "PlanningFailure",
     "canonical_capability_json",
+    "derive_capability_output_id",
     "normalize_capability_data",
 ]

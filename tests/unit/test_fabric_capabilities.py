@@ -12,6 +12,14 @@ from pd_agent.fabric.capabilities import (
     CapabilityModelError,
     PlanningFailure,
     canonical_capability_json,
+    derive_capability_output_id,
+)
+from pd_agent.fabric.registry import (
+    FOUNDATION_DEFINITIONS,
+    CapabilityRegistry,
+    DuplicateCapabilityError,
+    UnsupportedCapabilityError,
+    foundation_capability_registry,
 )
 
 
@@ -87,3 +95,35 @@ def test_candidate_and_planning_failure_are_serializable_data() -> None:
     failure = PlanningFailure(code="INVALID_CANDIDATE", message="candidate rejected", details={"field": "x"})
     assert candidate.to_dict() == {"definition_id": "fabric.demo", "parameters": {"enabled": True}}
     assert failure.to_dict()["code"] == "INVALID_CANDIDATE"
+
+
+def test_foundation_registry_contains_only_generic_capabilities() -> None:
+    registry = foundation_capability_registry()
+    assert registry.definition_ids == ("fabric.block", "fabric.block_item", "fabric.recipe")
+    assert all("server" not in item.definition_id for item in registry.definitions())
+    assert all("provider" not in item.to_dict() for item in registry.definitions())
+
+
+def test_registry_rejects_duplicates_unknown_ids_and_mutation_after_freeze() -> None:
+    registry = CapabilityRegistry().register(FOUNDATION_DEFINITIONS[0])
+    with pytest.raises(DuplicateCapabilityError):
+        registry.register(FOUNDATION_DEFINITIONS[0])
+    with pytest.raises(UnsupportedCapabilityError):
+        registry.get("fabric.unknown")
+    registry.freeze()
+    with pytest.raises(CapabilityModelError):
+        registry.register(FOUNDATION_DEFINITIONS[1])
+
+
+def test_prerequisites_are_data_only_and_registry_does_not_resolve_them() -> None:
+    registry = foundation_capability_registry()
+    assert registry.get("fabric.block_item").prerequisites
+    assert registry.get("fabric.recipe").prerequisites
+    assert not hasattr(registry, "resolve")
+
+
+def test_derived_output_ids_are_stable_and_local_key_sensitive() -> None:
+    instance = CapabilityInstance(definition_id="fabric.block", parameters={"name": "core", "namespace": "example"})
+    same = CapabilityInstance(definition_id="fabric.block", parameters={"namespace": "example", "name": "core"})
+    assert derive_capability_output_id(instance, "source") == derive_capability_output_id(same, "source")
+    assert derive_capability_output_id(instance, "source") != derive_capability_output_id(instance, "resource")
