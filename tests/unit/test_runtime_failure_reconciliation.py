@@ -159,6 +159,26 @@ def test_runtime_old_artifact_or_wrong_requirement_does_not_resolve() -> None:
     assert not reconciler.reconcile_runtime(state, failure, runtime=_runtime(artifact, requirement="other"), artifact=artifact, requirement_ids=("r1",), validation_revision="v1")
 
 
+def test_runtime_resolution_keeps_unrelated_active_failure() -> None:
+    state = _state()
+    first = _failure(category="RUNTIME", requirements=("r1",))
+    second = replace(first, failure_id="failure-2", requirement_ids=("r2",), fingerprint=None)
+    state.progress_ledger = replace(state.progress_ledger, failures=(first, second))
+    artifact = _artifact()
+
+    assert FailureReconciler().reconcile_runtime(
+        state,
+        first,
+        runtime=_runtime(artifact, requirement="r1"),
+        artifact=artifact,
+        requirement_ids=("r1",),
+        validation_revision="v1",
+    )
+    latest = {item.failure_id: item for item in state.progress_ledger.failures}
+    assert latest["failure-1"].status is FailureFactStatus.RESOLVED
+    assert latest["failure-2"].status is FailureFactStatus.ACTIVE
+
+
 def test_repair_cycle_limit_is_enforced_and_context_is_bounded(tmp_path: Path) -> None:
     seen = []
     source = tmp_path / "source.txt"
