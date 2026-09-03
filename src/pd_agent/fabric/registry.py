@@ -68,27 +68,42 @@ def _definition(
     *,
     parameter_schema: dict[str, Any],
     prerequisites: tuple[dict[str, Any], ...] = (),
+    requirements: tuple[dict[str, Any], ...] = (),
+    validations: tuple[dict[str, Any], ...] = (),
+    mutation_expectations: tuple[dict[str, Any], ...] = (),
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         definition_id=definition_id,
         parameter_schema=parameter_schema,
         prerequisites=prerequisites,
+        requirements=requirements,
+        validations=validations,
+        mutation_expectations=mutation_expectations,
     )
 
 
 BLOCK_DEFINITION = _definition(
     "fabric.block",
     parameter_schema={"namespace": {"type": "string"}, "name": {"type": "string"}},
+    requirements=({"key": "source", "description": "the block source declaration is present"},),
+    validations=({"key": "build", "kind": "build", "requirement_keys": ("source",)},),
+    mutation_expectations=({"key": "source", "role": "source"},),
 )
 BLOCK_ITEM_DEFINITION = _definition(
     "fabric.block_item",
     parameter_schema={"block_instance_id": {"type": "string"}, "namespace": {"type": "string"}},
     prerequisites=({"capability": "fabric.block", "reference": "block_instance_id"},),
+    requirements=({"key": "source", "description": "the block item source declaration is present"},),
+    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("source",)},),
+    mutation_expectations=({"key": "source", "role": "source"},),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
     parameter_schema={"output_instance_id": {"type": "string"}, "ingredients": {"type": "array"}},
     prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
+    requirements=({"key": "source", "description": "the recipe source declaration is present"},),
+    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("source",)},),
+    mutation_expectations=({"key": "source", "role": "resource"},),
 )
 
 FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, RECIPE_DEFINITION)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityDefinition, CapabilityInstance
-from pd_agent.fabric.planning import CapabilityPlanner
+from pd_agent.core.contracts import FabricEnvironmentConstraints
+from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import CapabilityRegistry, FOUNDATION_DEFINITIONS, foundation_capability_registry
 
 
@@ -74,3 +75,59 @@ def test_planning_result_is_data_only_and_has_no_execution_authority() -> None:
     assert result.to_dict()["success"] is True
     assert not hasattr(result, "execute")
     assert not hasattr(result, "provider")
+
+
+def test_composed_plan_expands_to_correlated_fabric_contract() -> None:
+    planner = CapabilityPlanner(foundation_capability_registry())
+    plan = planner.plan(_foundation_candidates())
+    expansion = expand_plan_to_contract(
+        plan,
+        foundation_capability_registry(),
+        FabricContractContext(task_id="task-1", revision="m1", goal="compose a block capability"),
+    )
+    assert expansion.success
+    assert expansion.contract is not None
+    assert len(expansion.contract.requirements) == 3
+    assert len(expansion.contract.validation_requirements) == 3
+    requirement_ids = {item.requirement_id for item in expansion.contract.requirements}
+    assert all(set(item.requirement_ids).issubset(requirement_ids) for item in expansion.contract.validation_requirements)
+    assert all(expansion.requirements_for(instance.identity) for instance in plan.instances)
+    assert all(expansion.validations_for(instance.identity) for instance in plan.instances)
+    assert expansion.contract.fingerprint == expansion.contract.from_dict(expansion.contract.to_dict()).fingerprint
+
+
+def test_contract_expansion_is_stable_under_candidate_permutation() -> None:
+    candidates = _foundation_candidates()
+    registry = foundation_capability_registry()
+    context = FabricContractContext(task_id="task-1", revision="m1", goal="compose a block capability")
+    first = expand_plan_to_contract(CapabilityPlanner(registry).plan(candidates), registry, context)
+    second = expand_plan_to_contract(CapabilityPlanner(registry).plan(tuple(reversed(candidates))), registry, context)
+    assert first.success and second.success
+    assert first.contract is not None and second.contract is not None
+    assert first.contract.fingerprint == second.contract.fingerprint
+    assert first.capability_requirement_ids == second.capability_requirement_ids
+
+
+def test_unsupported_validation_fails_before_contract_generation() -> None:
+    definition = CapabilityDefinition(
+        definition_id="test.unsupported",
+        parameter_schema={"name": {"type": "string"}},
+        requirements=({"key": "source", "description": "source exists"},),
+        validations=({"key": "visual", "kind": "screenshot", "requirement_keys": ("source",)},),
+    )
+    registry = CapabilityRegistry([definition]).freeze()
+    plan = CapabilityPlanner(registry).plan([CapabilityCandidate(definition_id="test.unsupported", parameters={"name": "x"})])
+    expansion = expand_plan_to_contract(plan, registry, FabricContractContext(task_id="t", revision="1", goal="test"))
+    assert expansion.failure is not None
+    assert expansion.failure.code == "UNSUPPORTED_VALIDATION"
+
+
+def test_invalid_generated_contract_is_structured() -> None:
+    registry = foundation_capability_registry()
+    failure = expand_plan_to_contract(
+        CapabilityPlanner(registry).plan(_foundation_candidates()),
+        registry,
+        FabricContractContext(task_id="", revision="1", goal="test", environment_constraints=FabricEnvironmentConstraints()),
+    )
+    assert failure.failure is not None
+    assert failure.failure.code == "INVALID_GENERATED_CONTRACT"

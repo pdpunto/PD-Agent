@@ -12,11 +12,20 @@ from .capabilities import (
     CapabilityModelError,
     PlanningFailure,
     canonical_capability_json,
+    derive_capability_output_id,
+)
+from pd_agent.core.contracts import (
+    FabricEnvironmentConstraints,
+    FabricMutationExpectation,
+    FabricRequirement,
+    FabricTaskContract,
+    FabricValidationRequirement,
 )
 from .registry import CapabilityRegistry, UnsupportedCapabilityError
 
 
 _TYPE_NAMES = {"string", "integer", "number", "boolean", "array", "object"}
+SUPPORTED_VALIDATION_KINDS = frozenset({"build", "artifact"})
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -66,6 +75,47 @@ class PlanningResult:
             "dependency_edges": [edge.to_dict() for edge in self.dependency_edges],
             "failure": self.failure.to_dict() if self.failure else None,
             "plan_fingerprint": self.plan_fingerprint,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FabricContractContext:
+    """Minimal non-Product context needed to build an existing contract."""
+
+    task_id: str
+    revision: str
+    goal: str
+    environment_constraints: FabricEnvironmentConstraints = FabricEnvironmentConstraints()
+    required_capabilities: tuple[str, ...] = ()
+    completion_criteria: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractExpansionResult:
+    """Contract plus plan provenance, without evidence or execution state."""
+
+    contract: FabricTaskContract | None = None
+    failure: PlanningFailure | None = None
+    capability_requirement_ids: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    capability_validation_requirement_ids: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def success(self) -> bool:
+        return self.contract is not None and self.failure is None
+
+    def requirements_for(self, capability_instance_id: str) -> tuple[str, ...]:
+        return dict(self.capability_requirement_ids).get(capability_instance_id, ())
+
+    def validations_for(self, capability_instance_id: str) -> tuple[str, ...]:
+        return dict(self.capability_validation_requirement_ids).get(capability_instance_id, ())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "contract": self.contract.to_dict() if self.contract else None,
+            "failure": self.failure.to_dict() if self.failure else None,
+            "capability_requirement_ids": {key: list(value) for key, value in self.capability_requirement_ids},
+            "capability_validation_requirement_ids": {key: list(value) for key, value in self.capability_validation_requirement_ids},
         }
 
 
@@ -159,6 +209,9 @@ class CapabilityPlanner:
         ordered_edges = tuple(DependencyEdge(dependent_instance_id=a, prerequisite_instance_id=b) for a, b in sorted(edges))
         return PlanningResult(instances=ordered, dependency_edges=ordered_edges)
 
+    def expand_contract(self, plan: PlanningResult, context: FabricContractContext) -> ContractExpansionResult:
+        return expand_plan_to_contract(plan, self.registry, context)
+
     def _resolve_prerequisite(
         self,
         declaration: Mapping[str, Any],
@@ -241,4 +294,119 @@ def plan_capabilities(candidates: Iterable[CapabilityCandidate], registry: Capab
     return CapabilityPlanner(registry).plan(candidates)
 
 
-__all__ = ["CapabilityPlanner", "DependencyEdge", "PlanningResult", "plan_capabilities"]
+def _expansion_failure(code: str, message: str, **details: Any) -> ContractExpansionResult:
+    return ContractExpansionResult(failure=PlanningFailure(code=code, message=message, details=details))
+
+
+def expand_plan_to_contract(
+    plan: PlanningResult,
+    registry: CapabilityRegistry,
+    context: FabricContractContext,
+) -> ContractExpansionResult:
+    """Expand a successful normalized plan into the existing Fabric contract."""
+    if not isinstance(plan, PlanningResult) or not plan.success:
+        return _expansion_failure("INVALID_GENERATED_CONTRACT", "a successful planning result is required")
+    if not isinstance(context, FabricContractContext):
+        return _expansion_failure("INVALID_GENERATED_CONTRACT", "contract context is invalid")
+
+    requirements: list[FabricRequirement] = []
+    validations: list[FabricValidationRequirement] = []
+    mutations: list[FabricMutationExpectation] = []
+    requirement_trace: list[tuple[str, tuple[str, ...]]] = []
+    validation_trace: list[tuple[str, tuple[str, ...]]] = []
+    requirement_by_instance: dict[str, dict[str, str]] = {}
+    try:
+        for instance in plan.instances:
+            definition = registry.get(instance.definition_id)
+            local_requirements: dict[str, str] = {}
+            for declaration in definition.requirements:
+                if not isinstance(declaration, Mapping):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "requirement declaration must be an object")
+                key = declaration.get("key")
+                description = declaration.get("description")
+                if not isinstance(key, str) or not key or not isinstance(description, str) or not description:
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "requirement declaration is malformed")
+                requirement_id = f"requirement:{derive_capability_output_id(instance, key)}"
+                requirements.append(FabricRequirement(requirement_id=requirement_id, description=description, required=bool(declaration.get("required", True))))
+                local_requirements[key] = requirement_id
+            if not local_requirements and definition.requirements != ():
+                return _expansion_failure("INVALID_GENERATED_CONTRACT", "capability requirement expansion is malformed")
+            requirement_by_instance[instance.identity] = local_requirements
+            requirement_trace.append((instance.identity, tuple(local_requirements.values())))
+
+            local_validations: list[str] = []
+            for declaration in definition.validations:
+                if not isinstance(declaration, Mapping):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation declaration must be an object")
+                key = declaration.get("key")
+                kind = declaration.get("kind")
+                if not isinstance(key, str) or not key or not isinstance(kind, str) or not kind.strip():
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation declaration is malformed")
+                normalized_kind = kind.casefold()
+                if normalized_kind not in SUPPORTED_VALIDATION_KINDS:
+                    return _expansion_failure("UNSUPPORTED_VALIDATION", "required validation kind is not supported", kind=normalized_kind)
+                raw_keys = declaration.get("requirement_keys", tuple(local_requirements))
+                if not isinstance(raw_keys, (list, tuple)) or not raw_keys or any(key not in local_requirements for key in raw_keys):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation has invalid requirement correlation")
+                correlated = tuple(local_requirements[key] for key in raw_keys)
+                spec = declaration.get("spec", {})
+                if not isinstance(spec, Mapping):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "validation spec must be a mapping")
+                validation_id = f"validation:{derive_capability_output_id(instance, key)}"
+                validations.append(FabricValidationRequirement(
+                    validation_requirement_id=validation_id,
+                    requirement_ids=correlated,
+                    kind=normalized_kind,
+                    required=bool(declaration.get("required", True)),
+                    spec=spec,
+                ))
+                local_validations.append(validation_id)
+            validation_trace.append((instance.identity, tuple(local_validations)))
+
+            for declaration in definition.mutation_expectations:
+                if not isinstance(declaration, Mapping):
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation declaration must be an object")
+                key = declaration.get("key")
+                role = declaration.get("role")
+                if not isinstance(key, str) or not key or not isinstance(role, str) or not role:
+                    return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation declaration is malformed")
+                mutations.append(FabricMutationExpectation(
+                    expectation_id=f"mutation:{derive_capability_output_id(instance, key)}",
+                    role=role,
+                    path=declaration.get("path"),
+                    required=bool(declaration.get("required", True)),
+                ))
+    except (CapabilityModelError, UnsupportedCapabilityError, ValueError) as exc:
+        return _expansion_failure("INVALID_GENERATED_CONTRACT", str(exc))
+
+    try:
+        contract = FabricTaskContract(
+            task_id=context.task_id,
+            revision=context.revision,
+            goal=context.goal,
+            requirements=tuple(requirements),
+            required_capabilities=context.required_capabilities,
+            completion_criteria=context.completion_criteria,
+            validation_requirements=tuple(validations),
+            mutation_expectations=tuple(mutations),
+            environment_constraints=context.environment_constraints,
+        )
+    except (TypeError, ValueError) as exc:
+        return _expansion_failure("INVALID_GENERATED_CONTRACT", str(exc))
+    return ContractExpansionResult(
+        contract=contract,
+        capability_requirement_ids=tuple(requirement_trace),
+        capability_validation_requirement_ids=tuple(validation_trace),
+    )
+
+
+__all__ = [
+    "CapabilityPlanner",
+    "ContractExpansionResult",
+    "DependencyEdge",
+    "FabricContractContext",
+    "PlanningResult",
+    "SUPPORTED_VALIDATION_KINDS",
+    "expand_plan_to_contract",
+    "plan_capabilities",
+]
