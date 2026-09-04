@@ -14,6 +14,7 @@ from .capabilities import (
     ResolvedCapabilityReference,
     canonical_capability_json,
     derive_capability_output_id,
+    validate_recipe_parameters,
 )
 from pd_agent.core.contracts import (
     FabricEnvironmentConstraints,
@@ -167,6 +168,8 @@ def _validate_parameters(candidate: CapabilityCandidate, definition: Any) -> dic
         minimum = specification.get("minimum")
         if minimum is not None and parameters[key] < minimum:
             raise CapabilityModelError(f"capability parameter is below minimum: {key}")
+    if definition.definition_id == "fabric.recipe":
+        validate_recipe_parameters(parameters)
     return parameters
 
 
@@ -218,6 +221,9 @@ class CapabilityPlanner:
             for declaration in definition.prerequisites:
                 if not isinstance(declaration, Mapping):
                     return _failure("INVALID_PREREQUISITE", "prerequisite declaration must be an object")
+                required_parameter = declaration.get("required_parameter")
+                if required_parameter is not None and required_parameter not in instance.parameters:
+                    continue
                 target = self._resolve_prerequisite(declaration, instance, instances_by_identity)
                 if isinstance(target, PlanningResult):
                     return target
@@ -247,6 +253,7 @@ class CapabilityPlanner:
                         capability_id=target.definition_id,
                         declaration_key=reference.declaration_key,
                         instance_identity=target.identity,
+                        role=reference.role,
                     )
                 )
                 edges.add((source.identity, target.identity))

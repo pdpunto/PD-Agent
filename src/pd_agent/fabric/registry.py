@@ -1,4 +1,4 @@
-"""Small declarative M1 capability registry."""
+"""Small declarative M3 capability registry."""
 
 from __future__ import annotations
 
@@ -174,10 +174,41 @@ BLOCK_ASSETS_DEFINITION = _definition(
     },),
     mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
 )
+ITEM_DEFINITION = _definition(
+    "fabric.item",
+    parameter_schema={
+        "namespace": {"type": "string", "format": "identifier"},
+        "item_id": {"type": "string", "format": "identifier"},
+        "display_name": {"type": "string", "required": False},
+        "settings": {"type": "object", "required": False},
+        "source_path": {"type": "string", "required": False},
+        "resource_paths": {"type": "object", "required": False},
+    },
+    requirements=({"key": "item-source", "description": "the standalone Item source declaration is present"},),
+)
+ITEM_ASSETS_DEFINITION = _definition(
+    "fabric.item_assets",
+    parameter_schema={
+        "item_instance_id": {"type": "string", "required": False},
+        "namespace": {"type": "string", "format": "identifier"},
+        "item_id": {"type": "string", "format": "identifier"},
+        "texture_strategy": {"type": "string", "enum": ("REUSE", "DERIVE", "GENERATE")},
+        "texture_reference": {"type": "string", "required": False},
+        "texture_path": {"type": "string", "required": False},
+        "resource_paths": {"type": "object"},
+    },
+    prerequisites=({"capability": "fabric.item", "reference": "item_instance_id", "required_parameter": "item_instance_id"},),
+    requirements=(
+        {"key": "item-model", "description": "the standalone item model resource is present"},
+        {"key": "lang", "description": "the item language resource is present"},
+        {"key": "texture", "description": "the item texture strategy is declared"},
+    ),
+)
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
     parameter_schema={
-        "output_instance_id": {"type": "string"},
+        "output_instance_id": {"type": "string", "required": False},
+        "output_capability_id": {"type": "string", "format": "identifier", "required": False},
         "namespace": {"type": "string", "format": "identifier", "required": False},
         "recipe_id": {"type": "string", "format": "identifier", "required": False},
         "recipe_type": {"type": "string", "format": "identifier", "required": False},
@@ -186,7 +217,7 @@ RECIPE_DEFINITION = _definition(
         "result_count": {"type": "integer", "required": False, "minimum": 1},
         "resource_path": {"type": "string", "required": False},
     },
-    prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
+    prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id", "required_parameter": "output_instance_id"},),
     requirements=({"key": "recipe-resource", "description": "the recipe resource is declared"},),
     validations=(
         {
@@ -207,11 +238,11 @@ RECIPE_DEFINITION = _definition(
     ),
 )
 
-FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, BLOCK_ASSETS_DEFINITION, RECIPE_DEFINITION)
+FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, BLOCK_ASSETS_DEFINITION, RECIPE_DEFINITION, ITEM_DEFINITION, ITEM_ASSETS_DEFINITION)
 
 
 def foundation_capability_registry() -> CapabilityRegistry:
-    """Return a fresh frozen registry containing only M1 foundation kinds."""
+    """Return a fresh frozen registry containing the bounded M3 foundation kinds."""
     return CapabilityRegistry(FOUNDATION_DEFINITIONS).freeze()
 
 
@@ -219,6 +250,8 @@ __all__ = [
     "BLOCK_ASSETS_DEFINITION",
     "BLOCK_DEFINITION",
     "BLOCK_ITEM_DEFINITION",
+    "ITEM_ASSETS_DEFINITION",
+    "ITEM_DEFINITION",
     "CapabilityRegistry",
     "DuplicateCapabilityError",
     "FOUNDATION_DEFINITIONS",

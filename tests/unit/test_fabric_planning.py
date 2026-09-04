@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityDefinition, CapabilityInstance, DeclarativeCapabilityReference
+from pd_agent.fabric.capabilities import (
+    CapabilityCandidate,
+    CapabilityDefinition,
+    CapabilityInstance,
+    CapabilityRecipeIngredient,
+    DeclarativeCapabilityReference,
+    VanillaRecipeIngredient,
+)
 from pd_agent.core.contracts import FabricEnvironmentConstraints
 from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import CapabilityRegistry, FOUNDATION_DEFINITIONS, foundation_capability_registry
@@ -171,6 +178,72 @@ def test_equivalent_declarations_keep_semantic_deduplication() -> None:
     ])
     assert result.success
     assert len(result.instances) == 1
+
+
+def test_b2_registry_supports_standalone_item_and_item_assets() -> None:
+    registry = foundation_capability_registry()
+    item = CapabilityCandidate(
+        definition_id="fabric.item",
+        declaration_key="item-a",
+        parameters={"namespace": "demo", "item_id": "core", "settings": {"max_count": 16}},
+    )
+    assets = CapabilityCandidate(
+        definition_id="fabric.item_assets",
+        declaration_key="assets-a",
+        parameters={
+            "namespace": "demo", "item_id": "core", "texture_strategy": "REUSE",
+            "resource_paths": {"item_model": "assets/demo/models/item/core.json", "lang": "assets/demo/lang/en_us.json"},
+        },
+        references=(DeclarativeCapabilityReference(capability_id="fabric.item", declaration_key="item-a", role="item"),),
+    )
+    result = CapabilityPlanner(registry).plan([assets, item])
+    assert result.success
+    assert {instance.definition_id for instance in result.instances} == {"fabric.item", "fabric.item_assets"}
+    assert result.resolved_references[0].role == "item"
+    assert result.resolved_references[0].capability_id == "fabric.item"
+
+
+def test_b2_recipe_supports_standalone_output_vanilla_and_own_task_ingredients() -> None:
+    registry = foundation_capability_registry()
+    item_a = CapabilityCandidate(definition_id="fabric.item", declaration_key="item-a", parameters={"namespace": "demo", "item_id": "part"})
+    item_b = CapabilityCandidate(definition_id="fabric.item", declaration_key="item-b", parameters={"namespace": "demo", "item_id": "core"})
+    recipe = CapabilityCandidate(
+        definition_id="fabric.recipe", declaration_key="recipe-r",
+        parameters={
+            "namespace": "demo", "recipe_id": "core", "ingredients": [
+                VanillaRecipeIngredient(item_id="minecraft:iron_ingot", quantity=2).to_dict(),
+                CapabilityRecipeIngredient(capability_id="fabric.item", declaration_key="item-a").to_dict(),
+            ],
+            "result_item_id": "core", "result_count": 1,
+        },
+        references=(
+            DeclarativeCapabilityReference(capability_id="fabric.item", declaration_key="item-b", role="output"),
+            DeclarativeCapabilityReference(capability_id="fabric.item", declaration_key="item-a", role="ingredient"),
+        ),
+    )
+    result = CapabilityPlanner(registry).plan([recipe, item_b, item_a])
+    assert result.success
+    assert len(result.instances) == 3
+    assert {item.role for item in result.resolved_references} == {"output", "ingredient"}
+    identities = {item.declaration_key: item.instance_identity for item in result.resolved_references}
+    assert identities["item-a"] != identities["item-b"]
+    assert all(edge.dependent_instance_id == result.instances[-1].identity for edge in result.dependency_edges)
+
+
+def test_b2_rejects_invalid_item_recipe_and_reference_parameters() -> None:
+    registry = foundation_capability_registry()
+    invalid_item = CapabilityCandidate(definition_id="fabric.item", parameters={"namespace": "demo", "item_id": "bad/id"})
+    assert CapabilityPlanner(registry).plan([invalid_item]).failure.code == "INVALID_PARAMETERS"
+    invalid_recipe = CapabilityCandidate(definition_id="fabric.recipe", parameters={"recipe_id": "Bad", "ingredients": [{"item": "minecraft:iron"}]})
+    assert CapabilityPlanner(registry).plan([invalid_recipe]).failure.code == "INVALID_PARAMETERS"
+    invalid_quantity = CapabilityCandidate(definition_id="fabric.recipe", parameters={"recipe_id": "core", "ingredients": [{"kind": "vanilla", "item_id": "minecraft:iron", "quantity": 0}]})
+    assert CapabilityPlanner(registry).plan([invalid_quantity]).failure.code == "INVALID_PARAMETERS"
+    incompatible = CapabilityCandidate(
+        definition_id="fabric.recipe", declaration_key="recipe", parameters={"recipe_id": "core", "ingredients": [{"item": "minecraft:iron"}]},
+        references=(DeclarativeCapabilityReference(capability_id="fabric.item", declaration_key="block", role="output"),),
+    )
+    block = CapabilityCandidate(definition_id="fabric.block", declaration_key="block", parameters={"namespace": "demo", "name": "core"})
+    assert CapabilityPlanner(registry).plan([incompatible, block]).failure.code == "INCOMPATIBLE_CAPABILITY_REFERENCE"
 
 
 def test_cycle_detection_uses_unique_capability_references() -> None:

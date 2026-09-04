@@ -17,6 +17,7 @@ MAX_CAPABILITY_STRING_LENGTH = 4096
 MAX_CAPABILITY_CONTAINER_LENGTH = 64
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
 _DECLARATION_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
+_REFERENCE_ROLE = re.compile(r"^(?:dependency|output|ingredient|item)$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_:-]{0,127}$")
 _FORBIDDEN_KEYS = frozenset(
     {"command", "commands", "exec", "executable", "reflection", "shell", "script", "scripts"}
@@ -212,17 +213,23 @@ class DeclarativeCapabilityReference:
 
     capability_id: str
     declaration_key: str
+    role: str = "dependency"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capability_id", _validate_identifier(self.capability_id, field_name="capability_id"))
         object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
+        if not isinstance(self.role, str) or not _REFERENCE_ROLE.fullmatch(self.role):
+            raise CapabilityModelError("reference role is invalid")
 
     def to_dict(self) -> dict[str, str]:
-        return {"capability_id": self.capability_id, "declaration_key": self.declaration_key}
+        value = {"capability_id": self.capability_id, "declaration_key": self.declaration_key}
+        if self.role != "dependency":
+            value["role"] = self.role
+        return value
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "DeclarativeCapabilityReference":
-        return cls(capability_id=data["capability_id"], declaration_key=data["declaration_key"])
+        return cls(capability_id=data["capability_id"], declaration_key=data["declaration_key"], role=data.get("role", "dependency"))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -232,18 +239,24 @@ class ResolvedCapabilityReference:
     capability_id: str
     declaration_key: str
     instance_identity: str
+    role: str = "dependency"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capability_id", _validate_identifier(self.capability_id, field_name="capability_id"))
         object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
         object.__setattr__(self, "instance_identity", _validate_identifier(self.instance_identity, field_name="instance_identity"))
+        if not isinstance(self.role, str) or not _REFERENCE_ROLE.fullmatch(self.role):
+            raise CapabilityModelError("reference role is invalid")
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        value = {
             "capability_id": self.capability_id,
             "declaration_key": self.declaration_key,
             "instance_identity": self.instance_identity,
         }
+        if self.role != "dependency":
+            value["role"] = self.role
+        return value
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "ResolvedCapabilityReference":
@@ -251,7 +264,82 @@ class ResolvedCapabilityReference:
             capability_id=data["capability_id"],
             declaration_key=data["declaration_key"],
             instance_identity=data["instance_identity"],
+            role=data.get("role", "dependency"),
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VanillaRecipeIngredient:
+    """Bounded vanilla registry ingredient for a declarative recipe."""
+
+    item_id: str
+    quantity: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "item_id", _validate_identifier(self.item_id, field_name="item_id"))
+        _validate_recipe_quantity(self.quantity)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": "vanilla", "item_id": self.item_id, "quantity": self.quantity}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CapabilityRecipeIngredient:
+    """Bounded own-task ingredient; its declaration resolves through B1."""
+
+    capability_id: str
+    declaration_key: str
+    quantity: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "capability_id", _validate_identifier(self.capability_id, field_name="capability_id"))
+        object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
+        _validate_recipe_quantity(self.quantity)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "capability",
+            "capability_id": self.capability_id,
+            "declaration_key": self.declaration_key,
+            "quantity": self.quantity,
+        }
+
+
+def _validate_recipe_quantity(value: Any) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 64:
+        raise CapabilityModelError("recipe quantity must be an integer from 1 through 64")
+
+
+def validate_recipe_parameters(parameters: Mapping[str, Any]) -> None:
+    """Validate bounded typed ingredients while retaining legacy item mappings."""
+    recipe_id = parameters.get("recipe_id")
+    if recipe_id is not None:
+        _validate_identifier(recipe_id, field_name="recipe_id")
+    result_count = parameters.get("result_count")
+    if result_count is not None:
+        _validate_recipe_quantity(result_count)
+    ingredients = parameters.get("ingredients")
+    if not isinstance(ingredients, list) or not ingredients:
+        raise CapabilityModelError("recipe ingredients must be a non-empty sequence")
+    for ingredient in ingredients:
+        if not isinstance(ingredient, Mapping):
+            raise CapabilityModelError("recipe ingredient must be an object")
+        kind = ingredient.get("kind")
+        if kind is None:
+            item_id = ingredient.get("item")
+            if not isinstance(item_id, str) or not item_id.strip():
+                raise CapabilityModelError("legacy recipe ingredient item is invalid")
+            continue
+        if kind == "vanilla":
+            VanillaRecipeIngredient(item_id=ingredient.get("item_id", ""), quantity=ingredient.get("quantity", 1))
+        elif kind == "capability":
+            CapabilityRecipeIngredient(
+                capability_id=ingredient.get("capability_id", ""),
+                declaration_key=ingredient.get("declaration_key", ""),
+                quantity=ingredient.get("quantity", 1),
+            )
+        else:
+            raise CapabilityModelError("unsupported recipe ingredient kind")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -313,10 +401,13 @@ __all__ = [
     "CapabilityDefinition",
     "CapabilityInstance",
     "CapabilityModelError",
+    "CapabilityRecipeIngredient",
     "DeclarativeCapabilityReference",
     "PlanningFailure",
     "ResolvedCapabilityReference",
+    "VanillaRecipeIngredient",
     "canonical_capability_json",
     "derive_capability_output_id",
     "normalize_capability_data",
+    "validate_recipe_parameters",
 ]

@@ -10,8 +10,10 @@ from pd_agent.fabric.capabilities import (
     CapabilityDefinition,
     CapabilityInstance,
     CapabilityModelError,
+    CapabilityRecipeIngredient,
     DeclarativeCapabilityReference,
     PlanningFailure,
+    VanillaRecipeIngredient,
     canonical_capability_json,
     derive_capability_output_id,
 )
@@ -109,7 +111,7 @@ def test_declaration_keys_and_references_are_bounded_and_serializable() -> None:
 
 def test_foundation_registry_contains_only_generic_capabilities() -> None:
     registry = foundation_capability_registry()
-    assert registry.definition_ids == ("fabric.block", "fabric.block_assets", "fabric.block_item", "fabric.recipe")
+    assert registry.definition_ids == ("fabric.block", "fabric.block_assets", "fabric.block_item", "fabric.item", "fabric.item_assets", "fabric.recipe")
     assert all("server" not in item.definition_id for item in registry.definitions())
     assert all("provider" not in item.to_dict() for item in registry.definitions())
 
@@ -137,3 +139,14 @@ def test_derived_output_ids_are_stable_and_local_key_sensitive() -> None:
     same = CapabilityInstance(definition_id="fabric.block", parameters={"namespace": "example", "name": "core"})
     assert derive_capability_output_id(instance, "source") == derive_capability_output_id(same, "source")
     assert derive_capability_output_id(instance, "source") != derive_capability_output_id(instance, "resource")
+
+
+def test_b2_recipe_ingredient_helpers_are_bounded_and_serializable() -> None:
+    vanilla = VanillaRecipeIngredient(item_id="minecraft:iron_ingot", quantity=2)
+    own = CapabilityRecipeIngredient(capability_id="fabric.item", declaration_key="item-a", quantity=1)
+    assert vanilla.to_dict() == {"kind": "vanilla", "item_id": "minecraft:iron_ingot", "quantity": 2}
+    assert own.to_dict()["kind"] == "capability"
+    with pytest.raises(CapabilityModelError):
+        VanillaRecipeIngredient(item_id="minecraft:iron_ingot", quantity=0)
+    with pytest.raises(CapabilityModelError):
+        VanillaRecipeIngredient(item_id="minecraft:iron_ingot", quantity=65)
