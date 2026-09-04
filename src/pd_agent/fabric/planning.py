@@ -11,6 +11,7 @@ from .capabilities import (
     CapabilityInstance,
     CapabilityModelError,
     PlanningFailure,
+    ResolvedCapabilityReference,
     canonical_capability_json,
     derive_capability_output_id,
 )
@@ -49,6 +50,7 @@ class PlanningResult:
 
     instances: tuple[CapabilityInstance, ...] = ()
     dependency_edges: tuple[DependencyEdge, ...] = ()
+    resolved_references: tuple[ResolvedCapabilityReference, ...] = ()
     failure: PlanningFailure | None = None
 
     @property
@@ -62,6 +64,7 @@ class PlanningResult:
         payload = {
             "instances": [item.to_dict(include_identity=True) for item in self.instances],
             "dependency_edges": [edge.to_dict() for edge in self.dependency_edges],
+            "resolved_references": [item.to_dict() for item in self.resolved_references],
         }
         return hashlib.sha256(canonical_capability_json(payload).encode("utf-8")).hexdigest()
 
@@ -184,8 +187,15 @@ class CapabilityPlanner:
             return _failure("INVALID_PARAMETERS", "candidate input contains a non-candidate value")
 
         instances_by_identity: dict[str, CapabilityInstance] = {}
+        declarations: dict[str, str] = {}
+        candidate_instances: list[tuple[CapabilityCandidate, CapabilityInstance]] = []
+        declaration_mode = any(item.declaration_key is not None or item.references for item in values)
         try:
             for candidate in values:
+                if declaration_mode and candidate.declaration_key is None:
+                    return _failure("MISSING_DECLARATION_KEY", "declaration key is required when references are used")
+                if candidate.declaration_key is not None and candidate.declaration_key in declarations:
+                    return _failure("DUPLICATE_DECLARATION_KEY", "declaration key is declared more than once", declaration_key=candidate.declaration_key)
                 definition = self.registry.get(candidate.definition_id)
                 parameters = _validate_parameters(candidate, definition)
                 instance = CapabilityInstance(
@@ -194,6 +204,9 @@ class CapabilityPlanner:
                     parameters=parameters,
                 )
                 instances_by_identity.setdefault(instance.identity, instance)
+                candidate_instances.append((candidate, instance))
+                if candidate.declaration_key is not None:
+                    declarations[candidate.declaration_key] = instance.identity
         except UnsupportedCapabilityError as exc:
             return _failure("UNSUPPORTED_CAPABILITY", str(exc), definition_id=str(getattr(exc, "args", [""])[0]))
         except CapabilityModelError as exc:
@@ -210,12 +223,41 @@ class CapabilityPlanner:
                     return target
                 edges.add((instance.identity, target.identity))
 
+        resolved_references: list[ResolvedCapabilityReference] = []
+        for candidate, source in candidate_instances:
+            for reference in candidate.references:
+                target_identity = declarations.get(reference.declaration_key)
+                if target_identity is None:
+                    return _failure(
+                        "MISSING_DECLARATION_KEY",
+                        "referenced declaration key was not found",
+                        declaration_key=reference.declaration_key,
+                    )
+                target = instances_by_identity[target_identity]
+                if target.definition_id != reference.capability_id:
+                    return _failure(
+                        "INCOMPATIBLE_CAPABILITY_REFERENCE",
+                        "referenced capability does not match the expected type",
+                        declaration_key=reference.declaration_key,
+                        expected=reference.capability_id,
+                        actual=target.definition_id,
+                    )
+                resolved_references.append(
+                    ResolvedCapabilityReference(
+                        capability_id=target.definition_id,
+                        declaration_key=reference.declaration_key,
+                        instance_identity=target.identity,
+                    )
+                )
+                edges.add((source.identity, target.identity))
+
         cycle = self._find_cycle(instances_by_identity, edges)
         if cycle:
             return _failure("DEPENDENCY_CYCLE", "capability dependency cycle detected", cycle=cycle)
         ordered = self._topological_order(instances_by_identity, edges)
         ordered_edges = tuple(DependencyEdge(dependent_instance_id=a, prerequisite_instance_id=b) for a, b in sorted(edges))
-        return PlanningResult(instances=ordered, dependency_edges=ordered_edges)
+        resolved_references.sort(key=lambda item: (item.declaration_key, item.capability_id, item.instance_identity))
+        return PlanningResult(instances=ordered, dependency_edges=ordered_edges, resolved_references=tuple(resolved_references))
 
     def expand_contract(self, plan: PlanningResult, context: FabricContractContext) -> ContractExpansionResult:
         return expand_plan_to_contract(plan, self.registry, context)
@@ -241,7 +283,7 @@ class CapabilityPlanner:
             if len(matches) == 1:
                 target = matches[0]
             elif len(matches) > 1:
-                return _failure("INVALID_PREREQUISITE", "prerequisite capability reference is ambiguous")
+                return _failure("AMBIGUOUS_CAPABILITY_REFERENCE", "prerequisite capability reference is ambiguous")
         if target is None:
             return _failure("UNRESOLVED_PREREQUISITE", "prerequisite instance was not found", dependent=dependent.identity)
         expected = declaration.get("capability")

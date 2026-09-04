@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityDefinition, CapabilityInstance
+from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityDefinition, CapabilityInstance, DeclarativeCapabilityReference
 from pd_agent.core.contracts import FabricEnvironmentConstraints
 from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import CapabilityRegistry, FOUNDATION_DEFINITIONS, foundation_capability_registry
@@ -87,6 +87,90 @@ def test_semantic_change_and_missing_reference_fail() -> None:
     assert planner.plan([changed]).instances[0].identity != planner.plan(_foundation_candidates()).instances[0].identity
     missing = CapabilityCandidate(definition_id="fabric.block_item", parameters={"namespace": "examplemod", "block_instance_id": "missing"})
     assert planner.plan([missing]).failure.code == "UNRESOLVED_PREREQUISITE"
+
+
+def _reference_registry() -> CapabilityRegistry:
+    return CapabilityRegistry([
+        CapabilityDefinition(definition_id="test.item", parameter_schema={"name": {"type": "string"}}),
+        CapabilityDefinition(definition_id="test.recipe", parameter_schema={"name": {"type": "string"}}),
+    ]).freeze()
+
+
+def test_declaration_references_resolve_to_authoritative_instance_identities() -> None:
+    registry = _reference_registry()
+    recipe = CapabilityCandidate(
+        definition_id="test.recipe", declaration_key="recipe-r", parameters={"name": "R"},
+        references=(DeclarativeCapabilityReference(capability_id="test.item", declaration_key="item-a"),),
+    )
+    item = CapabilityCandidate(definition_id="test.item", declaration_key="item-a", parameters={"name": "A"})
+    result = CapabilityPlanner(registry).plan([recipe, item])
+    assert result.success
+    assert result.resolved_references[0].instance_identity == result.instances[0].identity
+    assert result.resolved_references[0].declaration_key == "item-a"
+    assert (result.instances[-1].identity, result.instances[0].identity) in {
+        (edge.dependent_instance_id, edge.prerequisite_instance_id) for edge in result.dependency_edges
+    }
+
+
+def test_declaration_keys_fail_closed_for_duplicate_missing_and_incompatible_references() -> None:
+    registry = _reference_registry()
+    duplicate = [
+        CapabilityCandidate(definition_id="test.item", declaration_key="same", parameters={"name": "A"}),
+        CapabilityCandidate(definition_id="test.item", declaration_key="same", parameters={"name": "B"}),
+    ]
+    assert CapabilityPlanner(registry).plan(duplicate).failure.code == "DUPLICATE_DECLARATION_KEY"
+    missing = CapabilityCandidate(
+        definition_id="test.recipe", declaration_key="recipe", parameters={"name": "R"},
+        references=(DeclarativeCapabilityReference(capability_id="test.item", declaration_key="missing"),),
+    )
+    assert CapabilityPlanner(registry).plan([missing]).failure.code == "MISSING_DECLARATION_KEY"
+    incompatible = CapabilityCandidate(
+        definition_id="test.recipe", declaration_key="recipe", parameters={"name": "R"},
+        references=(DeclarativeCapabilityReference(capability_id="test.item", declaration_key="recipe"),),
+    )
+    assert CapabilityPlanner(registry).plan([incompatible]).failure.code == "INCOMPATIBLE_CAPABILITY_REFERENCE"
+
+
+def test_capability_only_prerequisite_reference_remains_ambiguous_fail_closed() -> None:
+    item_definition = CapabilityDefinition(definition_id="test.item", parameter_schema={"name": {"type": "string"}})
+    recipe_definition = CapabilityDefinition(definition_id="test.recipe", prerequisites=({"capability": "test.item"},))
+    registry = CapabilityRegistry([item_definition, recipe_definition]).freeze()
+    result = CapabilityPlanner(registry).plan([
+        CapabilityCandidate(definition_id="test.item", parameters={"name": "A"}),
+        CapabilityCandidate(definition_id="test.item", parameters={"name": "B"}),
+        CapabilityCandidate(definition_id="test.recipe"),
+    ])
+    assert result.failure is not None
+    assert result.failure.code == "AMBIGUOUS_CAPABILITY_REFERENCE"
+
+
+def test_distinct_declaration_keys_support_same_capability_and_order_independence() -> None:
+    registry = _reference_registry()
+    a = CapabilityCandidate(definition_id="test.item", declaration_key="item-a", parameters={"name": "A"})
+    b = CapabilityCandidate(definition_id="test.item", declaration_key="item-b", parameters={"name": "B"})
+    recipe = CapabilityCandidate(
+        definition_id="test.recipe", declaration_key="recipe", parameters={"name": "R"},
+        references=(
+            DeclarativeCapabilityReference(capability_id="test.item", declaration_key="item-b"),
+            DeclarativeCapabilityReference(capability_id="test.item", declaration_key="item-a"),
+        ),
+    )
+    first = CapabilityPlanner(registry).plan([a, b, recipe])
+    second = CapabilityPlanner(registry).plan([recipe, b, a])
+    assert first.success and second.success
+    assert len(first.instances) == 3
+    assert first.plan_fingerprint == second.plan_fingerprint
+    assert first.resolved_references == second.resolved_references
+
+
+def test_equivalent_declarations_keep_semantic_deduplication() -> None:
+    registry = _reference_registry()
+    result = CapabilityPlanner(registry).plan([
+        CapabilityCandidate(definition_id="test.item", declaration_key="item-a", parameters={"name": "A"}),
+        CapabilityCandidate(definition_id="test.item", declaration_key="item-b", parameters={"name": "A"}),
+    ])
+    assert result.success
+    assert len(result.instances) == 1
 
 
 def test_cycle_detection_uses_unique_capability_references() -> None:

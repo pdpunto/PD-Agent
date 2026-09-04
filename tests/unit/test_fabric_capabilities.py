@@ -10,6 +10,7 @@ from pd_agent.fabric.capabilities import (
     CapabilityDefinition,
     CapabilityInstance,
     CapabilityModelError,
+    DeclarativeCapabilityReference,
     PlanningFailure,
     canonical_capability_json,
     derive_capability_output_id,
@@ -95,6 +96,15 @@ def test_candidate_and_planning_failure_are_serializable_data() -> None:
     failure = PlanningFailure(code="INVALID_CANDIDATE", message="candidate rejected", details={"field": "x"})
     assert candidate.to_dict() == {"definition_id": "fabric.demo", "parameters": {"enabled": True}}
     assert failure.to_dict()["code"] == "INVALID_CANDIDATE"
+
+
+def test_declaration_keys_and_references_are_bounded_and_serializable() -> None:
+    reference = DeclarativeCapabilityReference(capability_id="fabric.item", declaration_key="item-a")
+    candidate = CapabilityCandidate(definition_id="fabric.item", declaration_key="item-b", references=(reference,))
+    assert candidate.to_dict()["declaration_key"] == "item-b"
+    assert candidate.to_dict()["references"] == [reference.to_dict()]
+    with pytest.raises(CapabilityModelError):
+        CapabilityCandidate(definition_id="fabric.item", declaration_key="Not Safe")
 
 
 def test_foundation_registry_contains_only_generic_capabilities() -> None:

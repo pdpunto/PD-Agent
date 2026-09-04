@@ -16,6 +16,7 @@ MAX_CAPABILITY_NODES = 256
 MAX_CAPABILITY_STRING_LENGTH = 4096
 MAX_CAPABILITY_CONTAINER_LENGTH = 64
 _IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,127}$")
+_DECLARATION_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_:-]{0,127}$")
 _FORBIDDEN_KEYS = frozenset(
     {"command", "commands", "exec", "executable", "reflection", "shell", "script", "scripts"}
@@ -35,6 +36,12 @@ def _validate_identifier(value: Any, *, field_name: str) -> str:
 def _validate_error_code(value: Any) -> str:
     if not isinstance(value, str) or not _ERROR_CODE.fullmatch(value):
         raise CapabilityModelError("code must be a bounded planning error code")
+    return value
+
+
+def _validate_declaration_key(value: Any) -> str:
+    if not isinstance(value, str) or not _DECLARATION_KEY.fullmatch(value):
+        raise CapabilityModelError("declaration_key must be a bounded task-local key")
     return value
 
 
@@ -200,20 +207,84 @@ class CapabilityInstance:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DeclarativeCapabilityReference:
+    """Task-local reference resolved by the capability planner."""
+
+    capability_id: str
+    declaration_key: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "capability_id", _validate_identifier(self.capability_id, field_name="capability_id"))
+        object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
+
+    def to_dict(self) -> dict[str, str]:
+        return {"capability_id": self.capability_id, "declaration_key": self.declaration_key}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "DeclarativeCapabilityReference":
+        return cls(capability_id=data["capability_id"], declaration_key=data["declaration_key"])
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolvedCapabilityReference:
+    """Authoritative reference containing an instance identity, not the instance."""
+
+    capability_id: str
+    declaration_key: str
+    instance_identity: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "capability_id", _validate_identifier(self.capability_id, field_name="capability_id"))
+        object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
+        object.__setattr__(self, "instance_identity", _validate_identifier(self.instance_identity, field_name="instance_identity"))
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "capability_id": self.capability_id,
+            "declaration_key": self.declaration_key,
+            "instance_identity": self.instance_identity,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ResolvedCapabilityReference":
+        return cls(
+            capability_id=data["capability_id"],
+            declaration_key=data["declaration_key"],
+            instance_identity=data["instance_identity"],
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CapabilityCandidate:
     """Untrusted data candidate; it has no execution authority."""
 
     definition_id: str
     parameters: Mapping[str, Any] = field(default_factory=dict)
+    declaration_key: str | None = None
+    references: tuple[DeclarativeCapabilityReference, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "definition_id", _validate_identifier(self.definition_id, field_name="definition_id"))
         if not isinstance(self.parameters, Mapping):
             raise CapabilityModelError("parameters must be a mapping")
         object.__setattr__(self, "parameters", normalize_capability_data(self.parameters))
+        if self.declaration_key is not None:
+            object.__setattr__(self, "declaration_key", _validate_declaration_key(self.declaration_key))
+        references = tuple(
+            item if isinstance(item, DeclarativeCapabilityReference) else DeclarativeCapabilityReference.from_dict(item)
+            for item in self.references
+        )
+        if len({(item.capability_id, item.declaration_key) for item in references}) != len(references):
+            raise CapabilityModelError("references must not contain duplicates")
+        object.__setattr__(self, "references", references)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"definition_id": self.definition_id, "parameters": self.parameters}
+        value: dict[str, Any] = {"definition_id": self.definition_id, "parameters": self.parameters}
+        if self.declaration_key is not None:
+            value["declaration_key"] = self.declaration_key
+        if self.references:
+            value["references"] = [item.to_dict() for item in self.references]
+        return value
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -242,7 +313,9 @@ __all__ = [
     "CapabilityDefinition",
     "CapabilityInstance",
     "CapabilityModelError",
+    "DeclarativeCapabilityReference",
     "PlanningFailure",
+    "ResolvedCapabilityReference",
     "canonical_capability_json",
     "derive_capability_output_id",
     "normalize_capability_data",
