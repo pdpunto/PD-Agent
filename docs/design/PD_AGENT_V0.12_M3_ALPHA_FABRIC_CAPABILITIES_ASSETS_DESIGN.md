@@ -1,6 +1,6 @@
 # PD Agent v0.12 / M3 - Alpha Fabric Capabilities & Assets
 
-Status: `DESIGN - READY FOR RFC`
+Status: `DESIGN - VERTICAL B DELTA READY FOR RFC`
 
 Milestone: `PD Agent v0.12 / M3 - Alpha Fabric Capabilities & Assets`
 
@@ -716,3 +716,193 @@ This DESIGN is acceptable only if it is understood and preserved that:
 When these constraints are carried into RFC, the DESIGN state is:
 
 `PD_AGENT_V0_12_M3_DESIGN_READY`
+
+## 30. Vertical B DESIGN Delta - Standalone Items and Recipes
+
+This section is an explicit scope delta to the existing M3 DESIGN. It does not
+invalidate Vertical A and does not define the technical schemas or algorithms
+that belong to the RFC and IMP.
+
+### 30.1 Scope
+
+Vertical B adds the following bounded product capabilities:
+
+- `fabric.item`: one standalone Fabric Item with no Block or BlockItem
+  prerequisite;
+- `fabric.item_assets`: the minimum language, item-model and texture/reference
+  obligations for that Item;
+- `fabric.recipe`: a generalized recipe capability that may target a standalone
+  Item as output and may reference vanilla or own-task Items as ingredients.
+
+The scope supports, in one deterministic task, a standalone Item, multiple
+standalone Items, Item plus recipe, and a recipe whose output is Item B and
+whose own-task ingredient is Item A. Names such as Ruby, Copper Coin or Magic
+Dust are examples only and are never capability hardcodes.
+
+Tools, weapons, armor, advanced food, complex components and advanced
+interactions remain outside this delta.
+
+### 30.2 Standalone Item Contract
+
+A complete `fabric.item` capability must be parameterized by the resolved
+project namespace and an independent item identifier. Its observable contract
+includes:
+
+- registration under the project mod namespace;
+- a display name when requested;
+- bounded basic Item settings/properties without Vertical C semantics;
+- an independent identity that does not require a Block;
+- independent coexistence with other Item instances;
+- minimum associated item assets;
+- current artifact presence;
+- `REGISTRY_ENTRY_PRESENT(item)` at runtime;
+- version-aware validity on Fabric 1.21.11 and Fabric 26.2.
+
+### 30.3 Item Assets Contract
+
+`fabric.item_assets` covers only the minimum standalone Item resources:
+
+- language entry;
+- item model;
+- texture strategy/reference;
+- required artifact entries and namespace/path coherence.
+
+The M3 strategies remain unchanged: `REUSE` is mandatory and sufficient when
+applicable, `DERIVE` is permitted, and `GENERATE` is optional. This delta does
+not create a transversal asset graph, an image pipeline or client rendering
+validation.
+
+### 30.4 Generalized Recipe Contract
+
+`fabric.recipe` remains compatible with Vertical A but is no longer
+conceptually tied to `fabric.block_item`. It must represent:
+
+- an explicit output Item capability instance;
+- vanilla ingredients;
+- own-task Item capability instances as ingredients;
+- bounded ingredient quantities and minimum recipe structure;
+- a recipe resource with version-aware validity.
+
+The representation of instance references, resource serialization and platform
+specific recipe details are deliberately RFC work. Existing Vertical A recipe
+contracts must remain valid or receive an explicit compatibility migration;
+silent reinterpretation is forbidden.
+
+### 30.5 Composition and Reference Semantics
+
+The existing CapabilityPlanner remains the sole planning authority. A task may
+contain multiple independent Item instances and recipe instances. Their
+identities, requirements and mutation expectations must remain deterministic
+and independently traceable.
+
+Recipe output and own-task ingredient relationships must be explicit,
+resolvable and verifiable. An absent, ambiguous, incompatible or unresolved
+reference fails closed before provider execution. No provider guess, ordering
+fallback or silent resource/registry collision is allowed.
+
+Equivalent duplicates may be deterministically deduplicated only when intent
+is preserved. Conflicting identifiers, duplicate resource claims and
+incompatible registry identities must fail closed.
+
+### 30.6 Brain and Validation Obligations
+
+Brain remains knowledge/context only. It must provide compatible,
+version-aware knowledge for standalone registration, basic Item settings,
+minimum Item assets, recipe resources, output/ingredient references and the
+supported 1.21.11/26.2 platform differences. Brain does not become planner,
+mutation authority or source of task truth.
+
+Vertical B acceptance is layered:
+
+- offline/preflight resolves standalone Item, Item plus recipe, multiple Items,
+  cross-item references and duplicate/conflict failures;
+- PRE_BUILD checks registration expectations, lang, item model, texture/reference,
+  recipe JSON, references and confined paths;
+- build/artifact proves a current valid artifact and required Item/resource/
+  recipe entries;
+- Minecraft proves `REGISTRY_ENTRY_PRESENT(item)` for every standalone Item and
+  successful resource/datapack loading for recipes;
+- CompletionGate is complete only after all required current evidence is
+  reconciled.
+
+No generic `RECIPE_MATCH` or client visual-rendering requirement is added by
+this delta.
+
+### 30.7 Platform and Vertical A Compatibility
+
+Vertical B requires equivalent observable behavior on exactly:
+
+- Fabric 1.21.11;
+- Fabric 26.2.
+
+It reuses `FabricSupportRegistry`, `FabricPlatformResolution` and
+`KnowledgeEnvironment`. Platform-specific Item API, mappings, Java and recipe
+resource differences may be resolved later in RFC/IMP, but may not introduce a
+parallel support authority. Fabric 26.1.2 remains outside scope.
+
+Vertical A remains closed and must not regress. In particular, `fabric.block`,
+`fabric.block_item`, `fabric.block_assets` and existing Vertical A recipes stay
+representable; recipe generalization must not invalidate them without explicit
+migration. The existing planner, runtime authority and CompletionGate remain
+single authorities.
+
+### 30.8 Vertical B Acceptance Matrix
+
+| Capability/behavior | Expected gate |
+| --- | --- |
+| Parameterized standalone Item | preflight, PRE_BUILD |
+| Multiple standalone Items | preflight, completion/regression |
+| Minimum Item assets | PRE_BUILD, build/artifact |
+| Recipe with vanilla ingredient | preflight, PRE_BUILD, build/artifact |
+| Recipe output to standalone Item | preflight, PRE_BUILD |
+| Cross-item recipe A ingredient -> B output | preflight, PRE_BUILD, completion |
+| Invalid/ambiguous/incompatible reference | fail-closed preflight |
+| Duplicate/conflicting identity or resource | fail-closed preflight |
+| Current valid artifact entries | build/artifact |
+| Item registry observation on 1.21.11 | Minecraft |
+| Item registry observation on 26.2 | Minecraft |
+| Recipe resource/datapack load | Minecraft |
+| Version-aware Brain knowledge | preflight, completion/regression |
+| CompletionGate authoritative completion | completion |
+| Vertical A regression | completion/regression |
+
+### 30.9 Explicit Non-goals
+
+This delta does not include Tools, Weapons, Armor, mobs/entities, advanced
+behaviors, advanced food behavior, complex Item components, advanced
+interactions, generic recipe runtime matching, client rendering validation,
+advanced texture generation, full transversal Assets closure, new orchestration
+architecture, a persistent DAG, multi-agent architecture or additional Fabric
+platforms.
+
+### 30.10 Contradictions Resolved and RFC Risks
+
+The original M3 wording is intentionally Vertical A-local where it says that
+the first slice is `Block -> associated BlockItem -> minimal assets -> recipe`
+and that its recipe prerequisite is the associated BlockItem. This remains
+correct for Vertical A but is not a global rule after this delta. The explicit
+Vertical B rule is that recipes can target standalone Item instances while
+preserving existing Vertical A compatibility.
+
+No unresolved architectural contradiction or new decision from 00 is required
+for this DESIGN delta. The RFC must resolve, without silently expanding into
+M4:
+
+- deterministic representation of Item-instance references;
+- ambiguity and duplicate identity semantics;
+- ingredient representation and quantity bounds;
+- compatibility/migration of existing recipe contracts;
+- platform-specific Item API and recipe/resource differences;
+- PRE_BUILD profile composition and asset expectation ownership;
+- Brain need derivation and bounded context coverage.
+
+### 30.11 Future Test Shape
+
+The future RFC/IMP must map unit, offline integration, build/artifact and
+Minecraft Harness tests for standalone Item, multiple Items, cross-item recipe
+references, invalid references, duplicate conflicts and both supported
+platforms. No tests are created in this DESIGN lot.
+
+This delta preserves the M3 pattern and authorities while defining the
+observable Vertical B product boundary. Its implementation is not authorized
+by this document alone.
