@@ -1,6 +1,6 @@
 # PD Agent v0.12 / M3 - Alpha Fabric Capabilities & Assets RFC
 
-Status: `RFC - READY FOR IMP`
+Status: `RFC - VERTICAL B DELTA READY FOR IMP`
 
 Milestone: `PD Agent v0.12 / M3 - Alpha Fabric Capabilities & Assets`
 
@@ -994,3 +994,344 @@ The RFC is accepted when all are true:
 Final RFC state when these criteria are accepted:
 
 `PD_AGENT_V0_12_M3_RFC_READY`
+
+## 41. Vertical B RFC Delta - Standalone Items and Recipes
+
+This section is the approved technical delta for the Vertical B DESIGN. It
+extends the existing M3 boundaries without introducing a second planner,
+runtime, validator, Brain or persistence authority.
+
+### 41.1 Capability-instance reference model
+
+The authoritative identity of a capability instance remains the existing
+`CapabilityInstance.identity`: the SHA-256 of its definition ID, schema
+version, normalized parameters and prerequisite instance references. It is the
+only identity used for dependency edges, requirement derivation and persisted
+traceability. `display_name` is presentation data and is never identity.
+
+References crossing a capability boundary use a bounded typed value with these
+logical fields:
+
+- `kind`: `CAPABILITY_INSTANCE` or `VANILLA_REGISTRY`;
+- `capability_id`: required for capability references;
+- `instance_id`: the authoritative instance identity for capability references;
+- `registry`: required for vanilla references;
+- `identifier`: a namespaced registry identifier;
+- `role`: `output` or `ingredient` where the surrounding declaration needs it;
+- `count`: a positive bounded integer where quantity applies.
+
+The canonical serialized form uses normalized JSON with sorted mapping keys,
+stable list order and no display-name-derived identity. No absolute path,
+executable value or arbitrary provider data is legal in a reference.
+
+The Product resolver creates explicit candidate declarations, the Planner
+creates normalized capability instances, and the Planner owns reference
+resolution before contract expansion. A reference must identify exactly one
+compatible instance or one vanilla registry entry. The resolved representation
+stored in the plan/contract is the canonical typed reference, not a display
+name or input-list position.
+
+Reference failures are deterministic planning failures:
+
+- `UNRESOLVED_CAPABILITY_REFERENCE`: target does not exist;
+- `AMBIGUOUS_CAPABILITY_REFERENCE`: more than one target matches;
+- `INCOMPATIBLE_CAPABILITY_REFERENCE`: target exists but has the wrong
+  capability kind or role;
+- `INVALID_REFERENCE`: malformed or unsafe reference data.
+
+These failures occur before Brain/provider execution and before mutation.
+Neither Brain nor the provider may resolve or repair an ambiguous reference by
+guessing.
+
+### 41.2 Multi-instance planning
+
+The current planner already permits distinct instances of the same definition
+because `CapabilityInstance.identity` includes normalized parameters, and it
+deduplicates only identical identities. Vertical B preserves that behavior and
+adds explicit reference binding where the current prerequisite declaration is
+insufficient.
+
+The bounded planning phases are:
+
+1. validate and normalize all candidates and their declaration-local reference
+   keys;
+2. create one instance identity per distinct semantic declaration;
+3. resolve each explicit output/ingredient/prerequisite reference to exactly
+   one instance or vanilla entry;
+4. add dependent-to-prerequisite edges to the existing `PlanningResult`;
+5. reject duplicates/conflicts/cycles;
+6. emit the existing deterministic topological order and contract traces.
+
+Canonical ordering is independent of input order: normalized capability data,
+definition ID and authoritative instance ID determine stable ordering, while
+dependency edges are sorted canonically. Declaration-local reference keys are
+lookup aids only and never replace instance identity.
+
+This supports one Item, N Items, Item plus recipe, N recipes and cross-item
+recipes without a persistent DAG or generic graph framework.
+
+### 41.3 Duplicate and conflict semantics
+
+The Planner/PRE_BUILD boundary rejects, fail-closed:
+
+- distinct declarations claiming the same `namespace:item_id` registry
+  identity;
+- distinct declarations claiming the same Java source identity;
+- distinct declarations claiming the same normalized resource path;
+- distinct recipes claiming the same namespace/recipe ID or resource path;
+- conflicting output declarations for one recipe;
+- duplicate capability identities when their declarations are not semantically
+  idempotent;
+- ambiguous or incompatible references.
+
+Equivalent duplicate candidates may collapse only when canonical semantic
+identity and all owned outputs are identical. There is no last-write-wins
+behavior. Planner owns capability/reference conflicts; PRE_BUILD owns concrete
+path/resource conflicts; existing ledger/runtime authorities own later
+evidence conflicts.
+
+### 41.4 `fabric.item`
+
+`fabric.item` is a standalone capability and has no Block or BlockItem
+prerequisite.
+
+Logical parameters:
+
+- project `namespace`;
+- independent `item_id`;
+- optional `display_name`;
+- bounded basic Item settings/properties only;
+- optional source path declaration;
+- optional reference to `fabric.item_assets` through an explicit instance
+  reference.
+
+Its requirements are registration source, registry identity and required
+asset/resource obligations. Its validation requirements cover PRE_BUILD,
+artifact required entries and one runtime registry observation per Item.
+Mutation expectations cover only the declared confined Java source and
+resource paths. Platform/API details come from the resolved M2 profile and
+compatible Brain context; tools, weapons, armor, advanced food and complex
+components are invalid Vertical B semantics.
+
+### 41.5 `fabric.item_assets`
+
+`fabric.item_assets` depends on one specific `fabric.item` instance and owns
+the Item's minimum resource set:
+
+- language entry, when requested;
+- item model;
+- `REUSE`, `DERIVE` or optional `GENERATE` texture/reference strategy;
+- exact project-relative resource paths;
+- artifact required entries for those resources.
+
+The Item capability owns registration/source identity. The asset capability
+owns resource mutation and resource validation, preventing duplicated
+ownership. `REUSE` is sufficient for the bounded M3 acceptance; no image
+pipeline or client rendering proof is introduced.
+
+### 41.6 Generalized `fabric.recipe`
+
+The internal recipe model has one recipe identity composed from namespace,
+recipe ID and normalized recipe declaration. It contains:
+
+- explicit output capability-instance reference;
+- ordered bounded ingredient references;
+- positive bounded result count and ingredient quantities;
+- recipe type and resource path;
+- recipe-resource requirement;
+- PRE_BUILD and artifact validations;
+- Brain needs for recipe/data semantics;
+- platform context from `FabricPlatformResolution`.
+
+Each ingredient is one of:
+
+```json
+{"kind":"VANILLA_REGISTRY","registry":"item","identifier":"minecraft:iron_ingot","count":1}
+```
+
+or:
+
+```json
+{"kind":"CAPABILITY_INSTANCE","capability_id":"fabric.item","instance_id":"<item-instance-id>","role":"ingredient","count":1}
+```
+
+The recipe output is likewise a typed `CAPABILITY_INSTANCE` reference. A
+recipe no longer requires `fabric.block_item`; Vertical A compatibility is
+handled at the boundary below.
+
+### 41.7 Vertical A recipe compatibility
+
+Strategy B is selected: accept the existing Vertical A input shape only at the
+Product resolver boundary and normalize it immediately to the single internal
+typed-reference model. A legacy Vertical A output reference to a BlockItem
+becomes a typed capability-instance output reference. Existing capability IDs,
+persisted contracts and old observation fields remain decodable; no second
+recipe engine is introduced.
+
+The compatibility boundary must preserve existing Vertical A fingerprints and
+tests where the semantic declaration is unchanged. Any unavoidable persisted
+schema change requires an explicit schema-version migration in IMP; silent
+reinterpretation is prohibited.
+
+### 41.8 Planner and productive resolver ownership
+
+`CapabilityRegistry` owns definitions only. `CapabilityCandidate` carries
+bounded untrusted declaration data. `CapabilityInstance` owns normalized
+semantic identity. `CapabilityPlanner` owns validation, instance creation,
+reference resolution, dependency edges, duplicate/conflict rejection, cycle
+detection and deterministic ordering. `PlanningResult` carries the immutable
+plan/failure only.
+
+The productive path is:
+
+`Product request -> candidate derivation -> instance creation -> reference resolution -> planning -> FabricTaskContract -> Brain/context -> ToolExecutor mutation -> PRE_BUILD -> BuildRunner -> ArtifactValidator -> Minecraft -> TaskProgressLedger -> CompletionGate`
+
+Only the productive resolver may map user intent to candidates. It must derive
+namespace from the inspected project metadata, preserve all required Item and
+recipe parameters through contract expansion and reject unsupported or
+ambiguous tasks before provider invocation.
+
+### 41.9 PRE_BUILD profile
+
+Vertical B uses a separate bounded `vertical_b_resources_v1` profile because
+the existing `vertical_a_resources_v1` profile contains block/blockstate
+assumptions. Vertical A continues using its existing profile unchanged.
+
+The Vertical B profile validates, before build:
+
+- Java registration expectation and namespace/item identity;
+- confined source/resource paths;
+- lang object and requested translation key;
+- item model structure and texture/reference strategy;
+- recipe JSON structure, output reference and ingredient references;
+- positive bounded quantities;
+- duplicate/conflicting registry/resource/recipe identities.
+
+Representative fail-closed codes are `VERTICAL_B_ITEM_INVALID`,
+`VERTICAL_B_RESOURCE_INVALID`, `VERTICAL_B_RECIPE_INVALID`,
+`VERTICAL_B_REFERENCE_INVALID` and `VERTICAL_B_IDENTITY_CONFLICT`.
+Malformed resource content may enter the existing repair path; unresolved
+references and identity conflicts are preflight failures unless the request
+itself is changed.
+
+### 41.10 Artifact strategy
+
+The existing `ArtifactValidator` remains the sole validator. Its current
+`required_entries` sequence is already cardinality-neutral and supports N
+Item models, language/resource entries, optional textures and N recipe JSONs
+after capability instances aggregate them deterministically. The capability/
+contract layer must produce a canonical sorted list; the validator normalizes
+path separators and rejects duplicate/unsafe entries before checking the
+current JAR.
+
+Compiled classes and metadata may be included as required entries when the
+existing contract exposes them. No second artifact schema or validator is
+required; semantic Java/resource validation remains PRE_BUILD responsibility.
+
+### 41.11 Runtime strategy and known gap
+
+Runtime uses the existing `MinecraftTestSpec`, `ObservationRequest`, runner,
+Harness and `ProductiveMinecraftFunctionalValidator`. One bounded Vertical B
+runtime validation requirement contains N ordered
+`REGISTRY_ENTRY_PRESENT(item)` observations, one for each standalone Item.
+This is the minimum extension of the existing one-requirement/many-observation
+boundary; no arbitrary runtime graph is introduced.
+
+Recipe acceptance remains:
+
+`PRE_BUILD PASS + required JAR entry + successful resource/datapack load`.
+
+The current repository has recipe observation contracts and a `RECIPE_MATCH`
+profile, but that profile is not the approved generic Vertical B acceptance,
+and current Productive Vertical A evidence does not prove arbitrary recipe
+resource loading independently. IMP must therefore identify the exact
+existing runner/Harness load evidence or add the smallest bounded load-result
+evidence needed. It must not claim RecipeManager matching or invent a generic
+probe.
+
+Runtime results remain bound to the current artifact, source revision,
+validation revision and canonical task requirement IDs. `CompletionGate` stays
+the sole completion authority.
+
+### 41.12 Brain and version strategy
+
+Keep `max_needs = 8`. Extend the existing composition mode rather than adding
+a new Brain. Priority must preserve coverage for:
+
+1. standalone Item registration/settings;
+2. Item assets/model/lang/texture reference;
+3. recipe resource/schema;
+4. vanilla ingredient semantics;
+5. capability-reference output/ingredients;
+6. composition/reference constraints;
+7. resolved platform API semantics;
+8. repair-specific knowledge when a structured failure exists.
+
+Needs remain `KnowledgeNeed` values with exact `KnowledgeEnvironment`,
+`version_sensitive=True`, and compatible source selection. Brain supplies
+context only and cannot create references, plans or mutations.
+
+Capability-generic semantics are identity/reference rules, logical contract
+shape, validation invariants and artifact/runtime obligations. Platform-specific
+semantics are Java/API registration, mappings, resource conventions and
+source-selection details for 1.21.11 versus 26.2. The sole platform authorities
+remain `FabricSupportRegistry` and `FabricPlatformResolution`; 26.2 must not
+receive Yarn/remapped knowledge and 26.1.2 remains excluded.
+
+### 41.13 Failure, repair and security ownership
+
+Preflight unresolved/ambiguous/incompatible references and duplicate productive
+identities are non-repairable contract failures and do not invoke the provider.
+PRE_BUILD malformed Item/asset/recipe resources may be repairable through the
+existing Semantic Repair flow. Build failures use the existing
+`BuildFailureNormalizer`; runtime failures use existing `FailureFact`,
+`FailureReconciler`, currentness and observation correlation. Mutation never
+resolves a failure without later authoritative revalidation.
+
+All namespace, item ID, recipe ID and resource components pass existing bounded
+identifier/path validation before path construction. `SecurePathResolver` and
+`ToolExecutor` remain the path/mutation authorities. Absolute paths, traversal,
+separator injection, symlink escape, shell data and request-controlled
+arbitrary filesystem paths fail closed.
+
+### 41.14 Technical acceptance matrix
+
+| Requirement | Test layer | Evidence/pass condition | Failure behavior |
+| --- | --- | --- | --- |
+| Standalone Item | unit/offline | valid `fabric.item` plan and contract | planner fail-closed |
+| Multiple Items | offline integration | N independent identities and entries | conflict blocks |
+| Item assets | PRE_BUILD/artifact | lang/model/texture entries current | repairable resource failure |
+| Vanilla recipe | offline/build | typed vanilla ingredients and recipe entry | invalid schema blocks |
+| Standalone output | offline/PRE_BUILD | output resolves to Item instance | incompatible reference blocks |
+| Cross-item A -> B | offline/completion | ingredient A and output B resolve exactly | unresolved/ambiguous blocks |
+| Duplicate/conflict | unit/PRE_BUILD | same productive identity rejected | no last-write-wins |
+| Current artifact | build/artifact | VALID/current with all entries | stale/missing blocks |
+| Item runtime 1.21.11 | Harness | every item registry observation PASS | runtime failure reconciles |
+| Item runtime 26.2 | Harness | every item registry observation PASS | profile mismatch blocks |
+| Recipe resource load | Harness | successful bounded load evidence | runtime/load failure blocks |
+| Brain version awareness | unit/integration | compatible environment and needs | mismatch blocks/degrades safely |
+| CompletionGate | integration | COMPLETE only with all current evidence | incomplete remains non-success |
+| Vertical A regression | full regression | prior contracts/tests remain PASS | implementation blocked |
+
+### 41.15 No overbuild and IMP checklist
+
+This RFC does not introduce generic AST validation, a generic recipe engine, a
+persistent dependency graph, new orchestrator/runtime/validation framework,
+new Brain, full asset pipeline, Vertical C semantics or multi-agent execution.
+
+Before implementation, IMP must verify the real repository boundaries for:
+
+- additive `CapabilityInstance`/planner reference support and deterministic
+  ordering;
+- `FabricTaskContract` compatibility and persisted decoding;
+- productive resolver assumptions and metadata-derived namespace;
+- separate PRE_BUILD profile composition;
+- required-entry aggregation/cardinality and actual JAR layout;
+- bounded N-observation runtime behavior;
+- concrete recipe/datapack load evidence in the current Harness;
+- Item registration APIs on both supported platforms;
+- Vertical A recipe regression and legacy normalization;
+- `max_needs=8` behavior without starvation.
+
+No architectural decision remains open for IMP. These are repository-specific
+extension placement and verification points, not permission to expand scope.
