@@ -414,7 +414,13 @@ Artifact extension requires replacing authority; path confinement cannot be pres
 
 ### Objective
 
-Connect existing BuildFailureNormalizer exactly once in productive build failure handling and prove strict later reconciliation.
+Connect existing BuildFailureNormalizer exactly once at the productive build
+failure boundary actually used by AgentRuntime and prove strict later
+reconciliation. LOT 0 established that AgentRuntime currently calls
+`build_runner.run()` directly; `FabricBuildOrchestrator` is an existing
+extension point but is not assumed to be the active path. LOT 4 must inspect
+the concrete call site and choose the minimum conformant integration without
+creating a second build runner or orchestrator.
 
 ### Preconditions
 
@@ -426,6 +432,9 @@ LOT 3 PASS.
 
 ### Allowed changes
 
+- `PRODUCTIVE_BUILD_FAILURE_NORMALIZATION_EXACTLY_ONCE`: every failed
+  BuildResult produced by an AgentRuntime build attempt yields exactly one
+  canonical normalized failure representation before repair or reconciliation;
 - single normalization call per failed build attempt;
 - persist structured normalized evidence;
 - create/update ACTIVE FailureFact with canonical BUILD-correlated task IDs;
@@ -444,6 +453,8 @@ Build failure evidence, FailureFact lifecycle, source/build currentness, repair/
 ### Unit tests
 
 - one normalization per failed attempt;
+- a failed build invoked through the real AgentRuntime path produces exactly
+  one normalized failure and no duplicate FailureFact;
 - category/classification/evidence refs;
 - only `requirement:*` correlation;
 - repair mutation leaves failure ACTIVE;
@@ -478,7 +489,44 @@ Revert LOT 4 commit; retain failure evidence.
 
 ### STOP blockers
 
-Existing path already normalizes and a second call would duplicate facts; reconciliation API cannot preserve currentness/unrelated failures without RFC correction.
+Existing path already normalizes and a second call would duplicate facts;
+AgentRuntime has no conformant exactly-once integration point without an
+architecture change; reconciliation API cannot preserve
+currentness/unrelated failures without RFC correction.
+
+## 10.1 `26_2_ENVIRONMENT_READINESS_GATE`
+
+This is a mandatory readiness gate before any implementation or live
+validation that depends on the 26.2 runtime, and no later than LOT 10. It does
+not make 26.2 optional, replace its live proof with mocks, or authorize a
+universal Harness redesign.
+
+The gate must verify, using the actual selected toolchain and materialized
+inputs:
+
+- Java 25 and real `java -version`;
+- selectable Java/toolchain configuration;
+- Minecraft 26.2;
+- Fabric Loader 0.19.3;
+- Fabric API 0.158.0+26.2;
+- compatible/materialized Loom 1.17-SNAPSHOT path;
+- runtime dependencies and fixture materialization;
+- unobfuscated/no-Yarn configuration.
+
+If any required check fails, stop before the affected 26.2 live gate. The
+current LOT 0 finding is an environment blocker because Java 25 is unavailable
+locally; LOT 1 is not blocked by it, but LOT 10 is.
+
+## 10.2 Expected implementation gaps
+
+The following are expected M3 implementation gaps, not documentation blockers:
+
+- M3-003: `BLOCK_ITEM_ASSOCIATION` does not yet exist; owner LOT 5/6.
+- M3-004: `ArtifactValidator` does not yet implement the complete planned
+  `required_entries` semantics; owner LOT 3.
+
+Both remain inside M3 and must not be moved to M4 or treated as already
+implemented.
 
 ## 11. LOT 5 — Runtime observations Vertical A
 
@@ -816,7 +864,9 @@ Independently prove the same logical Vertical A acceptance on real Fabric 26.2.
 
 ### Preconditions
 
-LOT 9 PASS; LOT 6 materialization PASS; explicit 00 authorization; Java 25/runtime dependencies verified.
+LOT 9 PASS; LOT 6 materialization PASS; explicit 00 authorization;
+`26_2_ENVIRONMENT_READINESS_GATE` PASS; Java 25/runtime dependencies
+verified.
 
 ### Candidate modules / paths
 
