@@ -92,6 +92,12 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     jvmArgs.add("-Dpd.agent.targetEntrypointClass=${providers.gradleProperty("pd.agent.targetEntrypointClass").get()}")
     jvmArgs.add("-Dpd.agent.testId=${providers.gradleProperty("pd.agent.testId").get()}")
     jvmArgs.add("-Dpd.agent.observationType=${providers.gradleProperty("pd.agent.observationType").get()}")
+    providers.gradleProperty("pd.agent.observationAssociationItemId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationAssociationItemId=$it")
+    }
+    providers.gradleProperty("pd.agent.observationAssociationBlockId").orNull?.let {
+        jvmArgs.add("-Dpd.agent.observationAssociationBlockId=$it")
+    }
     jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")
     jvmArgs.add("-Dpd.agent.resultMode=${providers.gradleProperty("pd.agent.resultMode").orElse("pass").get()}")
     jvmArgs.add("-Dpd.agent.expectedBlockStateId=${providers.gradleProperty("pd.agent.expectedBlockStateId").orElse("diamond_block").get()}")

@@ -156,6 +156,25 @@ def test_batch_b_registry_presence_lookup_is_semantically_key_based() -> None:
     assert "Registry" in runner_source
 
 
+def test_batch_b_association_properties_bridge_from_gradle_to_harness_jvm() -> None:
+    build_file = _read(HARNESS_FIXTURE / "build.gradle.kts")
+    config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
+    runner_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessRunner.java")
+    result_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessResult.java")
+
+    assert 'providers.gradleProperty("pd.agent.observationAssociationItemId").orNull?.let {' in build_file
+    assert 'jvmArgs.add("-Dpd.agent.observationAssociationItemId=$it")' in build_file
+    assert 'providers.gradleProperty("pd.agent.observationAssociationBlockId").orNull?.let {' in build_file
+    assert 'jvmArgs.add("-Dpd.agent.observationAssociationBlockId=$it")' in build_file
+    assert 'jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")' in build_file
+    assert 'PROP_OBSERVATION_ASSOCIATION_ITEM_ID = "pd.agent.observationAssociationItemId"' in config_source
+    assert 'PROP_OBSERVATION_ASSOCIATION_BLOCK_ID = "pd.agent.observationAssociationBlockId"' in config_source
+    assert "boolean isBlockItem = item instanceof BlockItem" in runner_source
+    assert "boolean associated = itemPresent && isBlockItem && blockPresent && blockId.equals(actualBlockId)" in runner_source
+    assert "BlockItem association did not match expected block" in runner_source
+    assert 'associated ? "PASS" : "FAIL"' in result_source
+
+
 def test_batch_b_harness_supports_generic_test_id_labels_without_task_whitelist() -> None:
     config_source = _read(HARNESS_FIXTURE / "src" / "main" / "java" / "dev" / "pdpunto" / "l11harness" / "HarnessConfig.java")
 
