@@ -1009,27 +1009,42 @@ version, normalized parameters and prerequisite instance references. It is the
 only identity used for dependency edges, requirement derivation and persisted
 traceability. `display_name` is presentation data and is never identity.
 
-References crossing a capability boundary use a bounded typed value with these
-logical fields:
+There are two representations with a strict phase boundary.
 
-- `kind`: `CAPABILITY_INSTANCE` or `VANILLA_REGISTRY`;
-- `capability_id`: required for capability references;
-- `instance_id`: the authoritative instance identity for capability references;
-- `registry`: required for vanilla references;
-- `identifier`: a namespaced registry identifier;
-- `role`: `output` or `ingredient` where the surrounding declaration needs it;
-- `count`: a positive bounded integer where quantity applies.
+**Declaration reference (pre-resolution).** Product requests and candidates use
+a task-local bounded declaration key, for example `item_a`, `item_b` or
+`recipe_r`. Its minimum logical shape is:
 
-The canonical serialized form uses normalized JSON with sorted mapping keys,
-stable list order and no display-name-derived identity. No absolute path,
-executable value or arbitrary provider data is legal in a reference.
+```json
+{"kind":"DECLARATION","key":"item_a","capability_id":"fabric.item","role":"ingredient","count":1}
+```
 
-The Product resolver creates explicit candidate declarations, the Planner
-creates normalized capability instances, and the Planner owns reference
-resolution before contract expansion. A reference must identify exactly one
-compatible instance or one vanilla registry entry. The resolved representation
-stored in the plan/contract is the canonical typed reference, not a display
-name or input-list position.
+The key is unique within the task declaration set, is not a display name, is
+not an input-list index and is not an instance identity. It is safe bounded
+data and may be serialized through existing candidate/plan boundaries. A
+declaration reference can therefore express Item A, Item B, Recipe output B
+and Recipe ingredient A before any hash exists.
+
+**Resolved capability-instance reference (post-resolution).** Only the Planner
+may replace a declaration reference after creating normalized instances. Its
+minimum shape is:
+
+```json
+{"kind":"CAPABILITY_INSTANCE","capability_id":"fabric.item","instance_id":"<authoritative-instance-sha>","role":"ingredient","count":1}
+```
+
+Vanilla references use the separate resolved shape
+`{"kind":"VANILLA_REGISTRY","registry":"item","identifier":"minecraft:iron_ingot","count":1}`.
+The canonical serialized forms use normalized JSON, sorted mapping keys and
+stable list order. No display-name-derived identity, absolute path,
+executable value or arbitrary provider data is legal.
+
+The Product resolver creates declaration keys. The Planner creates
+`CapabilityInstance` values, verifies declaration-key uniqueness, resolves
+each key to exactly one compatible instance or vanilla entry, and emits only
+resolved references before contract expansion/provider/mutation. After this
+phase, the contract and persisted plan use `instance_id`; declaration keys may
+remain only as non-authoritative provenance/debug metadata.
 
 Reference failures are deterministic planning failures:
 
@@ -1043,6 +1058,19 @@ These failures occur before Brain/provider execution and before mutation.
 Neither Brain nor the provider may resolve or repair an ambiguous reference by
 guessing.
 
+Declaration/reference-specific failures are:
+
+- `DUPLICATE_DECLARATION_KEY`: two declarations use one task-local key;
+- `MISSING_DECLARATION_KEY`: a reference has no valid key or target
+  declaration;
+- `AMBIGUOUS_CAPABILITY_REFERENCE`: a key maps to more than one instance;
+- `INCOMPATIBLE_CAPABILITY_REFERENCE`: the target exists but has the wrong
+  capability or role.
+
+The Planner owns these failures and they are never converted into provider
+repair requests. Resolved references are the persistence/contract boundary;
+declaration keys are not authoritative after resolution.
+
 ### 41.2 Multi-instance planning
 
 The current planner already permits distinct instances of the same definition
@@ -1053,14 +1081,14 @@ insufficient.
 
 The bounded planning phases are:
 
-1. validate and normalize all candidates and their declaration-local reference
-   keys;
-2. create one instance identity per distinct semantic declaration;
-3. resolve each explicit output/ingredient/prerequisite reference to exactly
-   one instance or vanilla entry;
-4. add dependent-to-prerequisite edges to the existing `PlanningResult`;
-5. reject duplicates/conflicts/cycles;
-6. emit the existing deterministic topological order and contract traces.
+1. validate and normalize all candidates and their task-local declaration keys;
+2. reject duplicate/missing declaration keys;
+3. create one instance identity per distinct semantic declaration;
+4. resolve each declaration reference to exactly one instance or vanilla entry;
+5. replace declaration references with resolved references;
+6. add dependent-to-prerequisite edges to the existing `PlanningResult`;
+7. reject duplicates/conflicts/cycles;
+8. emit the existing deterministic topological order and contract traces.
 
 Canonical ordering is independent of input order: normalized capability data,
 definition ID and authoritative instance ID determine stable ordering, while
@@ -1102,8 +1130,7 @@ Logical parameters:
 - optional `display_name`;
 - bounded basic Item settings/properties only;
 - optional source path declaration;
-- optional reference to `fabric.item_assets` through an explicit instance
-  reference.
+- no prerequisite on `fabric.item_assets`.
 
 Its requirements are registration source, registry identity and required
 asset/resource obligations. Its validation requirements cover PRE_BUILD,
