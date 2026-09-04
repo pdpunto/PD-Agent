@@ -1,6 +1,6 @@
 # PD Agent v0.12 / M3 — Alpha Fabric Capabilities & Assets — Implementation Plan
 
-Status: `IMP — READY FOR PRE-IMPLEMENTATION AUDIT`
+Status: `IMP - VERTICAL B DELTA READY FOR IMPLEMENTATION AUDIT`
 
 Milestone: `PD Agent v0.12 / M3 — Alpha Fabric Capabilities & Assets`
 
@@ -1294,3 +1294,300 @@ This IMP is ready for 00 review when all are true:
 Expected verdict after document persistence and repository verification:
 
 `PD_AGENT_V0_12_M3_IMP_READY`
+
+## 32. Vertical B implementation delta - standalone items and recipes
+
+This section is the accepted implementation delta for the next bounded M3
+vertical. It is documentation only: no B lot is executed by this document.
+The first executable action is B0, a read-only audit. B1 may start only after
+B0 returns `VERTICAL_B_PREIMPLEMENTATION_AUDIT_PASS` and 00 accepts that
+result.
+
+### 32.1 Fixed architecture and identity rules
+
+Vertical B extends the existing chain and does not introduce a second planner,
+runtime, recipe engine, evidence store or completion authority:
+
+`declaration reference (task-local key) -> Planner -> CapabilityInstance -> resolved reference (capability_id + authoritative instance identity) -> FabricTaskContract -> Brain -> PRE_BUILD -> Build -> Artifact -> Runtime -> CompletionGate`
+
+The declaration reference is not a capability identity. A planned
+`CapabilityInstance` is the sole authority for instance identity and the
+Product contract consumes the resolved reference. `fabric.item_assets` may
+reference its specific `fabric.item`; the reverse dependency is forbidden.
+Recipes use explicit output and ingredient references, including vanilla items
+and items declared by the same task. The Vertical A legacy recipe shape is
+normalized at the Product resolver boundary into one internal typed-reference
+model. Existing Vertical A behavior, requirement IDs and currentness rules are
+preserved.
+
+The default Brain `max_needs=8` remains unchanged. The 1.21.11 environment is
+the first implementation target. Fabric 26.2 remains bounded and must use its
+validated platform assumptions; it is not permission to generalize the
+harness.
+
+### 32.2 Common lot protocol
+
+Every lot starts by checking the accepted previous SHA, `HEAD == origin/main`,
+tracked cleanliness and the allowed pre-existing diagnostics untracked path.
+Every implementation lot runs its focused tests, `git diff --check`, and the
+specified offline checks before commit. A lot is complete only after its
+dedicated commit is pushed, `HEAD == origin/main`, and the tracked tree is
+clean. No empty commits are created. The last accepted published lot is the
+rollback boundary; recovery uses a revert, never reset, rebase or history
+rewrite. Evidence records changed files, exact commands/results, identities,
+failures, deviations and final Git state.
+
+No provider/API, Minecraft live, benchmark or Product Execution is implied by
+B0-B9. B10 and B11 require separate explicit live authorization. A provider
+call, new capability, second planner/runtime/gate, or unbounded framework work
+is a local STOP condition.
+
+### 32.3 LOT B0 - pre-implementation audit (mandatory, read-only)
+
+**Objective:** audit the real repository against DESIGN, RFC and this delta;
+do not implement B1 or any later lot. **Prerequisites/dependencies:** accepted
+Vertical B DESIGN/RFC/IMP deltas, accepted Vertical A closure, correct
+baseline, tracked clean. **Probable modules/files:** `FabricTaskContract`,
+capability/Planner/`CapabilityInstance`, Product resolver, recipe and
+ingredient models, PRE_BUILD/resource validator, `ArtifactValidator`, runtime
+Harness/probes, Brain deriver, `TaskProgressLedger`, `CompletionGate`,
+Vertical A fixtures/tests and the three authoritative documents.
+
+**Allowed scope:** read-only symbol/file/test inspection and offline tests.
+Audit current shapes, identity/cardinality/order, reference resolution,
+one-per-ID assumptions, serialization, FabricTaskContract, resolver recipe
+normalization, ingredients, PRE_BUILD, artifact/resource expectations, runtime
+cardinality, Brain `max_needs=8`, 1.21.11 and 26.2 Item APIs/resource paths,
+recipe-load evidence, Vertical A compatibility and migration risks.
+Classify each finding as `NO ISSUE`, `MINOR IMP ADJUSTMENT`,
+`RFC CONTRADICTION`, `DESIGN CONTRADICTION` or `IMPLEMENTATION BLOCKER`.
+
+**Forbidden scope:** code/docs changes, migration, new planner/state machine,
+generic `RECIPE_MATCH`, M4 framework, live execution and provider/API access.
+**Tests:** inspect and run existing focused contract, resolver, PRE_BUILD,
+artifact, runtime, Brain, ledger and gate tests; no invented test names.
+**Acceptance:** `VERTICAL_B_PREIMPLEMENTATION_AUDIT_PASS` only when every
+required assumption is evidenced and no contradiction/blocker remains.
+**STOP:** any contradiction/blocker, unavailable required environment, or
+false B0 assumption. **Commit/push:** none. **Rollback:** none; preserve all
+read-only evidence. **Return:** audited symbols/paths, classifications,
+commands/results, risks and explicit approval request for B1.
+
+### 32.4 LOT B1 - reference and planner primitives
+
+**Objective:** add declaration references, deterministic multi-instance
+planning and authoritative `CapabilityInstance` identities. **Prerequisites:**
+B0 PASS and 00 approval. **Probable files:** existing capability models,
+Planner/composition and identity serialization modules, plus focused tests.
+**Allowed:** extend existing planner/model path with typed references, stable
+ordering and duplicate/collision rejection. **Forbidden:** second planner,
+persistent DAG, new global registry, ProductCatalog/runtime coupling, or
+recipe logic. **Tests:** valid multi-instance ordering, declaration-to-instance
+resolution, duplicate IDs, collision/reuse, serialization and Vertical A
+regression. **Acceptance:** `REFERENCE_AND_MULTI_INSTANCE_PLANNER_PASS`.
+**STOP:** identity ambiguity, nondeterminism, legacy incompatibility or any
+need for a new planner/registry. **Commit/push:** dedicated production commit
+after tests and gates pass. **Rollback:** revert B1 only. **Return:** identities,
+ordering, changed files, tests and pushed SHA.
+
+### 32.5 LOT B2 - item, item-assets and recipe capability definitions
+
+**Objective:** define typed B capability declarations and their dependencies.
+**Prerequisites:** B1 PASS/pushed. **Probable files:** capability definitions,
+typed refs and contract fixtures. **Allowed:** `fabric.item`, its specific
+`fabric.item_assets`, generalized `fabric.recipe`, explicit output/ingredient
+refs and bounded schema validation. **Forbidden:** reverse assets dependency,
+hardcoded namespace, generic recipe engine, tools/weapons/entities or M4
+features. **Tests:** item-only, item-assets association, recipe output,
+vanilla/own-task ingredients, cardinality and identity. **Acceptance:**
+`VERTICAL_B_CAPABILITY_MODEL_PASS`. **STOP:** schema migration outside the
+accepted delta or capability identity conflation. **Commit/push:** dedicated
+commit after tests; verify remote and clean tree. **Rollback:** revert B2.
+**Return:** model shapes, identity matrix and evidence.
+
+### 32.6 LOT B3 - Product resolver and FabricTaskContract
+
+**Objective:** resolve declarations into the typed Product contract while
+preserving Vertical A compatibility. **Prerequisites:** B2 PASS. **Probable
+files:** Product resolver, `FabricTaskContract`, recipe/ingredient adapters and
+contract tests. **Allowed:** resolved `capability_id` plus authoritative
+instance identity, multiple requirements, deterministic order and legacy A
+normalization. **Forbidden:** changing Project/Task/Execution boundaries,
+provider behavior, or a second contract path. **Tests:** B item, assets,
+recipe, multiple instances, legacy A and unsupported reference fail-closed.
+**Acceptance:** `VERTICAL_B_PRODUCT_RESOLUTION_PASS`. **STOP:** contract or
+identity-domain redesign. **Commit/push:** dedicated commit after gates.
+**Rollback:** revert B3. **Return:** resolved contract and requirement IDs.
+
+### 32.7 LOT B4 - Brain selection and knowledge
+
+**Objective:** derive bounded item/recipe needs and specific knowledge through
+the existing Brain path. **Prerequisites:** B3 PASS. **Probable files:** Brain
+deriver, knowledge selectors and evidence tests. **Allowed:** B-specific
+signals/knowledge and deterministic selection inside the existing deriver;
+keep default `max_needs=8`. **Forbidden:** new Brain, prompt/provider
+redesign, hidden capability hardcodes or budget changes. **Tests:** relevant
+knowledge retrieved/selected/injected, provenance, ordering, max-needs bound,
+Brain OFF/ON and A regression. **Acceptance:** `VERTICAL_B_BRAIN_PASS`.
+**STOP:** max-needs insufficiency proven, provider dependency or new deriver
+required. **Commit/push:** dedicated commit after gates. **Rollback:** revert
+B4. **Return:** needs, knowledge identities and trace evidence.
+
+### 32.8 LOT B5 - resources and PRE_BUILD
+
+**Objective:** validate item, assets and recipe resources before build using a
+new bounded profile `vertical_b_resources_v1`. **Prerequisites:** B3 PASS;
+B4 if resource expectations consume Brain output. **Probable files:** resource
+profiles, PRE_BUILD validators, fixture helpers and tests. **Allowed:** paths,
+namespaces, JSON/schema checks and profile-specific diagnostics while keeping
+the Vertical A profile unchanged. **Forbidden:** broad filtering, build
+execution, artifact identity shortcuts or runtime changes. **Tests:** valid
+resources, missing item/assets/recipe, bad references, duplicate outputs and
+A profile regression. **Acceptance:** `VERTICAL_B_PREBUILD_PASS`.
+**STOP:** profile requires a generic framework or alters A semantics.
+**Commit/push:** dedicated commit. **Rollback:** revert B5. **Return:** profile,
+diagnostics and PRE_BUILD evidence.
+
+### 32.9 LOT B6 - artifact expectations
+
+**Objective:** validate generated JAR contents for B using the existing
+`ArtifactValidator` and `required_entries` authority. **Prerequisites:** B5
+PASS. **Probable files:** artifact expectation adapter and tests. **Allowed:**
+canonical required entries, separator normalization and duplicate rejection at
+the contract boundary; reuse current validator behavior. **Forbidden:** a new
+artifact validator, stale acceptance, arbitrary hidden expectations or build
+changes. **Tests:** valid/missing item class, assets, recipe and manifest
+entries, currentness and Vertical A regression. **Acceptance:**
+`VERTICAL_B_ARTIFACT_PASS`. **STOP:** validator contract mismatch or need to
+invent a second authority. **Commit/push:** dedicated commit. **Rollback:**
+revert B6. **Return:** expected entries and artifact evidence.
+
+### 32.10 LOT B7 - runtime observations
+
+**Objective:** support N item registry observations through the existing runtime
+observation model. **Prerequisites:** B6 PASS and runtime contract audit.
+**Probable files:** observation models, Fabric probes/Harness adapter and tests.
+**Allowed:** parameterized item selectors and one bounded runtime requirement
+with N observations. **Forbidden:** generic `RECIPE_MATCH`, recipe loading
+logic, second Harness, or broad M4 runtime cardinality framework. **Tests:**
+multiple item registry entries, missing entry, currentness and A three-
+observation regression. **Acceptance:** `VERTICAL_B_RUNTIME_OBSERVATIONS_PASS`.
+**STOP:** M4 framework is required. **Commit/push:** dedicated commit.
+**Rollback:** revert B7. **Return:** observation requests/results and evidence.
+
+### 32.11 LOT B8 - recipe/datapack load evidence
+
+**Objective:** audit and, if bounded support already exists, expose concrete
+recipe/datapack load evidence. **Prerequisites:** B7 PASS. **Probable files:**
+existing Harness/load evidence adapter and tests. **Allowed:** reuse current
+load evidence and add only a bounded typed result if the existing boundary
+supports it. First classify the Harness as `YA EXISTE`, `PARCIAL` or `NO
+EXISTE`. **Forbidden:** generic `RECIPE_MATCH`, new recipe engine, generic
+probe framework or silent fallback. **Tests:** valid recipe load, missing/bad
+recipe and unsupported fixture fail-closed. **Acceptance:**
+`VERTICAL_B_RECIPE_LOAD_EVIDENCE_PASS`. **STOP:** any generic framework or M4
+dependency. **Commit/push:** dedicated commit only if tracked changes exist.
+**Rollback:** revert B8 if committed. **Return:** classification, load evidence
+and scope decision.
+
+### 32.12 LOT B9 - offline integration
+
+**Objective:** prove the complete bounded B path without external services.
+**Prerequisites:** B1-B8 PASS/pushed as applicable. **Probable files:**
+integration fixtures/tests only. **Allowed:** deterministic local provider,
+offline planner -> contract -> Brain -> PRE_BUILD -> artifact -> structured
+runtime evidence -> CompletionGate. **Forbidden:** OpenAI/Gemini, Minecraft
+live, benchmark, Product Execution or fixture mutation outside isolated roots.
+**Tests/cases:** valid item, valid item-assets, valid recipe, multiple items,
+and invalid/missing reference. **Acceptance:**
+`VERTICAL_B_OFFLINE_INTEGRATION_PASS`. **STOP:** any unresolved currentness,
+identity or gate inconsistency. **Commit/push:** test/evidence commit only
+when authorized and tracked. **Rollback:** revert B9. **Return:** full matrix,
+identities and gate result.
+
+### 32.13 LOT B10 - Fabric 1.21.11 live
+
+**Objective:** validate the B vertical on Fabric 1.21.11. **Prerequisites:**
+B9 PASS, clean fixture/materialization and explicit 00 live authorization.
+**Probable files:** live driver/evidence only. **Allowed:** one bounded live
+run, deterministic local provider where sufficient, real build/artifact/runtime
+and evidence. **Forbidden:** unapproved provider spend, benchmark, unrelated
+capabilities or tuning. **Tests:** live item/assets/recipe load and expected
+observations. **Acceptance:** `FABRIC_1_21_11_VERTICAL_B_LIVE_PASS`.
+**STOP:** budget, environment, identity, stale artifact or security blocker.
+**Commit/push:** evidence-only unless a corrective tracked change is explicitly
+authorized. **Rollback:** preserve evidence and revert only an authorized fix.
+**Return:** execution, build/artifact/runtime/evidence and budget counters.
+
+### 32.14 LOT B11 - Fabric 26.2 live
+
+**Objective:** validate the same bounded B contract on 26.2. **Prerequisites:**
+B10 PASS, B6/B7 evidence, Java 25, UNOBFUSCATED mappings NONE, Loader/API/Loom
+materialized, and explicit 00 live authorization. **Probable files:** live
+driver/evidence only. **Allowed:** platform-specific launch inputs and bounded
+probe adaptation. **Forbidden:** generalized 26.2 Harness, Yarn assumptions,
+new platform architecture or unapproved API spend. **Tests:** live build,
+artifact and item/runtime evidence. **Acceptance:**
+`FABRIC_26_2_VERTICAL_B_LIVE_PASS`. **STOP:** missing/non-reproducible
+toolchain or any M4 framework need. **Commit/push:** evidence-only unless a
+corrective tracked change is authorized. **Rollback:** preserve evidence and
+revert only that fix. **Return:** toolchain, runtime and evidence matrix.
+
+### 32.15 LOT B12 - Vertical A regression
+
+**Objective:** prove B did not regress the accepted A vertical. **Prerequisites:**
+B10 and B11 PASS; current code and evidence. **Probable files:** existing A
+tests/fixtures and regression evidence. **Allowed:** reuse current live A
+evidence when still current; rerun only with a concrete validity reason, plus
+offline regressions. **Forbidden:** altering A contracts, fixture workarounds
+or unrelated fixes. **Tests:** A capability model, Brain, PRE_BUILD, artifact,
+runtime observations, repair/revalidation, CompletionGate and required live
+proof when evidence is stale. **Acceptance:**
+`VERTICAL_A_REGRESSION_AFTER_VERTICAL_B_PASS`. **STOP:** regression outside a
+bounded authorized correction. **Commit/push:** only authorized corrective
+changes. **Rollback:** revert that correction. **Return:** A/B comparison and
+evidence currentness.
+
+### 32.16 LOT B13 - final closure
+
+**Objective:** close Vertical B with complete regression and evidence.
+**Prerequisites:** B1-B12 accepted, all required commits pushed, tracked clean.
+**Probable files:** closure evidence at
+`docs/validation/PD_AGENT_V0.12_M3_VERTICAL_B_CLOSURE.md`, tests and reports.
+**Allowed:** focused/full Python suite, compileall, diff-check, frontend checks
+when relevant, closure documentation and evidence index. **Forbidden:** new
+capabilities, live runs not required by stale evidence, roadmap changes or
+silent contract changes. **Tests:** B focal suites, full suite, platform
+regressions and evidence/currentness checks. **Acceptance:** closure maps all
+B requirements and returns `V0_12_M3_VERTICAL_B_CLOSED_PASS`.
+**STOP:** missing evidence, stale artifact, regression, or contradiction.
+**Commit/push:** dedicated `docs: close v0.12 Vertical B` commit after all
+gates. **Rollback:** revert closure commit only; preserve evidence. **Return:**
+closure document, exact tests/results, A/B matrix and final SHA.
+
+### 32.17 Vertical B acceptance traceability
+
+| Requirement | Implementing lot | Validating lot/evidence |
+| --- | --- | --- |
+| Multiple standalone item instances | B1-B3 | B9, B10, B11 |
+| Item assets tied to a specific item | B2-B3 | B5, B6, B9 |
+| Explicit vanilla/own-task recipe refs | B2-B3 | B5, B8, B9 |
+| Brain-specific knowledge/signals | B4 | B9 and live evidence |
+| PRE_BUILD/resource safety | B5 | B9-B11 |
+| Artifact required entries/currentness | B6 | B9-B11 |
+| Multiple item observations | B7 | B9-B11 |
+| Recipe load evidence | B8 | B9-B11 where supported |
+| Vertical A compatibility | B3-B7 | B12 |
+| Full regression/closure | B13 | Closure document |
+
+### 32.18 Global STOP conditions and deferments
+
+Stop and return to 00 for any DESIGN/RFC contradiction, second planner/runtime/
+gate, persistent DAG, `FabricTaskContract` redesign, M4 runtime cardinality
+framework, generic `RECIPE_MATCH` requirement, Vertical C or later scope,
+premature Assets closure, provider/API spend without authorization, or Vertical
+A regression outside a bounded fix. B8 may remain blocked if recipe-load
+evidence is not available without a generic framework; that is a truthful gate,
+not permission to generalize M3. Design, RFC and this IMP are not changed by a
+lot implementation unless 00 explicitly routes a contradiction back through
+the corresponding document milestone.
