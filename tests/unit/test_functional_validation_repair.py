@@ -272,8 +272,11 @@ class SequenceFunctionalValidator:
                 violations=(ValidationViolation(
                     code="JSON_POINTER_MISMATCH",
                     requirement="assets/examplemod/lang/en_us.json:/item.examplemod.server_core",
-                    observed={"category": "mismatch"},
+                    observed={"category": "mismatch", "value": "wrong"},
                     message="required artifact value was not delivered",
+                    expected="Server Core",
+                    actual="wrong",
+                    evidence_refs=("workspace/assets/examplemod/lang/en_us.json",),
                 ),),
             )
             self.last_results = (post,)
@@ -290,8 +293,11 @@ class SequenceFunctionalValidator:
                 violations=(ValidationViolation(
                     code="REGISTRY_ENTRY_PRESENT",
                     requirement="item registry entry examplemod:signal_charm",
-                    observed={"category": "missing"},
+                    observed={"category": "mismatch", "value": "wrong"},
                     message="required item registry entry was not observed",
+                    expected="examplemod:signal_charm",
+                    actual="wrong",
+                    evidence_refs=("runtime/registry",),
                 ),),
             )
         self.last_results = (post, runtime)
@@ -317,7 +323,8 @@ def _repair_provider() -> ScriptedProvider:
 
 def test_t2_like_end_to_end_prebuild_then_runtime_repair(tmp_path: Path) -> None:
     root = _runtime_project(tmp_path / "t2", build_state="pass")
-    controller, storage = _controller(root, _repair_provider())
+    provider = _repair_provider()
+    controller, storage = _controller(root, provider)
     controller.pre_build_validator = PreBuildWorkspaceValidator()
     functional = SequenceFunctionalValidator([ValidationStatus.REPAIRABLE_FAIL, ValidationStatus.PASS], post_failures=0)
     controller.functional_validator = functional
@@ -342,6 +349,22 @@ def test_t2_like_end_to_end_prebuild_then_runtime_repair(tmp_path: Path) -> None
     feedback = [event.payload["feedback"] for event in storage.read_events(state.run_id) if event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK"]
     assert len(feedback) == 2
     assert all("reference" not in item.casefold() and "api" not in item.casefold() for item in feedback)
+    assert 'expected: "examplemod:signal_charm"' in feedback[1]
+    assert 'actual: "wrong"' in feedback[1]
+    assert 'observed: {"category":"mismatch","value":"wrong"}' in feedback[1]
+    assert 'evidence_refs: ["runtime/registry"]' in feedback[1]
+    assert any(
+        'expected: "examplemod:signal_charm"' in message.content
+        for request in provider.requests
+        for message in request.messages
+    )
+    diagnostics = [
+        event.payload["diagnostics"]
+        for event in storage.read_events(state.run_id)
+        if event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK"
+    ]
+    assert diagnostics[1][0]["expected"] == "examplemod:signal_charm"
+    assert diagnostics[1][0]["actual"] == "wrong"
 
 
 def test_t3_like_post_artifact_then_runtime_repair(tmp_path: Path) -> None:

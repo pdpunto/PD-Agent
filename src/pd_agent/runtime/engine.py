@@ -32,6 +32,7 @@ from pd_agent.core import (
     ToolResultStatus,
     ValidationResult,
     ValidationStatus,
+    ValidationViolation,
     artifact_identity_from_result,
     compute_source_revision,
 )
@@ -107,6 +108,38 @@ _RECENT_HISTORY_LIMIT = 8
 _MAX_RETAINED_FILE_EVIDENCE = 8
 _MAX_RETAINED_FILE_EXCERPT_BYTES = 4096
 _MAX_RETAINED_FILE_TOTAL_BYTES = 24576
+_MAX_VALIDATION_FEEDBACK_VALUE_BYTES = 2048
+
+
+def _format_validation_feedback_value(value: Any) -> str:
+    """Render one JSON-safe diagnostic value deterministically and bounded."""
+    rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    encoded_size = len(rendered.encode("utf-8"))
+    if encoded_size <= _MAX_VALIDATION_FEEDBACK_VALUE_BYTES:
+        return rendered
+    return f"[truncated: {encoded_size} bytes]"
+
+
+def _format_validation_violation(violation: ValidationViolation) -> list[str]:
+    """Keep actionable validation metadata visible without unbounded feedback."""
+    lines = [
+        f"- code: {violation.code}",
+        f"  requirement: {violation.requirement}",
+        f"  message: {violation.message}",
+    ]
+    for name, value in (
+        ("expected", violation.expected),
+        ("actual", violation.actual),
+        ("observed", violation.observed),
+    ):
+        if value is not None:
+            lines.append(f"  {name}: {_format_validation_feedback_value(value)}")
+    if violation.evidence_refs:
+        lines.append(
+            "  evidence_refs: "
+            + _format_validation_feedback_value(list(violation.evidence_refs))
+        )
+    return lines
 
 
 class AgentRuntime:
@@ -1051,6 +1084,7 @@ class AgentRuntime:
                 "stage": result.stage.value,
                 "signature": signature,
                 "feedback": feedback,
+                "diagnostics": [violation.to_dict() for violation in result.violations],
                 "classification": (
                     "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR"
                     if ineffective else "FIRST_FAILURE"
@@ -1134,6 +1168,7 @@ class AgentRuntime:
                         "stage": staged_result.stage.value,
                         "signature": signature,
                         "feedback": feedback,
+                        "diagnostics": [violation.to_dict() for violation in staged_result.violations],
                         "classification": (
                             "REPEATED_FAILURE_AFTER_INEFFECTIVE_REPAIR"
                             if ineffective else "FIRST_FAILURE"
@@ -1170,7 +1205,7 @@ class AgentRuntime:
                 *lines,
             ]
         for violation in result.violations:
-            lines.append(f"- {violation.requirement}: {violation.message}")
+            lines.extend(_format_validation_violation(violation))
         return "\n".join(lines)
 
     def _prepare_repair_knowledge(self, result: ValidationResult) -> None:
@@ -1210,9 +1245,7 @@ class AgentRuntime:
                 *lines,
             ]
         for violation in result.violations:
-            lines.append(
-                f"- {violation.code}: {violation.requirement}; {violation.message}"
-            )
+            lines.extend(_format_validation_violation(violation))
         return "\n".join(lines)
 
     def _validation_signature(self, result: ValidationResult) -> str:

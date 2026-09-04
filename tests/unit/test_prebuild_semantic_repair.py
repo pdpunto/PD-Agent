@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from pd_agent.benchmark import BenchmarkAcceptanceSpec, build_public_validation_contract
-from pd_agent.core import AgentResponse, FabricRequirement, FabricTaskContract, FabricValidationRequirement, ToolCall, ValidationStatus
+from pd_agent.core import AgentResponse, FabricRequirement, FabricTaskContract, FabricValidationRequirement, ToolCall, ValidationStatus, ValidationViolation
 from pd_agent.validation import PreBuildValidationError, PreBuildWorkspaceValidator
+from pd_agent.runtime.engine import _format_validation_feedback_value, _format_validation_violation
 from tests.unit.test_l9_runtime import ScriptedProvider, _controller, _runtime_project
 
 
@@ -17,6 +18,26 @@ def _contract(*resources: dict[str, object]) -> dict[str, object]:
 
 def _json_resource(path: str, *assertions: dict[str, object]) -> dict[str, object]:
     return {"path": path, "resource_type": "json", "assertions": list(assertions)}
+
+
+def test_validation_feedback_formats_json_values_deterministically_and_bounded() -> None:
+    violation = ValidationViolation(
+        code="CHECK",
+        requirement="generic requirement",
+        observed=[1, True, {"z": 2, "a": None}],
+        message="diagnostic",
+        expected=7,
+        actual=False,
+        evidence_refs=("evidence/ref",),
+    )
+
+    lines = _format_validation_violation(violation)
+    rendered = "\n".join(lines)
+    assert 'expected: 7' in rendered
+    assert 'actual: false' in rendered
+    assert 'observed: [1,true,{"a":null,"z":2}]' in rendered
+    assert 'evidence_refs: ["evidence/ref"]' in rendered
+    assert _format_validation_feedback_value("x" * 3000) == "[truncated: 3002 bytes]"
 
 
 def test_prebuild_passes_without_resources(tmp_path: Path) -> None:
@@ -177,6 +198,10 @@ def test_repair_feedback_allows_write_then_build_and_rechecks(tmp_path: Path) ->
     feedback = next(event.payload["feedback"] for event in events if event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK")
     assert "class " not in feedback
     assert "Fabric" not in feedback
+    diagnostics = next(event.payload["diagnostics"] for event in events if event.event_type.value == "SEMANTIC_REPAIR_FEEDBACK")
+    assert diagnostics[0]["code"] == "RESOURCE_MISSING"
+    assert "expected" not in feedback
+    assert any("Semantic validation failed before build:" in message.content for request in provider.requests for message in request.messages)
 
 
 def test_repair_feedback_allows_inspection_before_next_mutation(tmp_path: Path) -> None:
