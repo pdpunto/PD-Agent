@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "$(dirname "$0")/../l11_minecraft_harness/gradlew" -p "$(dirname "$0")" "$@"

@@ -881,6 +881,7 @@ class MinecraftTestSpec:
     command_invocation: CommandInvocation | None = None
     event_profile: str | None = None
     observation_requests: tuple[ObservationRequest, ...] = ()
+    platform_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target_jar", _normalize_path(self.target_jar))
@@ -897,6 +898,8 @@ class MinecraftTestSpec:
             tuple(sorted(runtime_mod_jars, key=lambda path: path.as_posix().casefold())),
         )
         object.__setattr__(self, "target_mod_id", _validate_mod_id(self.target_mod_id))
+        if self.platform_id is not None:
+            object.__setattr__(self, "platform_id", _non_empty_text("platform_id", self.platform_id))
         object.__setattr__(self, "minecraft_version", _non_empty_text("minecraft_version", self.minecraft_version))
         object.__setattr__(self, "loader_version", _non_empty_text("loader_version", self.loader_version))
         object.__setattr__(self, "test_id", _non_empty_text("test_id", self.test_id))
@@ -924,6 +927,7 @@ class MinecraftTestSpec:
             "target_jar": self.target_jar.as_posix(),
             "runtime_mod_jars": [path.as_posix() for path in self.runtime_mod_jars],
             "target_mod_id": self.target_mod_id,
+            **({"platform_id": self.platform_id} if self.platform_id is not None else {}),
             "minecraft_version": self.minecraft_version,
             "loader_version": self.loader_version,
             "test_id": self.test_id,
@@ -950,6 +954,7 @@ class MinecraftTestSpec:
             target_jar=Path(data["target_jar"]),
             runtime_mod_jars=tuple(Path(path) for path in data.get("runtime_mod_jars", [])),
             target_mod_id=str(data["target_mod_id"]),
+            platform_id=(str(data["platform_id"]) if data.get("platform_id") is not None else None),
             minecraft_version=str(data["minecraft_version"]),
             loader_version=str(data["loader_version"]),
             test_id=str(data["test_id"]),

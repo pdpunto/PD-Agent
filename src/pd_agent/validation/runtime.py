@@ -87,6 +87,7 @@ def _minecraft_spec(
         runtime_mod_jars=tuple(Path(item) for item in spec.get("runtime_mod_jars", runtime_mod_jars)),
         observation_requests=runtime_plan.observations,
         target_mod_id=target_mod_id,
+        platform_id=str(spec.get("platform_id", environment.extra.get("platform_id"))) if spec.get("platform_id", environment.extra.get("platform_id")) is not None else None,
         minecraft_version=str(spec.get("minecraft_version", environment.minecraft_version)),
         loader_version=str(spec.get("loader_version", environment.loader_version)),
         test_id=str(spec.get("test_id", requirement.validation_requirement_id)),

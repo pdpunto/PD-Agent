@@ -46,6 +46,43 @@ from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmen
 
 
 DEFAULT_PRODUCTION_TASK = "productionServerRun"
+_BOUNDED_HARNESS_PLATFORM_IDS = frozenset({"fabric-minecraft-1.21.11", "fabric-minecraft-26.2"})
+
+
+def _harness_platform_profile(spec: MinecraftTestSpec):
+    """Resolve the bounded M3 harness profile through the M2 authority."""
+    from pd_agent.fabric import load_platform_registry
+
+    platform_id = spec.platform_id
+    if platform_id is None:
+        if spec.minecraft_version == "26.2":
+            raise UnsupportedMinecraftEnvironmentError(
+                "26.2 requires an explicit platform_id"
+            )
+        if spec.minecraft_version != "1.21.11":
+            raise UnsupportedMinecraftEnvironmentError(
+                f"unsupported minecraft_version: {spec.minecraft_version}"
+            )
+        platform_id = "fabric-minecraft-1.21.11"
+    if platform_id not in _BOUNDED_HARNESS_PLATFORM_IDS:
+        raise UnsupportedMinecraftEnvironmentError(f"unsupported harness platform: {platform_id}")
+    registry = load_platform_registry(Path(__file__).resolve().parents[1] / "fabric" / "data" / "platform_profiles.json")
+    try:
+        profile = registry.get(platform_id)
+    except KeyError as exc:
+        raise UnsupportedMinecraftEnvironmentError(f"missing harness platform profile: {platform_id}") from exc
+    if profile.support_status.value != "SUPPORTED":
+        raise UnsupportedMinecraftEnvironmentError(f"harness platform is not supported: {platform_id}")
+    expected = {
+        "minecraft_version": profile.minecraft_version,
+        "loader_version": profile.loader_version,
+    }
+    for field_name, expected_value in expected.items():
+        if getattr(spec, field_name) != expected_value:
+            raise UnsupportedMinecraftEnvironmentError(
+                f"{platform_id} requires {field_name}={expected_value}"
+            )
+    return profile
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,10 +316,10 @@ class MinecraftTestRunner:
     production_task: str = DEFAULT_PRODUCTION_TASK
     environment_overrides: Mapping[str, str] = field(default_factory=dict)
     supported_minecraft_versions: frozenset[str] = field(
-        default_factory=lambda: frozenset({"1.21.11"})
+        default_factory=lambda: frozenset({"1.21.11", "26.2"})
     )
     supported_loader_versions: frozenset[str] = field(default_factory=lambda: frozenset({"0.19.3"}))
-    supported_java_versions: frozenset[str] = field(default_factory=lambda: frozenset({"21"}))
+    supported_java_versions: frozenset[str] = field(default_factory=lambda: frozenset({"21", "25"}))
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "project_root", Path(self.project_root).resolve(strict=True))
@@ -320,14 +357,13 @@ class MinecraftTestRunner:
         )
 
     def validate_spec(self, spec: MinecraftTestSpec, *, java_version: str | None = None) -> None:
+        profile = _harness_platform_profile(spec)
         if spec.minecraft_version not in self.supported_minecraft_versions:
-            raise UnsupportedMinecraftEnvironmentError(
-                f"unsupported minecraft_version: {spec.minecraft_version}"
-            )
+            raise UnsupportedMinecraftEnvironmentError(f"unsupported minecraft_version: {spec.minecraft_version}")
         if spec.loader_version not in self.supported_loader_versions:
             raise UnsupportedMinecraftEnvironmentError(f"unsupported loader_version: {spec.loader_version}")
-        if java_version is not None and java_version not in self.supported_java_versions:
-            raise UnsupportedMinecraftEnvironmentError(f"unsupported java_version: {java_version}")
+        if java_version is not None and java_version != profile.java_version:
+            raise UnsupportedMinecraftEnvironmentError(f"{profile.platform_id} requires java_version: {profile.java_version}")
         if spec.observation_type is MinecraftObservationType.ITEM_COMPONENT_STATE:
             _item_component_params(spec.observation_params)
         elif spec.observation_type in {
