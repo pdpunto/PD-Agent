@@ -158,6 +158,47 @@ final class HarnessResult {
         );
     }
 
+    static HarnessResult blockItemAssociation(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        boolean itemPresent,
+        boolean isBlockItem,
+        String actualBlockId,
+        boolean associated,
+        String reason
+    ) {
+        HarnessResult result = create(
+            config,
+            identity,
+            config.observationType(),
+            associated,
+            null,
+            null,
+            associated ? "PASS" : "FAIL",
+            false,
+            reason
+            , null, null, null, null, null, null, null, null
+        );
+        JsonObject expected = new JsonObject();
+        expected.addProperty("associated", true);
+        JsonObject actual = new JsonObject();
+        actual.addProperty("item_present", itemPresent);
+        actual.addProperty("is_block_item", isBlockItem);
+        if (actualBlockId == null) {
+            actual.add("actual_block_id", null);
+        } else {
+            actual.addProperty("actual_block_id", actualBlockId);
+        }
+        actual.addProperty("associated", associated);
+        result.structuredObservation = new JsonObject();
+        result.structuredObservation.getAsJsonObject().add("expected", expected);
+        result.structuredObservation.getAsJsonObject().add("actual", actual);
+        if (!associated) {
+            result.structuredObservation.getAsJsonObject().addProperty("error_code", "BLOCK_ITEM_ASSOCIATION_MISMATCH");
+        }
+        return result;
+    }
+
     static HarnessResult infraError(HarnessConfig config, String reason, HarnessIdentity identity) {
         return create(
             config,

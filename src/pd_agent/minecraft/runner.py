@@ -40,6 +40,7 @@ from .contracts import (
     validate_tag_membership_profile,
     validate_recipe_match_profile,
     validate_loot_result_profile,
+    validate_block_item_association_profile,
 )
 from .errors import MinecraftTestValidationError, UnsupportedMinecraftEnvironmentError
 
@@ -149,6 +150,14 @@ def _registry_kind_from_params(params: Mapping[str, Any]) -> str | None:
     if not text:
         return None
     return text
+
+
+def _block_item_association_properties(params: Mapping[str, Any]) -> tuple[str, str]:
+    item_id = params.get("item_id")
+    block_id = params.get("block_id")
+    selector = {"kind": "block_item_association", "item_id": item_id, "block_id": block_id}
+    validate_block_item_association_profile(selector, {})
+    return str(item_id), str(block_id)
 
 
 def _item_component_params(params: Mapping[str, Any]) -> tuple[str, str, bool]:
@@ -332,6 +341,8 @@ class MinecraftTestRunner:
             _recipe_match_properties(spec.observation_params)
         elif spec.observation_type is MinecraftObservationType.LOOT_RESULT:
             _loot_result_properties(spec.observation_params)
+        elif spec.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION:
+            _block_item_association_properties(spec.observation_params)
 
     def validate_target(
         self,
@@ -467,6 +478,14 @@ class MinecraftTestRunner:
                     _loot_result_properties(spec.observation_params),
                 ))
                 if spec.observation_type is MinecraftObservationType.LOOT_RESULT
+                else ()
+            ),
+            *(
+                tuple(zip(
+                    ("pd.agent.observationAssociationItemId", "pd.agent.observationAssociationBlockId"),
+                    _block_item_association_properties(spec.observation_params),
+                ))
+                if spec.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION
                 else ()
             ),
         )
@@ -741,21 +760,32 @@ class MinecraftTestRunner:
 
         results: list[MinecraftTestResult] = []
         for index, request in enumerate(spec.observation_requests):
-            if request.observation_type is not MinecraftObservationType.REGISTRY_ENTRY_PRESENT:
+            if request.observation_type not in {
+                MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
+                MinecraftObservationType.BLOCK_ITEM_ASSOCIATION,
+            }:
                 raise MinecraftTestValidationError(
-                    "multiple observation requests require registry observations"
+                    "Vertical A multi-observation requests are limited to registry and BlockItem association observations"
                 )
             selector = request.selector
-            if selector.get("kind") != "registry":
-                raise MinecraftTestValidationError("registry observation selector is invalid")
+            if request.observation_type is MinecraftObservationType.REGISTRY_ENTRY_PRESENT:
+                if selector.get("kind") != "registry":
+                    raise MinecraftTestValidationError("registry observation selector is invalid")
+                observation_params = {
+                    "registry_kind": selector.get("registry_kind"),
+                    "identifier": selector.get("identifier"),
+                }
+            else:
+                validate_block_item_association_profile(selector, {})
+                observation_params = {
+                    "item_id": selector["item_id"],
+                    "block_id": selector["block_id"],
+                }
             child_spec = replace(
                 spec,
                 test_id=request.observation_id,
                 observation_type=request.observation_type,
-                observation_params={
-                    "registry_kind": selector.get("registry_kind"),
-                    "identifier": selector.get("identifier"),
-                },
+                observation_params=observation_params,
                 observation_requests=(request,),
             )
             child_root = runtime_run_dir / str(index) if runtime_run_dir is not None else None
@@ -1028,6 +1058,17 @@ class MinecraftTestRunner:
                 if result.spec.observation_type is MinecraftObservationType.LOOT_RESULT
                 else ()
             ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationAssociationItemId", "pd.agent.observationAssociationBlockId"),
+                        _block_item_association_properties(result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION
+                else ()
+            ),
         )
 
     def _build_command(self, launch_properties: tuple[str, ...]) -> tuple[str, ...]:
@@ -1286,6 +1327,35 @@ class MinecraftTestRunner:
                         None
                         if functional_test_result == "PASS"
                         else {"code": "REGISTRY_ENTRY_PRESENT_MISMATCH", "message": reason}
+                    ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() == MinecraftObservationType.BLOCK_ITEM_ASSOCIATION.value:
+                observation = ObservationResult(
+                    observation_id=contract_observation_id,
+                    observation_type=MinecraftObservationType.BLOCK_ITEM_ASSOCIATION,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected=dict(harness_result.get("observation_expected", {"associated": True})),
+                    actual=dict(harness_result.get("observation_actual", {})),
+                    phase=persistence_phase or "RUNTIME",
+                    evidence_refs=(
+                        MinecraftEvidenceReference(
+                            kind=MinecraftEvidenceKind.OBSERVATION,
+                            ref="harness-result.json",
+                            phase=persistence_phase or "RUNTIME",
+                        ),
+                    ),
+                    error=(
+                        None
+                        if functional_test_result == "PASS"
+                        else {
+                            "code": str(harness_result.get("error_code") or "BLOCK_ITEM_ASSOCIATION_MISMATCH"),
+                            "message": reason,
+                        }
                     ),
                 )
                 metadata["observation_result"] = observation.to_dict()

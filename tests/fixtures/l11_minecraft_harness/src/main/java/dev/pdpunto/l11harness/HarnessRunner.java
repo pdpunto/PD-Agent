@@ -12,6 +12,7 @@ import net.minecraft.block.entity.HopperBlockEntity;
 import net.minecraft.component.ComponentType;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.Item;
+import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.inventory.Inventory;
@@ -73,6 +74,9 @@ final class HarnessRunner {
 
         if (HarnessConfig.OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(config.observationType())) {
             return runRegistryObservation(config, identity);
+        }
+        if (HarnessConfig.OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(config.observationType())) {
+            return runBlockItemAssociationObservation(config, identity);
         }
         if (HarnessConfig.OBSERVATION_ITEM_COMPONENT_STATE.equals(config.observationType())) {
             return runItemComponentObservation(config, identity);
@@ -530,6 +534,27 @@ final class HarnessRunner {
             );
         }
         return HarnessResult.passRegistry(config, identity, config.observationRegistryKind(), observedIdentifier);
+    }
+
+    private static HarnessResult runBlockItemAssociationObservation(HarnessConfig config, HarnessIdentity identity) {
+        Identifier itemId = parseIdentifier(config.observationAssociationItemId());
+        Identifier blockId = parseIdentifier(config.observationAssociationBlockId());
+        Item item = Registries.ITEM.get(itemId);
+        boolean itemPresent = item != null;
+        boolean isBlockItem = item instanceof BlockItem;
+        Block associatedBlock = isBlockItem ? ((BlockItem) item).getBlock() : null;
+        Identifier actualBlockId = associatedBlock == null ? null : Registries.BLOCK.getId(associatedBlock);
+        boolean blockPresent = Registries.BLOCK.containsId(blockId);
+        boolean associated = itemPresent && isBlockItem && blockPresent && blockId.equals(actualBlockId);
+        return HarnessResult.blockItemAssociation(
+            config,
+            identity,
+            itemPresent,
+            isBlockItem,
+            actualBlockId == null ? null : actualBlockId.toString(),
+            associated,
+            associated ? "BlockItem association observed" : "BlockItem association did not match expected block"
+        );
     }
 
     private static HarnessResult runItemComponentObservation(HarnessConfig config, HarnessIdentity identity) {

@@ -290,11 +290,30 @@ def _validate_mod_id(value: object) -> str:
     return mod_id
 
 
+def validate_block_item_association_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the bounded Vertical A BlockItem association profile."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "item_id", "block_id"}:
+        raise ValueError("BLOCK_ITEM_ASSOCIATION selector must declare kind, item_id and block_id")
+    if selector.get("kind") != "block_item_association":
+        raise ValueError("BLOCK_ITEM_ASSOCIATION selector kind is invalid")
+    for field_name in ("item_id", "block_id"):
+        value = selector.get(field_name)
+        if not isinstance(value, str) or not _ITEM_COMPONENT_ID_RE.fullmatch(value):
+            raise ValueError(f"BLOCK_ITEM_ASSOCIATION {field_name} must be a namespaced identifier")
+    if not isinstance(parameters, Mapping) or parameters:
+        raise ValueError("BLOCK_ITEM_ASSOCIATION parameters must be empty")
+
+
 class MinecraftObservationType(StrEnum):
     """Supported runtime observation contracts."""
 
     LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE"
     REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT"
+    BLOCK_ITEM_ASSOCIATION = "BLOCK_ITEM_ASSOCIATION"
     ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE"
     BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE"
     INVENTORY_STATE = "INVENTORY_STATE"
@@ -704,6 +723,12 @@ class ObservationRequest:
             "expected",
             _closed_json(self.expected, field_name="expected", reject_unsafe_keys=False),
         )
+        if self.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION:
+            validate_block_item_association_profile(selector, parameters)
+            if self.profile != "block_item_association":
+                raise ValueError("BLOCK_ITEM_ASSOCIATION profile is invalid")
+            if self.expected != {"associated": True}:
+                raise ValueError("BLOCK_ITEM_ASSOCIATION expected must be {'associated': true}")
         object.__setattr__(self, "phase", _optional_identity("phase", self.phase))
         metadata = _closed_json(self.metadata, field_name="metadata")
         if not isinstance(metadata, dict):
@@ -755,6 +780,10 @@ def effective_observation_config(
             raise ValueError("registry observation selector is invalid")
         params.setdefault("registry_kind", request.selector.get("registry_kind"))
         params.setdefault("identifier", request.selector.get("identifier"))
+    elif request.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION:
+        validate_block_item_association_profile(request.selector, params)
+        params.setdefault("item_id", request.selector["item_id"])
+        params.setdefault("block_id", request.selector["block_id"])
     return request.observation_type, params
 
 

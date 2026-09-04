@@ -14,6 +14,8 @@ record HarnessConfig(
     String observationType,
     String observationRegistryKind,
     String observationIdentifier,
+    String observationAssociationItemId,
+    String observationAssociationBlockId,
     String observationComponentId,
     String observationItemId,
     boolean observationRoundTrip,
@@ -44,6 +46,8 @@ record HarnessConfig(
     static final String PROP_OBSERVATION_TYPE = "pd.agent.observationType";
     static final String PROP_OBSERVATION_REGISTRY_KIND = "pd.agent.observationRegistryKind";
     static final String PROP_OBSERVATION_IDENTIFIER = "pd.agent.observationIdentifier";
+    static final String PROP_OBSERVATION_ASSOCIATION_ITEM_ID = "pd.agent.observationAssociationItemId";
+    static final String PROP_OBSERVATION_ASSOCIATION_BLOCK_ID = "pd.agent.observationAssociationBlockId";
     static final String PROP_OBSERVATION_COMPONENT_ID = "pd.agent.observationComponentId";
     static final String PROP_OBSERVATION_ITEM_ID = "pd.agent.observationItemId";
     static final String PROP_OBSERVATION_ROUND_TRIP = "pd.agent.observationRoundTrip";
@@ -68,6 +72,7 @@ record HarnessConfig(
     static final String PROP_EXPECT_NEIGHBOR_UPDATE = "pd.agent.expectNeighborUpdate";
     static final String OBSERVATION_LEGACY_BLOCK_STATE = "LEGACY_BLOCK_STATE";
     static final String OBSERVATION_REGISTRY_ENTRY_PRESENT = "REGISTRY_ENTRY_PRESENT";
+    static final String OBSERVATION_BLOCK_ITEM_ASSOCIATION = "BLOCK_ITEM_ASSOCIATION";
     static final String OBSERVATION_ITEM_COMPONENT_STATE = "ITEM_COMPONENT_STATE";
     static final String OBSERVATION_BLOCK_ENTITY_STATE = "BLOCK_ENTITY_STATE";
     static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
@@ -87,6 +92,8 @@ record HarnessConfig(
         observationType = normalizeObservationType(observationType);
         observationRegistryKind = normalizeObservationRegistryKind(observationType, observationRegistryKind);
         observationIdentifier = normalizeObservationIdentifier(observationType, observationIdentifier);
+        observationAssociationItemId = normalizeAssociationItemId(observationType, observationAssociationItemId);
+        observationAssociationBlockId = normalizeAssociationBlockId(observationType, observationAssociationBlockId);
         observationComponentId = normalizeObservationComponentId(observationType, observationComponentId);
         observationItemId = normalizeObservationItemId(observationType, observationItemId);
         observationBlockEntityId = normalizeBlockEntityId(observationType, observationBlockEntityId);
@@ -117,6 +124,8 @@ record HarnessConfig(
             observationType,
             requireObservationText(PROP_OBSERVATION_REGISTRY_KIND, observationType),
             requireObservationText(PROP_OBSERVATION_IDENTIFIER, observationType),
+            requireObservationText(PROP_OBSERVATION_ASSOCIATION_ITEM_ID, observationType),
+            requireObservationText(PROP_OBSERVATION_ASSOCIATION_BLOCK_ID, observationType),
             requireObservationText(PROP_OBSERVATION_COMPONENT_ID, observationType),
             requireObservationText(PROP_OBSERVATION_ITEM_ID, observationType),
             requireBoolean(PROP_OBSERVATION_ROUND_TRIP, false),
@@ -186,7 +195,8 @@ record HarnessConfig(
             && !OBSERVATION_BLOCK_ENTITY_STATE.equals(normalized)
             && !OBSERVATION_INVENTORY_STATE.equals(normalized)
             && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)
-            && !OBSERVATION_RECIPE_MATCH.equals(normalized)) {
+            && !OBSERVATION_RECIPE_MATCH.equals(normalized)
+            && !OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(normalized)) {
             if (!OBSERVATION_LOOT_RESULT.equals(normalized)) {
                 throw new IllegalArgumentException("unsupported observation type: " + value);
             }
@@ -218,6 +228,20 @@ record HarnessConfig(
         String normalized = requireTextValue("observation identifier", value);
         Identifier parsed = parseIdentifier(normalized);
         return parsed.toString();
+    }
+
+    private static String normalizeAssociationItemId(String observationType, String value) {
+        if (!OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(observationType)) {
+            return null;
+        }
+        return parseIdentifier(requireTextValue("association item id", value)).toString();
+    }
+
+    private static String normalizeAssociationBlockId(String observationType, String value) {
+        if (!OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(observationType)) {
+            return null;
+        }
+        return parseIdentifier(requireTextValue("association block id", value)).toString();
     }
 
     private static String normalizeObservationComponentId(String observationType, String value) {
@@ -350,6 +374,8 @@ record HarnessConfig(
         String value = System.getProperty(key);
         boolean registryField = PROP_OBSERVATION_REGISTRY_KIND.equals(key)
             || PROP_OBSERVATION_IDENTIFIER.equals(key);
+        boolean associationField = PROP_OBSERVATION_ASSOCIATION_ITEM_ID.equals(key)
+            || PROP_OBSERVATION_ASSOCIATION_BLOCK_ID.equals(key);
         boolean componentField = PROP_OBSERVATION_COMPONENT_ID.equals(key)
             || PROP_OBSERVATION_ITEM_ID.equals(key);
         boolean blockEntityField = PROP_OBSERVATION_BLOCK_ENTITY_ID.equals(key);
@@ -358,6 +384,7 @@ record HarnessConfig(
         if (registryField && OBSERVATION_REGISTRY_ENTRY_PRESENT.equals(observationType)
             || (componentField && OBSERVATION_ITEM_COMPONENT_STATE.equals(observationType))
             || (PROP_OBSERVATION_ITEM_ID.equals(key) && OBSERVATION_INVENTORY_STATE.equals(observationType))
+            || (associationField && OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(observationType))
             || (blockEntityField && OBSERVATION_BLOCK_ENTITY_STATE.equals(observationType))) {
             return requireTextValue(key, value);
         }

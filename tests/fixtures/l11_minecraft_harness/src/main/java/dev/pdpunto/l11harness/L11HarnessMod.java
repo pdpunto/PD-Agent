@@ -168,6 +168,8 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
             null,
             null,
             null,
+            null,
+            null,
             false,
             null,
             0,
