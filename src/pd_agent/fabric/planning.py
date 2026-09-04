@@ -158,6 +158,12 @@ def _validate_parameters(candidate: CapabilityCandidate, definition: Any) -> dic
         if specification.get("format") == "identifier":
             if not isinstance(parameters[key], str) or not parameters[key] or any(char in parameters[key] for char in "/\\"):
                 raise CapabilityModelError(f"invalid identifier parameter: {key}")
+        allowed_values = specification.get("enum")
+        if allowed_values is not None and parameters[key] not in allowed_values:
+            raise CapabilityModelError(f"invalid value for capability parameter: {key}")
+        minimum = specification.get("minimum")
+        if minimum is not None and parameters[key] < minimum:
+            raise CapabilityModelError(f"capability parameter is below minimum: {key}")
     return parameters
 
 

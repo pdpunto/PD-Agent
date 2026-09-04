@@ -99,7 +99,7 @@ def test_candidate_and_planning_failure_are_serializable_data() -> None:
 
 def test_foundation_registry_contains_only_generic_capabilities() -> None:
     registry = foundation_capability_registry()
-    assert registry.definition_ids == ("fabric.block", "fabric.block_item", "fabric.recipe")
+    assert registry.definition_ids == ("fabric.block", "fabric.block_assets", "fabric.block_item", "fabric.recipe")
     assert all("server" not in item.definition_id for item in registry.definitions())
     assert all("provider" not in item.to_dict() for item in registry.definitions())
 

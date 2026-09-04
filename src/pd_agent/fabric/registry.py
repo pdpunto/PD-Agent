@@ -84,14 +84,20 @@ def _definition(
 
 BLOCK_DEFINITION = _definition(
     "fabric.block",
-    parameter_schema={"namespace": {"type": "string"}, "name": {"type": "string"}, "runtime_spec": {"type": "object", "required": False}},
+    parameter_schema={
+        "namespace": {"type": "string", "format": "identifier"},
+        "block_id": {"type": "string", "format": "identifier", "required": False},
+        "name": {"type": "string", "format": "identifier", "required": False},
+        "display_name": {"type": "string", "required": False},
+        "runtime_spec": {"type": "object", "required": False},
+    },
     requirements=(
         {"key": "source", "description": "a relevant source change is present for the block"},
-        {"key": "runtime", "description": "the block runtime declaration is present"},
+        {"key": "block-registration", "description": "the block runtime declaration is present"},
     ),
     validations=(
         {"key": "build", "kind": "build", "requirement_keys": ("source",)},
-        {"key": "minecraft", "kind": "minecraft", "requirement_keys": ("runtime",), "required_parameter": "runtime_spec", "spec": {"$parameter": "runtime_spec"}},
+        {"key": "runtime", "kind": "minecraft", "requirement_keys": ("block-registration",), "required_parameter": "runtime_spec", "spec": {"$parameter": "runtime_spec"}},
     ),
     mutation_expectations=({"key": "source", "role": "source"},),
 )
@@ -99,27 +105,73 @@ BLOCK_ITEM_DEFINITION = _definition(
     "fabric.block_item",
     parameter_schema={
         "block_instance_id": {"type": "string"},
-        "namespace": {"type": "string"},
+        "namespace": {"type": "string", "format": "identifier"},
+        "item_id": {"type": "string", "format": "identifier", "required": False},
+        "display_name": {"type": "string", "required": False},
         "artifact_spec": {"type": "object", "required": False},
         "mutation_paths": {"type": "array", "required": False},
     },
     prerequisites=({"capability": "fabric.block", "reference": "block_instance_id"},),
     requirements=(
-        {"key": "resource-lang", "description": "the block language resource is present"},
-        {"key": "resource-recipe", "description": "the block recipe resource is present"},
+        {"key": "item-source", "description": "the BlockItem source declaration is present"},
+        {"key": "block-item-association", "description": "the BlockItem association is declared"},
         {"key": "artifact", "description": "the produced artifact contains the declared resources"},
     ),
-    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("resource-lang", "resource-recipe", "artifact"), "spec": {"$parameter": "artifact_spec"}},),
+    validations=(
+        {
+            "key": "artifact",
+            "kind": "artifact",
+            "requirement_keys": ("item-source", "block-item-association", "artifact"),
+            "required_parameter": "artifact_spec",
+            "spec": {"$parameter": "artifact_spec"},
+        },
+    ),
     mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
+)
+BLOCK_ASSETS_DEFINITION = _definition(
+    "fabric.block_assets",
+    parameter_schema={
+        "block_instance_id": {"type": "string"},
+        "block_item_instance_id": {"type": "string"},
+        "namespace": {"type": "string", "format": "identifier"},
+        "block_id": {"type": "string", "format": "identifier"},
+        "item_id": {"type": "string", "format": "identifier"},
+        "display_name": {"type": "string", "required": False},
+        "texture_strategy": {"type": "string", "enum": ("REUSE", "DERIVE", "GENERATE")},
+        "texture_reference": {"type": "string", "required": False},
+        "texture_path": {"type": "string", "required": False},
+        "resource_paths": {"type": "object"},
+    },
+    prerequisites=(
+        {"capability": "fabric.block", "reference": "block_instance_id"},
+        {"capability": "fabric.block_item", "reference": "block_item_instance_id"},
+    ),
+    requirements=(
+        {"key": "blockstate", "description": "the blockstate resource is present"},
+        {"key": "block-model", "description": "the block model resource is present"},
+        {"key": "item-model", "description": "the item model resource is present"},
+        {"key": "lang", "description": "the language resource is present", "required": False},
+        {"key": "texture-reference", "description": "the texture strategy is declared"},
+    ),
+    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("blockstate", "block-model", "item-model", "lang", "texture-reference")},),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
-    parameter_schema={"output_instance_id": {"type": "string"}, "ingredients": {"type": "array"}},
+    parameter_schema={
+        "output_instance_id": {"type": "string"},
+        "namespace": {"type": "string", "format": "identifier", "required": False},
+        "recipe_id": {"type": "string", "format": "identifier", "required": False},
+        "recipe_type": {"type": "string", "format": "identifier", "required": False},
+        "ingredients": {"type": "array"},
+        "result_item_id": {"type": "string", "format": "identifier", "required": False},
+        "result_count": {"type": "integer", "required": False, "minimum": 1},
+        "resource_path": {"type": "string", "required": False},
+    },
     prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
-    requirements=({"key": "recipe", "description": "the recipe capability is declared"},),
+    requirements=({"key": "recipe-resource", "description": "the recipe resource is declared"},),
 )
 
-FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, RECIPE_DEFINITION)
+FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, BLOCK_ASSETS_DEFINITION, RECIPE_DEFINITION)
 
 
 def foundation_capability_registry() -> CapabilityRegistry:
@@ -128,6 +180,7 @@ def foundation_capability_registry() -> CapabilityRegistry:
 
 
 __all__ = [
+    "BLOCK_ASSETS_DEFINITION",
     "BLOCK_DEFINITION",
     "BLOCK_ITEM_DEFINITION",
     "CapabilityRegistry",
