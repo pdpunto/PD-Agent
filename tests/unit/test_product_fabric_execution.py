@@ -85,11 +85,10 @@ def test_resolver_derives_resource_paths_from_manifest_identity(tmp_path: Path) 
     artifact = next(item for item in contract.validation_requirements if item.kind == "artifact")
     assert artifact.spec["required_paths"] == [
         "src/main/resources/assets/examplemod/lang/en_us.json",
-        "src/main/resources/data/examplemod/recipe/server_core.json",
+        "src/main/resources/data/examplemod/recipes/server_core.json",
     ]
-    assert [item.path for item in contract.mutation_expectations if item.role == "resource"] == list(
-        artifact.spec["required_paths"]
-    )
+    resource_paths = [item.path for item in contract.mutation_expectations if item.role == "resource"]
+    assert set(artifact.spec["required_paths"]).issubset(resource_paths)
 
 
 def test_resolver_uses_a_different_manifest_identity_without_hardcoding(tmp_path: Path) -> None:
@@ -105,7 +104,7 @@ def test_resolver_uses_a_different_manifest_identity_without_hardcoding(tmp_path
     artifact = next(item for item in contract.validation_requirements if item.kind == "artifact")
     assert artifact.spec["required_paths"] == [
         "src/main/resources/assets/othermod/lang/en_us.json",
-        "src/main/resources/data/othermod/recipe/server_core.json",
+        "src/main/resources/data/othermod/recipes/server_core.json",
     ]
     assert all("examplemod" not in (item.path or "") for item in contract.mutation_expectations)
 

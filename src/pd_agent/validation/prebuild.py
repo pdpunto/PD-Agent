@@ -114,17 +114,19 @@ def _vertical_a_violations(root: Path, spec: Mapping[str, Any], resource_roots: 
     block_id = str(spec.get("block_id", "")).strip()
     item_id = str(spec.get("item_id", block_id)).strip()
     recipe_id = str(spec.get("recipe_id", "")).strip()
-    expected = {
+    asset_spec = any(key in spec for key in ("texture_strategy", "texture_reference", "blockstate", "block_model", "item_model"))
+    expected = ({
         "blockstate": f"assets/{namespace}/blockstates/{block_id}.json",
         "block_model": f"assets/{namespace}/models/block/{block_id}.json",
         "item_model": f"assets/{namespace}/models/item/{item_id}.json",
         "recipe": f"data/{namespace}/recipes/{recipe_id}.json",
-    }
+    } if asset_spec else {"recipe": f"data/{namespace}/recipes/{recipe_id}.json"})
     for key, value in expected.items():
         paths.setdefault(key, value)
     violations: list[ValidationViolation] = []
     parsed_files: dict[str, Any] = {}
-    for key in ("blockstate", "block_model", "item_model", "lang", "recipe"):
+    resource_keys = ("blockstate", "block_model", "item_model", "lang", "recipe") if asset_spec else ("recipe",)
+    for key in resource_keys:
         path = paths.get(key)
         if not path:
             if key in {"blockstate", "block_model", "item_model", "recipe"}:
@@ -184,12 +186,13 @@ def _vertical_a_violations(root: Path, spec: Mapping[str, Any], resource_roots: 
 
     strategy = str(spec.get("texture_strategy", "REUSE")).upper()
     texture_reference = spec.get("texture_reference")
-    if strategy not in {"REUSE", "DERIVE"}:
-        violations.append(_profile_violation("VERTICAL_A_TEXTURE_STRATEGY_UNSUPPORTED", "texture-reference", "GENERATE is not implemented for Vertical A", observed=strategy, expected=("REUSE", "DERIVE")))
-    elif not isinstance(texture_reference, str) or ":" not in texture_reference or texture_reference.startswith(":") or texture_reference.endswith(":"):
-        violations.append(_profile_violation("VERTICAL_A_TEXTURE_REFERENCE_INVALID", "texture-reference", "texture reference must be a namespace:path identifier", observed=texture_reference, expected="namespace:path"))
-    elif strategy == "REUSE" and spec.get("texture_path"):
-        violations.append(_profile_violation("VERTICAL_A_TEXTURE_REFERENCE_INVALID", "texture-reference", "REUSE must not require an owned texture file", observed=spec.get("texture_path"), expected=None))
+    if asset_spec:
+        if strategy not in {"REUSE", "DERIVE"}:
+            violations.append(_profile_violation("VERTICAL_A_TEXTURE_STRATEGY_UNSUPPORTED", "texture-reference", "GENERATE is not implemented for Vertical A", observed=strategy, expected=("REUSE", "DERIVE")))
+        elif not isinstance(texture_reference, str) or ":" not in texture_reference or texture_reference.startswith(":") or texture_reference.endswith(":"):
+            violations.append(_profile_violation("VERTICAL_A_TEXTURE_REFERENCE_INVALID", "texture-reference", "texture reference must be a namespace:path identifier", observed=texture_reference, expected="namespace:path"))
+        elif strategy == "REUSE" and spec.get("texture_path"):
+            violations.append(_profile_violation("VERTICAL_A_TEXTURE_REFERENCE_INVALID", "texture-reference", "REUSE must not require an owned texture file", observed=spec.get("texture_path"), expected=None))
 
     lang = parsed_files.get("lang")
     lang_key = spec.get("lang_key")
@@ -214,7 +217,7 @@ def _vertical_a_violations(root: Path, spec: Mapping[str, Any], resource_roots: 
             violations.append(_profile_violation("VERTICAL_A_RECIPE_RESULT_MISMATCH", paths["recipe"], "recipe result does not match the BlockItem", observed=actual_result, expected=result_id))
         if "result_count" in spec and (not isinstance(recipe.get("result"), Mapping) or recipe["result"].get("count") != spec["result_count"]):
             violations.append(_profile_violation("VERTICAL_A_RECIPE_COUNT_MISMATCH", paths["recipe"], "recipe result count does not match the contract", observed=recipe.get("result") if isinstance(recipe, Mapping) else None, expected=spec["result_count"]))
-    owned_texture = spec.get("texture_path") if strategy != "REUSE" else None
+    owned_texture = spec.get("texture_path") if asset_spec and strategy != "REUSE" else None
     if owned_texture:
         texture_candidate = (root / Path(_relative_path(owned_texture))).resolve(strict=False)
         if not texture_candidate.is_file():

@@ -89,6 +89,7 @@ BLOCK_DEFINITION = _definition(
         "block_id": {"type": "string", "format": "identifier", "required": False},
         "name": {"type": "string", "format": "identifier", "required": False},
         "display_name": {"type": "string", "required": False},
+        "source_path": {"type": "string", "required": False},
         "runtime_spec": {"type": "object", "required": False},
     },
     requirements=(
@@ -99,7 +100,7 @@ BLOCK_DEFINITION = _definition(
         {"key": "build", "kind": "build", "requirement_keys": ("source",)},
         {"key": "runtime", "kind": "minecraft", "requirement_keys": ("block-registration",), "required_parameter": "runtime_spec", "spec": {"$parameter": "runtime_spec"}},
     ),
-    mutation_expectations=({"key": "source", "role": "source"},),
+    mutation_expectations=({"key": "source", "role": "source", "path_parameter": "source_path"},),
 )
 BLOCK_ITEM_DEFINITION = _definition(
     "fabric.block_item",
@@ -108,6 +109,7 @@ BLOCK_ITEM_DEFINITION = _definition(
         "namespace": {"type": "string", "format": "identifier"},
         "item_id": {"type": "string", "format": "identifier", "required": False},
         "display_name": {"type": "string", "required": False},
+        "source_path": {"type": "string", "required": False},
         "artifact_spec": {"type": "object", "required": False},
         "mutation_paths": {"type": "array", "required": False},
     },
@@ -126,7 +128,10 @@ BLOCK_ITEM_DEFINITION = _definition(
             "spec": {"$parameter": "artifact_spec"},
         },
     ),
-    mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
+    mutation_expectations=(
+        {"key": "source", "role": "source", "path_parameter": "source_path"},
+        {"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},
+    ),
 )
 BLOCK_ASSETS_DEFINITION = _definition(
     "fabric.block_assets",
@@ -141,6 +146,7 @@ BLOCK_ASSETS_DEFINITION = _definition(
         "texture_reference": {"type": "string", "required": False},
         "texture_path": {"type": "string", "required": False},
         "resource_paths": {"type": "object"},
+        "mutation_paths": {"type": "array", "required": False},
     },
     prerequisites=(
         {"capability": "fabric.block", "reference": "block_instance_id"},
@@ -166,6 +172,7 @@ BLOCK_ASSETS_DEFINITION = _definition(
             "resource_paths": {"$parameter": "resource_paths"},
         },
     },),
+    mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",

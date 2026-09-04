@@ -45,10 +45,18 @@ class _DeterministicProvider:
             tool_calls=(
                 ToolCall(
                     call_id="edit-java",
-                    tool_name="write_file",
+                    tool_name="create_file",
                     arguments={
-                        "path": "src/main/java/dev/pdpunto/l11/ExampleMod.java",
-                        "content": self.java_source,
+                        "path": "src/main/java/pdagentl11/ServerCoreBlock.java",
+                        "content": self.java_source.replace("ExampleMod", "ServerCoreBlock"),
+                    },
+                ),
+                ToolCall(
+                    call_id="edit-block-item-java",
+                    tool_name="create_file",
+                    arguments={
+                        "path": "src/main/java/pdagentl11/ServerCoreBlockItem.java",
+                        "content": self.java_source.replace("ExampleMod", "ServerCoreBlockItem"),
                     },
                 ),
                 ToolCall(
@@ -63,16 +71,36 @@ class _DeterministicProvider:
                     call_id="create-recipe",
                     tool_name="create_file",
                     arguments={
-                        "path": "src/main/resources/data/pdagentl11/recipe/server_core.json",
+                        "path": "src/main/resources/data/pdagentl11/recipes/server_core.json",
                         "content": json.dumps({
-                            "type": "minecraft:crafting_shaped",
-                            "pattern": ["III", "ICI", "III"],
-                            "key": {
-                                "I": {"item": "minecraft:iron_ingot"},
-                                "C": {"item": "minecraft:crafting_table"},
-                            },
+                            "type": "minecraft:crafting_shapeless",
+                            "ingredients": [{"item": "minecraft:iron_ingot"}],
                             "result": {"id": "pdagentl11:server_core", "count": 1},
                         }),
+                    },
+                ),
+                ToolCall(
+                    call_id="create-blockstate",
+                    tool_name="create_file",
+                    arguments={
+                        "path": "src/main/resources/assets/pdagentl11/blockstates/server_core.json",
+                        "content": json.dumps({"variants": {"": {"model": "pdagentl11:block/server_core"}}}),
+                    },
+                ),
+                ToolCall(
+                    call_id="create-block-model",
+                    tool_name="create_file",
+                    arguments={
+                        "path": "src/main/resources/assets/pdagentl11/models/block/server_core.json",
+                        "content": json.dumps({"parent": "minecraft:block/cube_all", "textures": {"all": "minecraft:block/stone"}}),
+                    },
+                ),
+                ToolCall(
+                    call_id="create-item-model",
+                    tool_name="create_file",
+                    arguments={
+                        "path": "src/main/resources/assets/pdagentl11/models/item/server_core.json",
+                        "content": json.dumps({"parent": "pdagentl11:block/server_core"}),
                     },
                 ),
             ),
@@ -178,16 +206,17 @@ public final class ExampleMod implements ModInitializer {
         persisted = application.runtime.storage.read_run_state(result.run_id)
         contract = persisted.task_contract
         assert contract is not None
-        assert len(contract.requirements) == 6
+        assert len(contract.requirements) == 11
         assert {item.kind for item in contract.validation_requirements} == {"build", "artifact", "minecraft"}
         assert planned
         plan = planned[-1]
         assert tuple(item.definition_id for item in plan.instances) == (
             "fabric.block",
             "fabric.block_item",
+            "fabric.block_assets",
             "fabric.recipe",
         )
-        assert len(plan.dependency_edges) == 2
+        assert len(plan.dependency_edges) == 4
         assert persisted.build_results[-1].success
         assert persisted.artifact_result is not None
         assert persisted.artifact_result.classification == "VALID"

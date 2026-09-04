@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+import re
 from typing import Protocol
 
 from pd_agent.core import (
@@ -101,11 +102,24 @@ class ProductFabricTaskContractResolver:
                 code=code,
             )
         profile = resolution.selected_profile
-        if not self._is_supported_server_core_request(task.request):
-            raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
         target_mod_id = mod_ids[0]
-        lang_path = f"src/main/resources/assets/{target_mod_id}/lang/en_us.json"
-        recipe_path = f"src/main/resources/data/{target_mod_id}/recipe/server_core.json"
+        request = self._parse_vertical_a_request(task.request)
+        if request is None:
+            raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
+        block_id = request["block_id"]
+        display_name = request["display_name"]
+        item_id = request["item_id"]
+        recipe_id = request["recipe_id"]
+        class_name = "".join(part.capitalize() for part in block_id.split("_"))
+        block_source_path = f"src/main/java/{target_mod_id}/{class_name}Block.java"
+        item_source_path = f"src/main/java/{target_mod_id}/{class_name}BlockItem.java"
+        resource_paths = {
+            "blockstate": f"src/main/resources/assets/{target_mod_id}/blockstates/{block_id}.json",
+            "block_model": f"src/main/resources/assets/{target_mod_id}/models/block/{block_id}.json",
+            "item_model": f"src/main/resources/assets/{target_mod_id}/models/item/{item_id}.json",
+            "lang": f"src/main/resources/assets/{target_mod_id}/lang/en_us.json",
+            "recipe": f"src/main/resources/data/{target_mod_id}/recipes/{recipe_id}.json",
+        }
         profile_constraints = fabric_environment_constraints_from_profile(profile)
         environment_constraints = replace(
             profile_constraints,
@@ -115,18 +129,14 @@ class ProductFabricTaskContractResolver:
             definition_id="fabric.block",
             parameters={
                 "namespace": target_mod_id,
-                "name": "server_core",
+                "block_id": block_id,
+                "name": block_id,
+                "display_name": display_name,
+                "source_path": block_source_path,
                 "runtime_spec": {
                     "target_mod_id": target_mod_id,
-                    "observations": [{
-                        "observation_id": "server-core-registry",
-                        "observation_type": "REGISTRY_ENTRY_PRESENT",
-                        "profile": "registry",
-                        "selector": {"kind": "registry", "registry_kind": "block", "identifier": f"{target_mod_id}:server_core"},
-                        "expected": {"present": True},
-                        "requirement_ids": ["$validation_id"],
-                        "phase": "RUNTIME",
-                    }],
+                    "platform_id": profile.platform_id,
+                    "observations": self._runtime_observations(target_mod_id, block_id, item_id),
                 },
             },
         )
@@ -136,17 +146,44 @@ class ProductFabricTaskContractResolver:
             parameters={
                 "block_instance_id": block_instance.identity,
                 "namespace": target_mod_id,
-                "artifact_spec": {"required_paths": [lang_path, recipe_path]},
-                "mutation_paths": [lang_path, recipe_path],
+                "item_id": item_id,
+                "display_name": display_name,
+                "source_path": item_source_path,
+                "artifact_spec": {"required_paths": [resource_paths["lang"], resource_paths["recipe"]]},
+                "mutation_paths": [resource_paths["lang"], resource_paths["recipe"]],
             },
         )
         item_instance = CapabilityInstance(definition_id="fabric.block_item", parameters=item.parameters)
+        assets = CapabilityCandidate(
+            definition_id="fabric.block_assets",
+            parameters={
+                "block_instance_id": block_instance.identity,
+                "block_item_instance_id": item_instance.identity,
+                "namespace": target_mod_id,
+                "block_id": block_id,
+                "item_id": item_id,
+                "display_name": display_name,
+                "texture_strategy": request["texture_strategy"],
+                "texture_reference": "minecraft:block/stone",
+                "resource_paths": resource_paths,
+                "mutation_paths": [resource_paths[key] for key in ("blockstate", "block_model", "item_model", "lang")],
+            },
+        )
         recipe = CapabilityCandidate(
             definition_id="fabric.recipe",
-            parameters={"output_instance_id": item_instance.identity, "ingredients": []},
+            parameters={
+                "output_instance_id": item_instance.identity,
+                "namespace": target_mod_id,
+                "recipe_id": recipe_id,
+                "recipe_type": "minecraft:crafting_shapeless",
+                "ingredients": [{"item": "minecraft:iron_ingot"}],
+                "result_item_id": item_id,
+                "result_count": 1,
+                "resource_path": resource_paths["recipe"],
+            },
         )
         planner = CapabilityPlanner(self.capability_registry)
-        plan = planner.plan((block, item, recipe))
+        plan = planner.plan((block, item, assets, recipe))
         expansion = planner.expand_contract(
             plan,
             FabricContractContext(
@@ -156,8 +193,8 @@ class ProductFabricTaskContractResolver:
                 required_capabilities=("Fabric project", "craftable utility block"),
                 completion_criteria=("source change", "build", "artifact", "minecraft"),
                 knowledge_signals=(FabricKnowledgeSignal(
-                signal_id="product-fabric-server-core",
-                query="How do you add a craftable utility block with a matching block item and recipe/resource wiring in Fabric?",
+                signal_id="product-fabric-vertical-a",
+                query="How do you compose a Fabric block, BlockItem, assets and recipe for the requested project?",
                 category="MAPPING",
                 required=False,
                 ),),
@@ -174,15 +211,69 @@ class ProductFabricTaskContractResolver:
         return expansion.contract
 
     @staticmethod
-    def _is_supported_server_core_request(request: str) -> bool:
+    def _parse_vertical_a_request(request: str) -> dict[str, str] | None:
+        """Extract bounded Vertical A intent without capability-specific names."""
+        if not isinstance(request, str):
+            return None
         normalized = " ".join(request.casefold().split())
-        if "server core" not in normalized:
-            return False
-        english = all(token in normalized for token in ("craftable", "utility", "block"))
-        spanish = all(token in normalized for token in ("bloque", "utilitario", "craftable"))
-        has_item_wiring = "block item" in normalized or "recursos en_us" in normalized
-        has_recipe = "recipe" in normalized or "recet" in normalized
-        return (english or spanish) and has_item_wiring and has_recipe
+        has_block = bool(re.search(r"\bblock\b|\bbloque\b", normalized))
+        has_item = bool(re.search(r"block\s*item|blockitem|item\s+asociad|recursos\s+en_us", normalized))
+        has_recipe = bool(re.search(r"\brecipe\b|\brecet\w*\b|crafting", normalized))
+        has_assets = bool(re.search(r"asset\w*|resource\w*|recurso\w*|blockstate|model", normalized))
+        if not (has_block and has_item and has_recipe and has_assets):
+            return None
+        match = re.search(
+            r"(?:called|named|llamad[oa])\s+[\"“']?([a-z0-9][a-z0-9 _-]{1,62}?)[\"”']?(?=\s+(?:to|for|with|including|incluyendo|,|while|preservando|preserving)|[.,]|$)",
+            request,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        display_name = " ".join(match.group(1).split()).strip(" -_")
+        block_id = re.sub(r"[^a-z0-9]+", "_", display_name.casefold()).strip("_")
+        if not display_name or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", block_id):
+            return None
+        return {
+            "display_name": display_name,
+            "block_id": block_id,
+            "item_id": block_id,
+            "recipe_id": block_id,
+            "texture_strategy": "REUSE",
+        }
+
+    @staticmethod
+    def _runtime_observations(namespace: str, block_id: str, item_id: str) -> list[dict[str, object]]:
+        block = f"{namespace}:{block_id}"
+        item = f"{namespace}:{item_id}"
+        return [
+            {
+                "observation_id": "vertical-a-block-registry",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "profile": "registry",
+                "selector": {"kind": "registry", "registry_kind": "block", "identifier": block},
+                "expected": {"present": True},
+                "requirement_ids": ["$validation_id"],
+                "phase": "RUNTIME",
+            },
+            {
+                "observation_id": "vertical-a-item-registry",
+                "observation_type": "REGISTRY_ENTRY_PRESENT",
+                "profile": "registry",
+                "selector": {"kind": "registry", "registry_kind": "item", "identifier": item},
+                "expected": {"present": True},
+                "requirement_ids": ["$validation_id"],
+                "phase": "RUNTIME",
+            },
+            {
+                "observation_id": "vertical-a-block-item-association",
+                "observation_type": "BLOCK_ITEM_ASSOCIATION",
+                "profile": "block_item_association",
+                "selector": {"kind": "block_item_association", "item_id": item, "block_id": block},
+                "expected": {"associated": True},
+                "requirement_ids": ["$validation_id"],
+                "phase": "RUNTIME",
+            },
+        ]
 
 class ProductExecutionRunner(Protocol):
     """Product execution port used by a later application composition root."""

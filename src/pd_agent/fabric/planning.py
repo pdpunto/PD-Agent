@@ -383,7 +383,13 @@ def expand_plan_to_contract(
                 if not isinstance(key, str) or not key or not isinstance(role, str) or not role:
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation declaration is malformed")
                 paths_parameter = declaration.get("paths_parameter")
-                paths = instance.parameters.get(paths_parameter, ()) if paths_parameter else (declaration.get("path"),)
+                path_parameter = declaration.get("path_parameter")
+                if paths_parameter:
+                    paths = instance.parameters.get(paths_parameter, ())
+                elif path_parameter:
+                    paths = (instance.parameters.get(path_parameter),)
+                else:
+                    paths = (declaration.get("path"),)
                 if paths_parameter and not isinstance(paths, (list, tuple)):
                     return _expansion_failure("INVALID_GENERATED_CONTRACT", "mutation paths must be a sequence")
                 for index, path in enumerate(paths):

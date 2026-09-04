@@ -249,7 +249,7 @@ class FabricNormalOrchestrator:
                 if kind in {"build", "compilation"}:
                     refs += tuple(item.result_ref for item in current_builds if item.result_ref)
                 elif kind in {"artifact", "jar"}:
-                    if "artifact" in requirement.description.casefold() and current_artifact is not None:
+                    if current_artifact is not None:
                         refs += (f"artifacts/{current_artifact.artifact_identity}",)
                     paths = validation.spec.get("required_paths", ())
                     if state.project_root is not None:
