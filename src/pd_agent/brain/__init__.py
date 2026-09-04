@@ -33,6 +33,7 @@ from .resolver import KnowledgeEnvironmentResolver
 from .yarn import YarnKnowledgeSource
 from .fabric_api import FabricApiKnowledgeSource
 from .concepts import CuratedConcept, FabricConceptPatternKnowledgeSource
+from .vertical_a import FabricVerticalAKnowledgeSource
 from .indexes import INDEX_SCHEMA_VERSION, KnowledgeIndexError, KnowledgeIndexMetadata, KnowledgePackIndex
 from .canonical import (
     KnowledgePack,
@@ -92,6 +93,7 @@ __all__ = [
     "FabricApiKnowledgeSource",
     "CuratedConcept",
     "FabricConceptPatternKnowledgeSource",
+    "FabricVerticalAKnowledgeSource",
     "INDEX_SCHEMA_VERSION",
     "KnowledgeIndexError",
     "KnowledgeIndexMetadata",

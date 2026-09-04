@@ -58,6 +58,17 @@ _CAPABILITIES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 _SYMBOL = re.compile(r"\b(?:[A-Z][A-Za-z0-9_]*\.)+[A-Z][A-Za-z0-9_]*\b")
 
+_VERTICAL_A_DOMAINS: tuple[tuple[str, KnowledgeType, tuple[str, ...]], ...] = (
+    ("vertical_a_composition", KnowledgeType.CAPABILITY, ("composition", "composed", "capability")),
+    ("block_registration", KnowledgeType.API, ("block", "registry", "register")),
+    ("block_item", KnowledgeType.PATTERN, ("block item", "blockitem", "associated item")),
+    ("blockstate_asset", KnowledgeType.PATTERN, ("blockstate", "block state")),
+    ("block_model_asset", KnowledgeType.PATTERN, ("block model", "model")),
+    ("item_model_asset", KnowledgeType.PATTERN, ("item model",)),
+    ("texture_reference", KnowledgeType.PATTERN, ("texture", "asset strategy", "resource")),
+    ("recipe_resource", KnowledgeType.CONCEPT, ("recipe", "crafting")),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PreCodeKnowledgeNeedDeriver:
@@ -82,6 +93,8 @@ class PreCodeKnowledgeNeedDeriver:
         metadata = metadata or {}
         text = " ".join((task_text, *[str(signal) for signal in capability_signals],
                          *[str(value) for value in metadata.values() if isinstance(value, str)])).casefold()
+        if self._is_vertical_a(text):
+            return self._derive_vertical_a(environment)
         capabilities = [capability for capability, aliases in _CAPABILITIES
                         if any(re.search(rf"\b{re.escape(alias)}\b", text) for alias in aliases)]
         needs: list[KnowledgeNeed] = []
@@ -117,3 +130,27 @@ class PreCodeKnowledgeNeedDeriver:
             unique.setdefault(key, need)
         ordered = tuple(unique.values())[: self.max_needs]
         return PreCodeDerivation(ordered, tuple(reasons[:len(ordered)]))
+
+    @staticmethod
+    def _is_vertical_a(text: str) -> bool:
+        return (
+            bool(re.search(r"\bblock\b|\bbloque\b", text))
+            and bool(re.search(r"block item|blockitem|associated item|item asociado", text))
+            and bool(re.search(r"recipe|receta|crafting|craftable", text))
+            and bool(re.search(r"asset|assets|resource|recursos|blockstate|model", text))
+        )
+
+    @staticmethod
+    def _derive_vertical_a(environment: KnowledgeEnvironment) -> PreCodeDerivation:
+        needs = tuple(
+            KnowledgeNeed(
+                id=f"pre-code:vertical-a:{domain}",
+                type=need_type,
+                query=domain,
+                environment=environment,
+                hints=(domain, *hints),
+                version_sensitive=True,
+            )
+            for domain, need_type, hints in _VERTICAL_A_DOMAINS
+        )
+        return PreCodeDerivation(needs, tuple(f"Vertical A knowledge domain: {domain}" for domain, _, _ in _VERTICAL_A_DOMAINS))
