@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from pd_agent.artifacts import ArtifactValidator
-from pd_agent.build import GradleBuildRunner
+from pd_agent.build import BuildFailureNormalizer, GradleBuildRunner, NormalizedBuildFailure
 from pd_agent.context import ContextItem, ContextManager, KnowledgeTraceState
 from pd_agent.brain import KnowledgeService, SemanticRepairKnowledgeNeedDeriver
 from pd_agent.core import (
@@ -128,6 +128,7 @@ class AgentRuntime:
         validation_contract: Any | None = None,
         repair_knowledge_source: Any | None = None,
         repair_knowledge_environment: Any | None = None,
+        build_failure_normalizer: BuildFailureNormalizer | None = None,
     ) -> None:
         self.provider = provider
         self.tool_executor = tool_executor or ToolExecutor(tools=tuple(filesystem_tools) or create_filesystem_tools())
@@ -141,6 +142,7 @@ class AgentRuntime:
         self.validation_contract = validation_contract
         self.repair_knowledge_source = repair_knowledge_source
         self.repair_knowledge_environment = repair_knowledge_environment
+        self.build_failure_normalizer = build_failure_normalizer or BuildFailureNormalizer()
         self._repair_knowledge_deriver = SemanticRepairKnowledgeNeedDeriver()
         self._repair_context: list[Any] = []
         self._repair_cycle_keys: set[str] = set()
@@ -423,6 +425,7 @@ class AgentRuntime:
                     self._check_limits(run_state, limits)
                     build_result = self.build_runner.run(project_snapshot, run_state, limits)
                     self._record_build_identity(run_state, project_snapshot, build_result)
+                    normalized_failure = self._normalize_productive_build_failure(run_state, build_result)
                     self._observe_progress(run_state, build_result=build_result)
                     self._record_action_telemetry(
                         run_state,
@@ -440,7 +443,20 @@ class AgentRuntime:
                             break
                         self._reset_action_pressure(run_state)
                         run_state.transition_to(RunStatus.DIAGNOSING)
-                        run_state.last_error = build_result.stderr_log or build_result.stdout_log or f"build failed with exit_code {build_result.exit_code}"
+                        run_state.last_error = (
+                            normalized_failure.concise_diagnostic
+                            if normalized_failure is not None
+                            else build_result.stderr_log or build_result.stdout_log or f"build failed with exit_code {build_result.exit_code}"
+                        )
+                        if normalized_failure is not None:
+                            history.append(AgentMessage(
+                                role="user",
+                                content=json.dumps(
+                                    {"normalized_build_failure": normalized_failure.to_dict()},
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
+                            ))
                     self._persist_state(run_state)
                     continue
 
@@ -916,6 +932,56 @@ class AgentRuntime:
             success=result.success,
         )
         run_state.build_identities = (*run_state.build_identities, identity)
+
+    def _normalize_productive_build_failure(
+        self, run_state: RunState, build_result: BuildResult
+    ) -> NormalizedBuildFailure | None:
+        if build_result.success:
+            return None
+        build_attempt_id = f"build-{run_state.run_id}-{build_result.attempt}"
+        normalized = self.build_failure_normalizer.normalize(
+            build_result,
+            source_revision=(run_state.source_revision.revision if run_state.source_revision else None),
+            build_attempt_id=build_attempt_id,
+            evidence_refs=(f"builds/{build_result.attempt}/stderr.log",),
+            requirement_ids=self._build_requirement_ids(run_state),
+        )
+        if normalized is None:
+            return None
+        failure = normalized.to_failure_fact(failure_id=f"build-failure-{build_result.attempt}")
+        self._record_failure_fact(run_state, failure)
+        self._emit(
+            run_state.run_id,
+            RunEventType.FAILURE_ACTIVE,
+            {
+                "failure_id": failure.failure_id,
+                "failure": failure.to_dict(),
+                "normalized": normalized.to_dict(),
+                "raw_logs_available": True,
+            },
+        )
+        return normalized
+
+    def _build_requirement_ids(self, run_state: RunState) -> tuple[str, ...]:
+        contract = run_state.task_contract
+        if contract is None:
+            return ()
+        ids = (
+            requirement_id
+            for validation in contract.validation_requirements
+            if validation.required and validation.kind in {"build", "compilation"}
+            for requirement_id in validation.requirement_ids
+            if requirement_id.startswith("requirement:")
+        )
+        return tuple(dict.fromkeys(ids))
+
+    def _record_failure_fact(self, run_state: RunState, failure: Any) -> None:
+        ledger = run_state.progress_ledger
+        if ledger is None:
+            return
+        if any(item.failure_id == failure.failure_id and item.status == failure.status for item in ledger.failures):
+            return
+        run_state.progress_ledger = replace(ledger, failures=(*ledger.failures, failure))
 
     def _record_artifact_identity(
         self,
