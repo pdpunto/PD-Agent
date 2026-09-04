@@ -153,7 +153,19 @@ BLOCK_ASSETS_DEFINITION = _definition(
         {"key": "lang", "description": "the language resource is present", "required": False},
         {"key": "texture-reference", "description": "the texture strategy is declared"},
     ),
-    validations=({"key": "artifact", "kind": "artifact", "requirement_keys": ("blockstate", "block-model", "item-model", "lang", "texture-reference")},),
+    validations=({
+        "key": "artifact", "kind": "artifact", "requirement_keys": ("blockstate", "block-model", "item-model", "lang", "texture-reference"),
+        "spec": {
+            "profile": "vertical_a_resources_v1",
+            "namespace": {"$parameter": "namespace"},
+            "block_id": {"$parameter": "block_id"},
+            "item_id": {"$parameter": "item_id"},
+            "texture_strategy": {"$parameter": "texture_strategy"},
+            "texture_reference": {"$parameter": "texture_reference"},
+            "texture_path": {"$parameter": "texture_path"},
+            "resource_paths": {"$parameter": "resource_paths"},
+        },
+    },),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",
@@ -169,6 +181,23 @@ RECIPE_DEFINITION = _definition(
     },
     prerequisites=({"capability": "fabric.block_item", "reference": "output_instance_id"},),
     requirements=({"key": "recipe-resource", "description": "the recipe resource is declared"},),
+    validations=(
+        {
+            "key": "artifact", "kind": "artifact", "requirement_keys": ("recipe-resource",),
+            "required_parameter": "resource_path",
+            "spec": {
+                "profile": "vertical_a_resources_v1",
+                "namespace": {"$parameter": "namespace"},
+                "block_id": {"$parameter": "result_item_id"},
+                "item_id": {"$parameter": "result_item_id"},
+                "recipe_id": {"$parameter": "recipe_id"},
+                "recipe_type": {"$parameter": "recipe_type"},
+                "ingredients": {"$parameter": "ingredients"},
+                "result_count": {"$parameter": "result_count"},
+                "resource_paths": {"recipe": {"$parameter": "resource_path"}},
+            },
+        },
+    ),
 )
 
 FOUNDATION_DEFINITIONS = (BLOCK_DEFINITION, BLOCK_ITEM_DEFINITION, BLOCK_ASSETS_DEFINITION, RECIPE_DEFINITION)

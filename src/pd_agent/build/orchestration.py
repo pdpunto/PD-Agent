@@ -122,7 +122,12 @@ class FabricBuildOrchestrator:
         artifact_result = None
         artifact_identity = None
         if artifact_required:
-            artifact_result = self.artifact_validator.validate(project_snapshot, result, run_id=run_state.run_id)
+            artifact_result = self.artifact_validator.validate(
+                project_snapshot,
+                result,
+                run_id=run_state.run_id,
+                required_entries=self._required_artifact_entries(contract),
+            )
             run_state.artifact_result = artifact_result
             if artifact_result.classification == ArtifactClassification.VALID.value:
                 artifact_identity = artifact_identity_from_result(artifact_result, producing_build_attempt_id=build_attempt_id, source_revision=source, contract_identity=contract_identity)
@@ -134,6 +139,22 @@ class FabricBuildOrchestrator:
 
     def _artifact_required(self, contract: FabricTaskContract) -> bool:
         return any(item.required and item.kind in {"artifact", "jar"} for item in contract.validation_requirements)
+
+    def _required_artifact_entries(self, contract: FabricTaskContract) -> tuple[str, ...] | None:
+        entries: list[str] = []
+        for validation in contract.validation_requirements:
+            if validation.kind.casefold() not in {"artifact", "jar"}:
+                continue
+            raw_entries = validation.spec.get("required_entries")
+            if isinstance(raw_entries, (list, tuple)):
+                entries.extend(str(entry) for entry in raw_entries)
+            if validation.spec.get("profile") == "vertical_a_resources_v1":
+                paths = validation.spec.get("resource_paths", {})
+                if isinstance(paths, Mapping):
+                    for path in paths.values():
+                        if isinstance(path, str) and path:
+                            entries.append(path.removeprefix("src/main/resources/"))
+        return tuple(entries) if entries else None
 
     def _current_build(self, run_state: RunState, source: str, contract_identity: tuple[str, str, str], toolchain: str | None) -> BuildAttemptIdentity | None:
         for identity in reversed(run_state.build_identities):

@@ -41,6 +41,8 @@ class _Candidate:
     classification: ArtifactClassification
     issues: tuple[str, ...]
     jar_entries_checked: int = 0
+    required_entries_checked: tuple[str, ...] = ()
+    missing_required_entries: tuple[str, ...] = ()
 
 
 class ArtifactValidator:
@@ -60,6 +62,7 @@ class ArtifactValidator:
         build_result: BuildResult,
         *,
         run_id: str | None = None,
+        required_entries: tuple[str, ...] | list[str] | None = None,
     ) -> ArtifactResult:
         if build_result is None:  # pragma: no cover - defensive guard
             raise ArtifactValidationError("build_result is required")
@@ -76,6 +79,26 @@ class ArtifactValidator:
                     "candidate_count": 0,
                     "filtered_candidate_count": 0,
                     "target_subproject": self._path_text(project_snapshot.target_subproject),
+                },
+            )
+            self._emit(run_id, result, project_snapshot.project_root)
+            return result
+
+        normalized_entries, entry_error = self._normalize_required_entries(required_entries)
+        if entry_error is not None:
+            result = ArtifactResult(
+                path=None,
+                size=0,
+                timestamp=build_result.started_at,
+                classification=ArtifactClassification.INVALID_METADATA.value,
+                metadata={
+                    "valid": False,
+                    "issues": [entry_error],
+                    "candidate_count": 0,
+                    "filtered_candidate_count": 0,
+                    "required_entries": list(normalized_entries),
+                    "required_entries_checked": list(normalized_entries),
+                    "missing_required_entries": [],
                 },
             )
             self._emit(run_id, result, project_snapshot.project_root)
@@ -109,6 +132,7 @@ class ArtifactValidator:
                 build_result=build_result,
                 target_root=target_root,
                 candidate_count=len(candidate_paths),
+                required_entries=normalized_entries,
             )
             for path in candidate_paths
         )
@@ -158,6 +182,9 @@ class ArtifactValidator:
             "expected_mod_id": candidate.expected_mod_id,
             "expected_version": candidate.expected_version,
             "root_entries": list(candidate.root_entries),
+            "required_entries": list(candidate.required_entries_checked),
+            "required_entries_checked": list(candidate.required_entries_checked),
+            "missing_required_entries": list(candidate.missing_required_entries),
         }
         return ArtifactResult(
             path=candidate.path,
@@ -194,6 +221,7 @@ class ArtifactValidator:
         build_result: BuildResult,
         target_root: Path,
         candidate_count: int,
+        required_entries: tuple[str, ...],
     ) -> _Candidate:
         stat = path.stat()
         timestamp = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
@@ -212,6 +240,7 @@ class ArtifactValidator:
                 expected_version=expected["version"],
                 classification=ArtifactClassification.EMPTY,
                 issues=("empty jar",),
+                required_entries_checked=required_entries,
             )
 
         if not zipfile.is_zipfile(path):
@@ -226,6 +255,7 @@ class ArtifactValidator:
                 expected_version=expected["version"],
                 classification=ArtifactClassification.CORRUPT,
                 issues=("not a valid zip",),
+                required_entries_checked=required_entries,
             )
 
         try:
@@ -245,6 +275,7 @@ class ArtifactValidator:
                         classification=ArtifactClassification.INVALID_METADATA,
                         issues=("missing root fabric.mod.json",),
                         jar_entries_checked=len(entries),
+                        required_entries_checked=required_entries,
                     )
                 raw_manifest = jar.read("fabric.mod.json").decode("utf-8")
         except (zipfile.BadZipFile, OSError, KeyError, UnicodeDecodeError):
@@ -259,6 +290,7 @@ class ArtifactValidator:
                 expected_version=expected["version"],
                 classification=ArtifactClassification.CORRUPT,
                 issues=("corrupt jar",),
+                required_entries_checked=required_entries,
             )
 
         try:
@@ -276,6 +308,7 @@ class ArtifactValidator:
                 classification=ArtifactClassification.INVALID_METADATA,
                 issues=("invalid fabric.mod.json JSON",),
                 jar_entries_checked=len(entries),
+                required_entries_checked=required_entries,
             )
 
         if not isinstance(manifest, Mapping):
@@ -291,6 +324,7 @@ class ArtifactValidator:
                 classification=ArtifactClassification.INVALID_METADATA,
                 issues=("fabric.mod.json is not an object",),
                 jar_entries_checked=len(entries),
+                required_entries_checked=required_entries,
             )
 
         mod_id = self._coerce_str(manifest.get("id"))
@@ -308,6 +342,9 @@ class ArtifactValidator:
         stale = self._is_stale(timestamp, build_result.started_at)
         if stale:
             issues.append("stale artifact")
+        missing_required_entries = tuple(entry for entry in required_entries if entry not in entries)
+        if missing_required_entries:
+            issues.append("missing required entries: " + ", ".join(missing_required_entries))
 
         if issues and any(
             issue in {"missing id", "missing version", "mod id mismatch", "version mismatch"}
@@ -316,6 +353,8 @@ class ArtifactValidator:
             classification = ArtifactClassification.INVALID_METADATA
         elif stale:
             classification = ArtifactClassification.STALE
+        elif missing_required_entries:
+            classification = ArtifactClassification.INVALID_METADATA
         else:
             classification = ArtifactClassification.VALID
 
@@ -331,7 +370,35 @@ class ArtifactValidator:
             classification=classification,
             issues=tuple(issues),
             jar_entries_checked=len(entries),
+            required_entries_checked=required_entries,
+            missing_required_entries=missing_required_entries,
         )
+
+    def _normalize_required_entries(
+        self, required_entries: tuple[str, ...] | list[str] | None
+    ) -> tuple[tuple[str, ...], str | None]:
+        if required_entries is None:
+            return (), None
+        if not isinstance(required_entries, (list, tuple)):
+            return (), "required_entries must be a sequence"
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw in required_entries:
+            if not isinstance(raw, str):
+                return tuple(normalized), "required entry must be a string"
+            entry = raw.replace("\\", "/").strip()
+            if not entry or entry.startswith("/") or entry.startswith("\\"):
+                return tuple(normalized), f"invalid required JAR entry: {raw!r}"
+            parts = entry.split("/")
+            if any(part in {"", ".", ".."} for part in parts):
+                return tuple(normalized), f"invalid required JAR entry: {raw!r}"
+            if ":" in parts[0] or entry.startswith("//"):
+                return tuple(normalized), f"invalid required JAR entry: {raw!r}"
+            if entry in seen:
+                return tuple(normalized), f"duplicate required JAR entry: {entry}"
+            seen.add(entry)
+            normalized.append(entry)
+        return tuple(normalized), None
 
     def _discover_candidates(self, libs_dir: Path) -> tuple[Path, ...]:
         if not libs_dir.exists():
@@ -407,6 +474,8 @@ class ArtifactValidator:
                         "version": result.metadata.get("version"),
                         "candidate_count": result.metadata.get("candidate_count"),
                         "jar_entries_checked": result.metadata.get("jar_entries_checked"),
+                        "required_entries_checked": result.metadata.get("required_entries_checked", []),
+                        "missing_required_entries": result.metadata.get("missing_required_entries", []),
                         "issues": result.metadata.get("issues", []),
                     },
                 },
