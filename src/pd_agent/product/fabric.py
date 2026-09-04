@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import json
 from pathlib import Path
 import re
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
 from pd_agent.core import (
     FabricKnowledgeSignal,
@@ -20,7 +21,14 @@ from pd_agent.fabric import (
     load_platform_registry,
     platform_observation_from_inspection,
 )
-from pd_agent.fabric.capabilities import CapabilityCandidate, CapabilityInstance
+from pd_agent.fabric.capabilities import (
+    CapabilityCandidate,
+    CapabilityInstance,
+    CapabilityModelError,
+    CapabilityRecipeIngredient,
+    DeclarativeCapabilityReference,
+    VanillaRecipeIngredient,
+)
 from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import foundation_capability_registry
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
@@ -103,6 +111,12 @@ class ProductFabricTaskContractResolver:
             )
         profile = resolution.selected_profile
         target_mod_id = mod_ids[0]
+        vertical_b = self._parse_vertical_b_request(task.request)
+        if vertical_b is not None:
+            try:
+                return self._resolve_vertical_b(project, task, workspace, profile, target_mod_id, vertical_b)
+            except CapabilityModelError as exc:
+                raise ProductFabricTaskContractError(str(exc), code="INVALID_VERTICAL_B_REQUEST") from exc
         request = self._parse_vertical_a_request(task.request)
         if request is None:
             raise ProductFabricTaskContractError("product Fabric task is not supported by this resolver")
@@ -210,6 +224,245 @@ class ProductFabricTaskContractResolver:
             )
         return expansion.contract
 
+    def _resolve_vertical_b(
+        self,
+        project: ProjectRecord,
+        task: TaskRecord,
+        workspace: ProjectSnapshot,
+        profile: Any,
+        target_mod_id: str,
+        request: Mapping[str, Any],
+    ) -> FabricTaskContract:
+        """Resolve one bounded declarative item/recipe composition."""
+        items = tuple(request["items"])
+        recipes = tuple(request.get("recipes", ()))
+        item_keys: set[str] = set()
+        productive_item_ids: set[str] = set()
+        recipe_ids: set[str] = set()
+        item_ids_by_key: dict[str, str] = {}
+        candidates: list[CapabilityCandidate] = []
+
+        for raw in items:
+            key = raw["declaration_key"]
+            item_id = raw["item_id"]
+            if key in item_keys or item_id in productive_item_ids:
+                raise ProductFabricTaskContractError(
+                    "duplicate standalone item declaration or productive ID",
+                    code="DUPLICATE_ITEM_ID",
+                )
+            item_keys.add(key)
+            productive_item_ids.add(item_id)
+            item_ids_by_key[key] = item_id
+            item_path = f"src/main/java/{target_mod_id}/{_java_class_name(item_id)}Item.java"
+            asset_paths = {
+                "item_model": f"src/main/resources/assets/{target_mod_id}/models/item/{item_id}.json",
+                "lang": f"src/main/resources/assets/{target_mod_id}/lang/en_us.json",
+            }
+            item_parameters: dict[str, Any] = {
+                "namespace": target_mod_id,
+                "item_id": item_id,
+                "display_name": raw.get("display_name", item_id.replace("_", " ").title()),
+                "settings": dict(raw.get("settings", {})),
+                "source_path": item_path,
+            }
+            candidates.append(CapabilityCandidate(
+                definition_id="fabric.item",
+                declaration_key=key,
+                parameters=item_parameters,
+            ))
+            assets = raw.get("assets", raw.get("item_assets"))
+            if assets is not None:
+                if not isinstance(assets, Mapping):
+                    raise ProductFabricTaskContractError("item assets must be an object", code="INVALID_ITEM_ASSETS")
+                asset_key = assets.get("declaration_key", f"{key}-assets")
+                if not isinstance(asset_key, str) or asset_key in item_keys:
+                    raise ProductFabricTaskContractError("duplicate item assets declaration", code="DUPLICATE_DECLARATION_KEY")
+                item_keys.add(asset_key)
+                resource_paths = dict(assets.get("resource_paths", asset_paths))
+                mutation_paths = list(dict.fromkeys(resource_paths.values()))
+                asset_parameters = {
+                    "namespace": target_mod_id,
+                    "item_id": item_id,
+                    "texture_strategy": assets.get("texture_strategy", "REUSE"),
+                    "texture_reference": assets.get("texture_reference", "minecraft:item/iron_ingot"),
+                    "resource_paths": resource_paths,
+                    "mutation_paths": mutation_paths,
+                }
+                candidates.append(CapabilityCandidate(
+                    definition_id="fabric.item_assets",
+                    declaration_key=asset_key,
+                    parameters=asset_parameters,
+                    references=(DeclarativeCapabilityReference(
+                        capability_id="fabric.item", declaration_key=key, role="item"
+                    ),),
+                ))
+
+        for raw in recipes:
+            recipe_key = raw["declaration_key"]
+            recipe_id = raw["recipe_id"]
+            if recipe_key in item_keys or recipe_id in recipe_ids:
+                raise ProductFabricTaskContractError("duplicate recipe declaration or resource ID", code="DUPLICATE_RECIPE_ID")
+            item_keys.add(recipe_key)
+            recipe_ids.add(recipe_id)
+            output_key = raw.get("output_declaration_key", raw.get("output"))
+            if not isinstance(output_key, str):
+                raise ProductFabricTaskContractError("recipe output declaration is required", code="MISSING_OUTPUT_REFERENCE")
+            references = [DeclarativeCapabilityReference(
+                capability_id="fabric.item", declaration_key=output_key, role="output"
+            )]
+            ingredients: list[dict[str, Any]] = []
+            for ingredient in raw.get("ingredients", ()):
+                if not isinstance(ingredient, Mapping):
+                    raise ProductFabricTaskContractError("recipe ingredient must be an object", code="INVALID_INGREDIENT")
+                kind = ingredient.get("kind")
+                if kind == "capability":
+                    ingredient_key = ingredient.get("declaration_key")
+                    if not isinstance(ingredient_key, str):
+                        raise ProductFabricTaskContractError("ingredient declaration is required", code="MISSING_INGREDIENT_REFERENCE")
+                    references.append(DeclarativeCapabilityReference(
+                        capability_id=str(ingredient.get("capability_id", "fabric.item")),
+                        declaration_key=ingredient_key,
+                        role="ingredient",
+                    ))
+                    ingredients.append(CapabilityRecipeIngredient(
+                        capability_id=str(ingredient.get("capability_id", "fabric.item")),
+                        declaration_key=ingredient_key,
+                        quantity=ingredient.get("quantity", 1),
+                    ).to_dict())
+                else:
+                    item_id = ingredient.get("item_id", ingredient.get("item"))
+                    ingredients.append(VanillaRecipeIngredient(
+                        item_id=item_id,
+                        quantity=ingredient.get("quantity", 1),
+                    ).to_dict())
+            if not ingredients:
+                raise ProductFabricTaskContractError("recipe ingredients are required", code="INVALID_INGREDIENT")
+            recipe_path = f"src/main/resources/data/{target_mod_id}/recipes/{recipe_id}.json"
+            candidates.append(CapabilityCandidate(
+                definition_id="fabric.recipe",
+                declaration_key=recipe_key,
+                parameters={
+                    "namespace": target_mod_id,
+                    "recipe_id": recipe_id,
+                    "recipe_type": raw.get("recipe_type", "minecraft:crafting_shapeless"),
+                    "ingredients": ingredients,
+                    "result_item_id": raw.get("result_item_id", item_ids_by_key.get(output_key, output_key)),
+                    "result_count": raw.get("result_count", 1),
+                    "resource_path": recipe_path,
+                },
+                references=tuple(references),
+            ))
+
+        planner = CapabilityPlanner(self.capability_registry)
+        plan = planner.plan(candidates)
+        if not plan.success:
+            failure = plan.failure
+            raise ProductFabricTaskContractError(
+                f"{failure.code if failure else 'INVALID_PLAN'}: {failure.message if failure else 'capability planning failed'}",
+                code=failure.code if failure else "INVALID_PLAN",
+            )
+        constraints = fabric_environment_constraints_from_profile(profile)
+        constraints = replace(constraints, extra={**constraints.extra, "project_root": str(workspace.project_root)})
+        canonical_goal = json.dumps(
+            {
+                "items": sorted(items, key=lambda item: item["declaration_key"]),
+                "recipes": sorted(recipes, key=lambda item: item["declaration_key"]),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        expansion = planner.expand_contract(
+            plan,
+            FabricContractContext(
+                task_id=task.task_id,
+                revision="product-2",
+                goal=canonical_goal,
+                required_capabilities=("Fabric project", "standalone items and recipes"),
+                completion_criteria=("source change", "build", "artifact"),
+                knowledge_signals=(),
+                environment_constraints=constraints,
+            ),
+        )
+        if not expansion.success or expansion.contract is None:
+            failure = expansion.failure
+            raise ProductFabricTaskContractError(
+                f"{failure.code if failure else 'INVALID_GENERATED_CONTRACT'}: {failure.message if failure else 'contract expansion failed'}",
+                code=failure.code if failure else "INVALID_GENERATED_CONTRACT",
+            )
+        return self._add_resolved_reference_provenance(expansion.contract, plan, expansion)
+
+    @staticmethod
+    def _add_resolved_reference_provenance(
+        contract: FabricTaskContract,
+        plan: Any,
+        expansion: Any,
+    ) -> FabricTaskContract:
+        """Expose planner identities in declarative validation specs."""
+        by_instance = {item.identity: item for item in plan.instances}
+        resolved = [item.to_dict() for item in plan.resolved_references]
+        validations = []
+        for validation in contract.validation_requirements:
+            instance_id = next(
+                (identity for identity, ids in expansion.capability_validation_requirement_ids if validation.validation_requirement_id in ids),
+                None,
+            )
+            spec = dict(validation.spec)
+            if instance_id is not None and by_instance[instance_id].definition_id == "fabric.recipe":
+                recipe = by_instance[instance_id]
+                item_parameters = {
+                    (item.parameters.get("namespace"), item.parameters.get("item_id")): item.identity
+                    for item in by_instance.values()
+                    if item.definition_id == "fabric.item"
+                }
+                output = item_parameters.get((recipe.parameters.get("namespace"), recipe.parameters.get("result_item_id")))
+                ingredient_keys = {
+                    item.get("declaration_key")
+                    for item in recipe.parameters.get("ingredients", ())
+                    if isinstance(item, Mapping) and item.get("kind") == "capability"
+                }
+                relevant = [item for item in resolved if item["declaration_key"] in ingredient_keys]
+                ingredients = [item["instance_identity"] for item in relevant if item["role"] == "ingredient"]
+                output_ref = next((item for item in resolved if item["instance_identity"] == output and item["role"] == "output"), None)
+                recipe_refs = ([output_ref] if output_ref is not None else []) + relevant
+                spec["output_instance_id"] = output
+                spec["ingredient_instance_ids"] = ingredients
+                spec["resolved_references"] = recipe_refs
+            validations.append(replace(validation, spec=spec))
+        return replace(contract, fingerprint=None, validation_requirements=tuple(validations))
+
+    @staticmethod
+    def _parse_vertical_b_request(request: str) -> dict[str, Any] | None:
+        """Parse only the bounded JSON request shape owned by Vertical B."""
+        if not isinstance(request, str):
+            return None
+        try:
+            value = json.loads(request)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if not isinstance(value, Mapping) or "items" not in value:
+            return None
+        items = value.get("items")
+        recipes = value.get("recipes", ())
+        if isinstance(items, Mapping):
+            items = (items,)
+        if isinstance(recipes, Mapping):
+            recipes = (recipes,)
+        if not isinstance(items, (list, tuple)) or not items or not isinstance(recipes, (list, tuple)):
+            raise ProductFabricTaskContractError("Vertical B items/recipes must be sequences", code="INVALID_VERTICAL_B_REQUEST")
+        normalized_items = []
+        for item in items:
+            if not isinstance(item, Mapping) or not isinstance(item.get("declaration_key"), str) or not isinstance(item.get("item_id"), str):
+                raise ProductFabricTaskContractError("Vertical B item declaration is invalid", code="INVALID_VERTICAL_B_REQUEST")
+            normalized_items.append(dict(item))
+        normalized_recipes = []
+        for recipe in recipes:
+            if not isinstance(recipe, Mapping) or not isinstance(recipe.get("declaration_key"), str) or not isinstance(recipe.get("recipe_id"), str):
+                raise ProductFabricTaskContractError("Vertical B recipe declaration is invalid", code="INVALID_VERTICAL_B_REQUEST")
+            normalized_recipes.append(dict(recipe))
+        return {"items": tuple(normalized_items), "recipes": tuple(normalized_recipes)}
+
+
     @staticmethod
     def _parse_vertical_a_request(request: str) -> dict[str, str] | None:
         """Extract bounded Vertical A intent without capability-specific names."""
@@ -274,6 +527,10 @@ class ProductFabricTaskContractResolver:
                 "phase": "RUNTIME",
             },
         ]
+
+def _java_class_name(identifier: str) -> str:
+    return "".join(part.capitalize() for part in identifier.split("_"))
+
 
 class ProductExecutionRunner(Protocol):
     """Product execution port used by a later application composition root."""

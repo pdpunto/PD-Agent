@@ -185,6 +185,8 @@ ITEM_DEFINITION = _definition(
         "resource_paths": {"type": "object", "required": False},
     },
     requirements=({"key": "item-source", "description": "the standalone Item source declaration is present"},),
+    validations=({"key": "build", "kind": "build", "requirement_keys": ("item-source",), "required_parameter": "source_path"},),
+    mutation_expectations=({"key": "source", "role": "source", "path_parameter": "source_path"},),
 )
 ITEM_ASSETS_DEFINITION = _definition(
     "fabric.item_assets",
@@ -196,6 +198,7 @@ ITEM_ASSETS_DEFINITION = _definition(
         "texture_reference": {"type": "string", "required": False},
         "texture_path": {"type": "string", "required": False},
         "resource_paths": {"type": "object"},
+        "mutation_paths": {"type": "array", "required": False},
     },
     prerequisites=({"capability": "fabric.item", "reference": "item_instance_id", "required_parameter": "item_instance_id"},),
     requirements=(
@@ -203,6 +206,19 @@ ITEM_ASSETS_DEFINITION = _definition(
         {"key": "lang", "description": "the item language resource is present"},
         {"key": "texture", "description": "the item texture strategy is declared"},
     ),
+    validations=({
+        "key": "artifact", "kind": "artifact", "requirement_keys": ("item-model", "lang", "texture"),
+        "spec": {
+            "profile": "vertical_b_resources_v1",
+            "namespace": {"$parameter": "namespace"},
+            "item_id": {"$parameter": "item_id"},
+            "texture_strategy": {"$parameter": "texture_strategy"},
+            "texture_reference": {"$parameter": "texture_reference"},
+            "texture_path": {"$parameter": "texture_path"},
+            "resource_paths": {"$parameter": "resource_paths"},
+        },
+    },),
+    mutation_expectations=({"key": "resource", "role": "resource", "paths_parameter": "mutation_paths"},),
 )
 RECIPE_DEFINITION = _definition(
     "fabric.recipe",

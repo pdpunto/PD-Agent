@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -33,6 +34,48 @@ REQUEST = (
     "block item, and add its English display-name resource and crafting recipe while preserving "
     "the existing mod id and entrypoints."
 )
+
+
+def _vertical_b_task(project: ProjectRecord, payload: dict[str, object]) -> TaskRecord:
+    return TaskRecord(
+        task_id=str(uuid4()),
+        project_id=project.project_id,
+        request=json.dumps(payload, sort_keys=True),
+    )
+
+
+def _vertical_b_payload(*, two_items: bool = False, vanilla: bool = False) -> dict[str, object]:
+    items: list[dict[str, object]] = [
+        {
+            "declaration_key": "item-a",
+            "item_id": "ruby_shard",
+            "display_name": "Ruby Shard",
+            "settings": {"max_count": 16},
+            "assets": {"texture_strategy": "REUSE"},
+        },
+    ]
+    if two_items:
+        items.append({
+            "declaration_key": "item-b",
+            "item_id": "ruby_core",
+            "display_name": "Ruby Core",
+            "assets": {"texture_strategy": "DERIVE"},
+        })
+    ingredient: dict[str, object]
+    if vanilla:
+        ingredient = {"kind": "vanilla", "item_id": "minecraft:iron_ingot", "quantity": 2}
+    else:
+        ingredient = {"kind": "capability", "capability_id": "fabric.item", "declaration_key": "item-a"}
+    return {
+        "items": items,
+        "recipes": [{
+            "declaration_key": "recipe-core",
+            "recipe_id": "ruby_core",
+            "output": "item-b" if two_items else "item-a",
+            "ingredients": [ingredient],
+            "result_count": 1,
+        }],
+    }
 
 
 def _snapshot(root: Path) -> ProjectSnapshot:
@@ -143,6 +186,69 @@ def test_resolver_rejects_partial_server_core_wording(tmp_path: Path) -> None:
 
     with pytest.raises(ProductFabricTaskContractError, match="not supported"):
         ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+
+def test_b3_resolves_standalone_item_assets_and_vanilla_recipe(tmp_path: Path) -> None:
+    project, _task, snapshot = _records(tmp_path)
+    task = _vertical_b_task(project, _vertical_b_payload(vanilla=True))
+
+    contract = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+    assert {item.role for item in contract.mutation_expectations} == {"source", "resource"}
+    assert any("ruby_shard" in str(item.spec) for item in contract.validation_requirements)
+    recipe = next(item for item in contract.validation_requirements if item.kind == "artifact" and "recipe" in str(item.spec))
+    assert recipe.spec["ingredients"][0]["kind"] == "vanilla"
+    assert recipe.spec["ingredients"][0]["item_id"] == "minecraft:iron_ingot"
+    assert all(item.requirement_id.startswith("requirement:") for item in contract.requirements)
+
+
+def test_b3_resolves_two_items_and_cross_item_recipe_with_authoritative_identities(tmp_path: Path) -> None:
+    project, _task, snapshot = _records(tmp_path)
+    task = _vertical_b_task(project, _vertical_b_payload(two_items=True))
+
+    contract = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+
+    item_requirements = [item for item in contract.requirements if "standalone Item" in item.description]
+    assert len(item_requirements) == 2
+    recipe = next(item for item in contract.validation_requirements if item.kind == "artifact" and "ingredient_instance_ids" in item.spec)
+    assert isinstance(recipe.spec["output_instance_id"], str)
+    assert len(recipe.spec["ingredient_instance_ids"]) == 1
+    assert recipe.spec["output_instance_id"] != recipe.spec["ingredient_instance_ids"][0]
+    assert {item["role"] for item in recipe.spec["resolved_references"]} == {"output", "ingredient", "item"}
+
+
+def test_b3_request_order_is_deterministic(tmp_path: Path) -> None:
+    project, _task, snapshot = _records(tmp_path)
+    payload = _vertical_b_payload(two_items=True)
+    task = _vertical_b_task(project, payload)
+    first = ProductFabricTaskContractResolver().resolve(project, task, snapshot)
+    reversed_payload = {"recipes": list(reversed(payload["recipes"])), "items": list(reversed(payload["items"]))}
+    second = ProductFabricTaskContractResolver().resolve(
+        project,
+        replace(task, request=json.dumps(reversed_payload, sort_keys=True)),
+        snapshot,
+    )
+
+    assert first.fingerprint == second.fingerprint
+
+
+@pytest.mark.parametrize(
+    ("payload", "code"),
+    [
+        ({"items": [{"declaration_key": "same", "item_id": "one"}, {"declaration_key": "other", "item_id": "one"}]}, "DUPLICATE_ITEM_ID"),
+        ({"items": [{"declaration_key": "item-a", "item_id": "one"}], "recipes": [{"declaration_key": "r", "recipe_id": "same", "output": "item-a", "ingredients": [{"item": "minecraft:iron_ingot"}]}, {"declaration_key": "r2", "recipe_id": "same", "output": "item-a", "ingredients": [{"item": "minecraft:iron_ingot"}]}]}, "DUPLICATE_RECIPE_ID"),
+        ({"items": [{"declaration_key": "item-a", "item_id": "one"}], "recipes": [{"declaration_key": "r", "recipe_id": "r", "ingredients": [{"item": "minecraft:iron_ingot"}]}]}, "MISSING_OUTPUT_REFERENCE"),
+        ({"items": [{"declaration_key": "item-a", "item_id": "one"}], "recipes": [{"declaration_key": "r", "recipe_id": "r", "output": "missing", "ingredients": [{"item": "minecraft:iron_ingot"}]}]}, "MISSING_DECLARATION_KEY"),
+        ({"items": [{"declaration_key": "item-a", "item_id": "one"}], "recipes": [{"declaration_key": "r", "recipe_id": "r", "output": "item-a", "ingredients": [{"kind": "capability", "declaration_key": "missing"}]}]}, "MISSING_DECLARATION_KEY"),
+    ],
+)
+def test_b3_invalid_requests_fail_before_any_product_execution(tmp_path: Path, payload: dict[str, object], code: str) -> None:
+    project, _task, snapshot = _records(tmp_path)
+
+    with pytest.raises(ProductFabricTaskContractError) as raised:
+        ProductFabricTaskContractResolver().resolve(project, _vertical_b_task(project, payload), snapshot)
+
+    assert raised.value.code == code
 
 
 def test_product_runner_delegates_contract_workspace_and_identity(tmp_path: Path) -> None:
