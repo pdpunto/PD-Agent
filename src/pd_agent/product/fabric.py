@@ -283,6 +283,7 @@ class ProductFabricTaskContractResolver:
                 asset_parameters = {
                     "namespace": target_mod_id,
                     "item_id": item_id,
+                    "display_name": item_parameters["display_name"],
                     "texture_strategy": assets.get("texture_strategy", "REUSE"),
                     "texture_reference": assets.get("texture_reference", "minecraft:item/iron_ingot"),
                     "resource_paths": resource_paths,
@@ -393,13 +394,15 @@ class ProductFabricTaskContractResolver:
                 f"{failure.code if failure else 'INVALID_GENERATED_CONTRACT'}: {failure.message if failure else 'contract expansion failed'}",
                 code=failure.code if failure else "INVALID_GENERATED_CONTRACT",
             )
-        return self._add_resolved_reference_provenance(expansion.contract, plan, expansion)
+        return self._add_resolved_reference_provenance(expansion.contract, plan, expansion, vertical_b=True)
 
     @staticmethod
     def _add_resolved_reference_provenance(
         contract: FabricTaskContract,
         plan: Any,
         expansion: Any,
+        *,
+        vertical_b: bool = False,
     ) -> FabricTaskContract:
         """Expose planner identities in declarative validation specs."""
         by_instance = {item.identity: item for item in plan.instances}
@@ -413,6 +416,8 @@ class ProductFabricTaskContractResolver:
             spec = dict(validation.spec)
             if instance_id is not None and by_instance[instance_id].definition_id == "fabric.recipe":
                 recipe = by_instance[instance_id]
+                if vertical_b:
+                    spec["profile"] = "vertical_b_resources_v1"
                 item_parameters = {
                     (item.parameters.get("namespace"), item.parameters.get("item_id")): item.identity
                     for item in by_instance.values()
@@ -431,6 +436,32 @@ class ProductFabricTaskContractResolver:
                 spec["output_instance_id"] = output
                 spec["ingredient_instance_ids"] = ingredients
                 spec["resolved_references"] = recipe_refs
+                spec["expected_output_id"] = (
+                    f"{recipe.parameters.get('namespace')}:{recipe.parameters.get('result_item_id')}"
+                )
+                item_by_key = {
+                    reference["declaration_key"]: by_instance[reference["instance_identity"]]
+                    for reference in resolved
+                    if reference["role"] == "item"
+                    and reference["instance_identity"] in by_instance
+                }
+                expected_ingredients = []
+                for ingredient in recipe.parameters.get("ingredients", ()):
+                    if not isinstance(ingredient, Mapping):
+                        continue
+                    if ingredient.get("kind") == "capability":
+                        item = item_by_key.get(ingredient.get("declaration_key"))
+                        item_id = (
+                            f"{item.parameters.get('namespace')}:{item.parameters.get('item_id')}"
+                            if item is not None else None
+                        )
+                    else:
+                        item_id = ingredient.get("item_id")
+                    expected_ingredients.append({
+                        "item_id": item_id,
+                        "quantity": ingredient.get("quantity", 1),
+                    })
+                spec["expected_ingredients"] = expected_ingredients
             validations.append(replace(validation, spec=spec))
         return replace(contract, fingerprint=None, validation_requirements=tuple(validations))
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from pd_agent.core import ValidationResult, ValidationStage, ValidationStatus, ValidationViolation
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot, resolve_logical_resource_path
+from pd_agent.tools import SecurePathResolver
 
 from .fabric import FabricBlockIdentityValidator
 
@@ -225,6 +227,157 @@ def _vertical_a_violations(root: Path, spec: Mapping[str, Any], resource_roots: 
     return violations
 
 
+def _vertical_b_candidate(root: Path, path: Any, resource_roots: tuple[Path, ...]) -> tuple[str, Path] | None:
+    relative = _relative_path(path)
+    resolver = SecurePathResolver(root)
+    if relative.startswith("src/main/resources/") or relative.startswith("src/main/java/"):
+        return relative, resolver.resolve_relative(relative)
+    if resource_roots:
+        logical = resolve_logical_resource_path(
+            ProjectSnapshot(
+                project_root=root,
+                status=ProjectInspectionStatus.READY,
+                resource_roots=resource_roots,
+                target_subproject=root,
+            ),
+            relative,
+        )
+        return relative, resolver.resolve_relative(logical)
+    return relative, resolver.resolve_relative(relative)
+
+
+def _namespaced_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.count(":") == 1 and all(value.split(":"))
+
+
+def _vertical_b_violations(root: Path, spec: Mapping[str, Any], resource_roots: tuple[Path, ...] = ()) -> list[ValidationViolation]:
+    """Validate the bounded standalone-item and recipe resource profile."""
+    namespace = str(spec.get("namespace", "")).strip()
+    item_id = str(spec.get("item_id", "")).strip()
+    if not namespace or not item_id:
+        return [_profile_violation("VERTICAL_B_ID_INVALID", "vertical_b_resources_v1", "Vertical B requires namespace and item_id")]
+    paths = _resource_paths(spec)
+    violations: list[ValidationViolation] = []
+    parsed: dict[str, Any] = {}
+    source_path = spec.get("source_path")
+    if source_path:
+        try:
+            source_info = _vertical_b_candidate(root, source_path, resource_roots)
+            assert source_info is not None
+            source_relative, source = source_info
+            source_text = source.read_text(encoding="utf-8") if source.is_file() else ""
+        except Exception as exc:
+            source_relative, source, source_text = str(source_path), None, ""
+            violations.append(_profile_violation("VERTICAL_B_PATH_INVALID", str(source_path), f"standalone item source path is unsafe: {exc}"))
+        if source is not None and not source.is_file():
+            violations.append(_profile_violation("VERTICAL_B_ITEM_SOURCE_MISSING", source_relative, "standalone item source is missing", observed={"path": source_relative, "present": False}))
+        elif source is not None:
+            namespaced = f"{namespace}:{item_id}"
+            has_id = namespaced in source_text or (namespace in source_text and item_id in source_text)
+            has_registration = bool(re.search(r"Registry\.register|registerItem|ITEM", source_text))
+            has_constructor = "new Item" in source_text or "Item.Settings" in source_text
+            if not has_id or not has_registration:
+                violations.append(_profile_violation("VERTICAL_B_ITEM_REGISTRATION_MISSING", source_relative, "standalone item source must register the expected namespaced item", observed=source_text[:500], expected=namespaced))
+            if not has_constructor:
+                violations.append(_profile_violation("VERTICAL_B_ITEM_SETTINGS_MISSING", source_relative, "standalone item source must declare bounded Item.Settings or Item construction", observed=source_text[:500], expected="Item.Settings"))
+            settings = spec.get("settings")
+            if isinstance(settings, Mapping):
+                for key, value in settings.items():
+                    if str(value) not in source_text and str(key) not in source_text:
+                        violations.append(_profile_violation("VERTICAL_B_ITEM_SETTINGS_MISMATCH", source_relative, f"item setting is not represented: {key}", observed=value, expected=key))
+
+    model_path = paths.get("item_model", f"src/main/resources/assets/{namespace}/models/item/{item_id}.json")
+    lang_path = paths.get("lang", f"src/main/resources/assets/{namespace}/lang/en_us.json")
+    expected_model_suffix = f"assets/{namespace}/models/item/{item_id}.json"
+    expected_lang_suffix = f"assets/{namespace}/lang/en_us.json"
+    if not str(model_path).replace("\\", "/").endswith(expected_model_suffix):
+        violations.append(_profile_violation("VERTICAL_B_ITEM_MODEL_PATH_MISMATCH", str(model_path), "item model path does not match the namespace and item identity", observed=model_path, expected=expected_model_suffix))
+    if not str(lang_path).replace("\\", "/").endswith(expected_lang_suffix):
+        violations.append(_profile_violation("VERTICAL_B_LANG_PATH_MISMATCH", str(lang_path), "language path does not match the namespace", observed=lang_path, expected=expected_lang_suffix))
+    for kind, path in (("item_model", model_path), ("lang", lang_path)):
+        try:
+            info = _vertical_b_candidate(root, path, resource_roots)
+            assert info is not None
+            relative, candidate = info
+        except Exception as exc:
+            violations.append(_profile_violation("VERTICAL_B_PATH_INVALID", str(path), f"Vertical B resource path is unsafe: {exc}"))
+            continue
+        if not candidate.is_file():
+            violations.append(_profile_violation("VERTICAL_B_RESOURCE_MISSING", relative, f"required standalone item resource is missing: {relative}", observed={"path": relative, "present": False}))
+            continue
+        try:
+            parsed[kind] = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            violations.append(_profile_violation("VERTICAL_B_RESOURCE_INVALID_JSON", relative, f"required standalone item JSON is invalid: {relative}"))
+
+    model = parsed.get("item_model")
+    if model is not None:
+        parent = model.get("parent") if isinstance(model, Mapping) else None
+        if not isinstance(model, Mapping) or not isinstance(parent, str) or parent not in {"minecraft:item/generated", "minecraft:item/handheld", f"{namespace}:item/{item_id}"}:
+            violations.append(_profile_violation("VERTICAL_B_ITEM_MODEL_INVALID", model_path, "item model must declare a supported parent", observed=parent, expected=("minecraft:item/generated", "minecraft:item/handheld")))
+        textures = model.get("textures") if isinstance(model, Mapping) else None
+        if textures is not None and (not isinstance(textures, Mapping) or any(not _namespaced_id(value) for value in textures.values())):
+            violations.append(_profile_violation("VERTICAL_B_TEXTURE_REFERENCE_INVALID", model_path, "item model texture references must be namespaced identifiers", observed=textures, expected="namespace:path"))
+    lang = parsed.get("lang")
+    lang_key = str(spec.get("lang_key", f"item.{namespace}.{item_id}"))
+    if not isinstance(lang, Mapping) or lang_key not in lang:
+        violations.append(_profile_violation("VERTICAL_B_LANG_ENTRY_MISMATCH", lang_path, "item language entry is missing", observed=lang, expected=lang_key))
+    elif "display_name" in spec and lang[lang_key] != spec["display_name"]:
+        violations.append(_profile_violation("VERTICAL_B_LANG_ENTRY_MISMATCH", lang_path, "item language value does not match", observed=lang[lang_key], expected=spec["display_name"]))
+
+    strategy = str(spec.get("texture_strategy", "REUSE")).upper()
+    reference = spec.get("texture_reference")
+    if strategy not in {"REUSE", "DERIVE", "GENERATE"} or not _namespaced_id(reference):
+        violations.append(_profile_violation("VERTICAL_B_TEXTURE_REFERENCE_INVALID", "texture-reference", "texture strategy requires a namespaced resource reference", observed=reference, expected="namespace:path"))
+    if strategy in {"DERIVE", "GENERATE"} and isinstance(spec.get("texture_path"), str):
+        try:
+            _, texture = _vertical_b_candidate(root, spec["texture_path"], resource_roots)
+            if not texture.is_file():
+                violations.append(_profile_violation("VERTICAL_B_TEXTURE_MISSING", str(spec["texture_path"]), "declared derived/generated texture is missing"))
+        except Exception as exc:
+            violations.append(_profile_violation("VERTICAL_B_PATH_INVALID", str(spec["texture_path"]), f"texture path is unsafe: {exc}"))
+
+    recipe_path = paths.get("recipe")
+    expected_output = spec.get("expected_output_id", f"{namespace}:{item_id}")
+    expected_ingredients = spec.get("expected_ingredients", ())
+    if recipe_path:
+        try:
+            info = _vertical_b_candidate(root, recipe_path, resource_roots)
+            assert info is not None
+            relative, candidate = info
+            recipe_id = spec.get("recipe_id")
+            if isinstance(recipe_id, str) and not relative.replace("\\", "/").endswith(f"data/{namespace}/recipes/{recipe_id}.json"):
+                violations.append(_profile_violation("VERTICAL_B_RECIPE_PATH_MISMATCH", relative, "recipe path does not match the namespace and recipe identity", observed=relative, expected=f"data/{namespace}/recipes/{recipe_id}.json"))
+            if not candidate.is_file():
+                violations.append(_profile_violation("VERTICAL_B_RECIPE_MISSING", relative, "recipe resource is missing"))
+            else:
+                recipe = json.loads(candidate.read_text(encoding="utf-8"))
+                recipe_type = recipe.get("type") if isinstance(recipe, Mapping) else None
+                result = recipe.get("result") if isinstance(recipe, Mapping) else None
+                actual_output = result.get("id", result.get("item")) if isinstance(result, Mapping) else None
+                count = result.get("count", 1) if isinstance(result, Mapping) else None
+                if recipe_type not in {"minecraft:crafting_shaped", "minecraft:crafting_shapeless"}:
+                    violations.append(_profile_violation("VERTICAL_B_RECIPE_SCHEMA_INVALID", relative, "recipe must use a bounded crafting type", observed=recipe_type, expected=("minecraft:crafting_shaped", "minecraft:crafting_shapeless")))
+                if actual_output != expected_output:
+                    violations.append(_profile_violation("VERTICAL_B_RECIPE_OUTPUT_MISMATCH", relative, "recipe output does not match resolved item identity", observed=actual_output, expected=expected_output))
+                if not isinstance(count, int) or not 1 <= count <= 64:
+                    violations.append(_profile_violation("VERTICAL_B_RECIPE_COUNT_INVALID", relative, "recipe output count must be between 1 and 64", observed=count, expected="1..64"))
+                expected_count = spec.get("result_count")
+                if isinstance(expected_count, int) and count != expected_count:
+                    violations.append(_profile_violation("VERTICAL_B_RECIPE_COUNT_MISMATCH", relative, "recipe output count does not match the contract", observed=count, expected=expected_count))
+                actual_ingredients = list(recipe.get("ingredients", ())) if recipe_type == "minecraft:crafting_shapeless" else list((recipe.get("key") or {}).values())
+                actual_ids = []
+                for ingredient in actual_ingredients:
+                    if isinstance(ingredient, Mapping):
+                        actual_ids.append(ingredient.get("item", ingredient.get("id")))
+                expected_ids = [item.get("item_id") for item in expected_ingredients if isinstance(item, Mapping)]
+                if expected_ids and sorted(actual_ids) != sorted(expected_ids):
+                    violations.append(_profile_violation("VERTICAL_B_RECIPE_INGREDIENT_MISMATCH", relative, "recipe ingredients do not match resolved vanilla/own-task identities", observed=actual_ids, expected=expected_ids))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, Exception) as exc:
+            violations.append(_profile_violation("VERTICAL_B_RECIPE_INVALID", str(recipe_path), f"recipe resource is invalid: {exc}"))
+    return violations
+
+
 class PreBuildWorkspaceValidator:
     """Validate only required files and JSON pointer requirements."""
 
@@ -357,6 +510,32 @@ class PreBuildWorkspaceValidator:
                 profile = validation.get("spec", {}).get("profile") if isinstance(validation.get("spec"), Mapping) else None
                 if profile == "vertical_a_resources_v1":
                     violations.extend(_vertical_a_violations(root, validation["spec"], self.resource_roots))
+                if profile == "vertical_b_resources_v1":
+                    violations.extend(_vertical_b_violations(root, validation["spec"], self.resource_roots))
+
+        # A model or recipe path has one deterministic owner; shared lang files
+        # intentionally remain valid for multiple item entries.
+        resource_claims: dict[tuple[str, str], str] = {}
+        for validation in data.get("validation_requirements", ()):
+            if not isinstance(validation, Mapping) or not isinstance(validation.get("spec"), Mapping):
+                continue
+            spec = validation["spec"]
+            if spec.get("profile") != "vertical_b_resources_v1":
+                continue
+            paths = _resource_paths(spec)
+            for key in ("item_model", "recipe"):
+                path = paths.get(key)
+                if not path:
+                    continue
+                owner = (key, path)
+                signature = json.dumps(
+                    {"namespace": spec.get("namespace"), "item_id": spec.get("item_id"), "recipe_id": spec.get("recipe_id"), "expected": spec.get("expected_output_id")},
+                    sort_keys=True,
+                )
+                previous = resource_claims.get(owner)
+                if previous is not None and previous != signature:
+                    violations.append(_profile_violation("VERTICAL_B_RESOURCE_PATH_CONFLICT", path, "incompatible Vertical B resource owners claim the same path", observed=signature, expected=previous))
+                resource_claims[owner] = signature
 
         status = ValidationStatus.PASS if not violations else ValidationStatus.REPAIRABLE_FAIL
         summary = "pre-build requirements passed" if not violations else "pre-build requirements failed"

@@ -185,7 +185,18 @@ ITEM_DEFINITION = _definition(
         "resource_paths": {"type": "object", "required": False},
     },
     requirements=({"key": "item-source", "description": "the standalone Item source declaration is present"},),
-    validations=({"key": "build", "kind": "build", "requirement_keys": ("item-source",), "required_parameter": "source_path"},),
+    validations=({
+        "key": "build", "kind": "build", "requirement_keys": ("item-source",),
+        "required_parameter": "source_path",
+        "spec": {
+            "profile": "vertical_b_resources_v1",
+            "namespace": {"$parameter": "namespace"},
+            "item_id": {"$parameter": "item_id"},
+            "display_name": {"$parameter": "display_name"},
+            "settings": {"$parameter": "settings"},
+            "source_path": {"$parameter": "source_path"},
+        },
+    },),
     mutation_expectations=({"key": "source", "role": "source", "path_parameter": "source_path"},),
 )
 ITEM_ASSETS_DEFINITION = _definition(
@@ -194,6 +205,7 @@ ITEM_ASSETS_DEFINITION = _definition(
         "item_instance_id": {"type": "string", "required": False},
         "namespace": {"type": "string", "format": "identifier"},
         "item_id": {"type": "string", "format": "identifier"},
+        "display_name": {"type": "string", "required": False},
         "texture_strategy": {"type": "string", "enum": ("REUSE", "DERIVE", "GENERATE")},
         "texture_reference": {"type": "string", "required": False},
         "texture_path": {"type": "string", "required": False},
@@ -212,6 +224,7 @@ ITEM_ASSETS_DEFINITION = _definition(
             "profile": "vertical_b_resources_v1",
             "namespace": {"$parameter": "namespace"},
             "item_id": {"$parameter": "item_id"},
+            "display_name": {"$parameter": "display_name"},
             "texture_strategy": {"$parameter": "texture_strategy"},
             "texture_reference": {"$parameter": "texture_reference"},
             "texture_path": {"$parameter": "texture_path"},
