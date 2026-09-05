@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from pd_agent.core import ValidationStatus
 from pd_agent.validation import PreBuildWorkspaceValidator
+from pd_agent.artifacts import ArtifactClassification, ArtifactValidator
+from pd_agent.build import FabricBuildOrchestrator
+from pd_agent.core import BuildResult
+from pd_agent.project import ProjectInspector
+from tests.fixtures.artifact_projects import make_simple_artifact_project, write_manifest_jar
 
 
 def _spec(*, item_id: str = "ruby", display_name: str = "Ruby", source_path: str = "src/main/java/demo/RubyItem.java", **overrides: object) -> dict[str, object]:
@@ -142,3 +149,61 @@ def test_vertical_b_26_2_contract_does_not_require_yarn() -> None:
     spec["platform"] = "26.2"
     spec["mappings_namespace"] = None
     assert spec["profile"] == "vertical_b_resources_v1"
+
+
+def test_vertical_b_artifact_entries_are_derived_and_shared_lang_is_deduplicated() -> None:
+    validations = (
+        SimpleNamespace(kind="artifact", spec={
+            "profile": "vertical_b_resources_v1",
+            "resource_paths": {
+                "item_model": "src/main/resources/assets/demo/models/one.json",
+                "lang": "src/main/resources/assets/demo/lang/en_us.json",
+            },
+            "texture_strategy": "REUSE",
+            "texture_reference": "minecraft:item/iron_ingot",
+        }),
+        SimpleNamespace(kind="artifact", spec={
+            "profile": "vertical_b_resources_v1",
+            "resource_paths": {
+                "item_model": "src/main/resources/assets/demo/models/two.json",
+                "lang": "src/main/resources/assets/demo/lang/en_us.json",
+                "recipe": "src/main/resources/data/demo/recipes/core.json",
+            },
+            "texture_strategy": "DERIVE",
+            "texture_path": {},
+        }),
+    )
+    contract = SimpleNamespace(validation_requirements=validations)
+    entries = FabricBuildOrchestrator()._required_artifact_entries(contract)
+    assert entries == (
+        "assets/demo/models/one.json",
+        "assets/demo/lang/en_us.json",
+        "assets/demo/models/two.json",
+        "data/demo/recipes/core.json",
+    )
+
+
+def test_vertical_b_artifact_validator_checks_required_entries_and_allows_extra_files(tmp_path: Path) -> None:
+    root = make_simple_artifact_project(tmp_path / "artifact")
+    snapshot = ProjectInspector().inspect(root)
+    started = datetime.now(timezone.utc)
+    jar = write_manifest_jar(
+        root / "build/libs/buildsimple-1.0.0.jar",
+        manifest=json.dumps({"schemaVersion": 1, "id": "buildsimple", "version": "1.0.0", "environment": "*"}),
+        extra_files={
+            "assets/demo/models/item/one.json": "{}",
+            "assets/demo/lang/en_us.json": "{}",
+            "data/demo/recipes/core.json": "{}",
+            "assets/demo/extra.txt": "allowed",
+        },
+        mtime=started,
+    )
+    build = BuildResult(attempt=1, command_display="build", cwd=root, started_at=started, duration_seconds=0, exit_code=0, stdout_log="", stderr_log="")
+    required = ("assets/demo/models/item/one.json", "assets/demo/lang/en_us.json", "data/demo/recipes/core.json")
+    result = ArtifactValidator().validate(snapshot, build, required_entries=required)
+    assert result.classification == ArtifactClassification.VALID.value
+    assert result.path == jar
+    assert result.metadata["required_entries_checked"] == list(required)
+    missing = ArtifactValidator().validate(snapshot, build, required_entries=required + ("assets/demo/models/item/missing.json",))
+    assert missing.classification == ArtifactClassification.INVALID_METADATA.value
+    assert missing.metadata["missing_required_entries"] == ["assets/demo/models/item/missing.json"]

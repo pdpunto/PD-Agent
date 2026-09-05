@@ -142,18 +142,31 @@ class FabricBuildOrchestrator:
 
     def _required_artifact_entries(self, contract: FabricTaskContract) -> tuple[str, ...] | None:
         entries: list[str] = []
+        seen: set[str] = set()
+
+        def add_entry(value: object) -> None:
+            if not isinstance(value, str) or not value:
+                return
+            entry = value.removeprefix("src/main/resources/").replace("\\", "/")
+            if entry not in seen:
+                seen.add(entry)
+                entries.append(entry)
+
         for validation in contract.validation_requirements:
             if validation.kind.casefold() not in {"artifact", "jar"}:
                 continue
             raw_entries = validation.spec.get("required_entries")
             if isinstance(raw_entries, (list, tuple)):
-                entries.extend(str(entry) for entry in raw_entries)
-            if validation.spec.get("profile") == "vertical_a_resources_v1":
+                for entry in raw_entries:
+                    add_entry(entry)
+            if validation.spec.get("profile") in {"vertical_a_resources_v1", "vertical_b_resources_v1"}:
                 paths = validation.spec.get("resource_paths", {})
                 if isinstance(paths, Mapping):
                     for path in paths.values():
-                        if isinstance(path, str) and path:
-                            entries.append(path.removeprefix("src/main/resources/"))
+                        add_entry(path)
+                if validation.spec.get("profile") == "vertical_b_resources_v1":
+                    # Only a contract-owned texture becomes a JAR expectation.
+                    add_entry(validation.spec.get("texture_path"))
         return tuple(entries) if entries else None
 
     def _current_build(self, run_state: RunState, source: str, contract_identity: tuple[str, str, str], toolchain: str | None) -> BuildAttemptIdentity | None:
