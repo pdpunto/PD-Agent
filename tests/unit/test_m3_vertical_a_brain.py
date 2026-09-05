@@ -3,6 +3,7 @@ from __future__ import annotations
 from pd_agent.brain import (
     CompatibilityStatus,
     FabricVerticalAKnowledgeSource,
+    FabricVerticalBKnowledgeSource,
     FabricBrainOrchestrator,
     KnowledgeEnvironment,
     KnowledgeNeed,
@@ -112,3 +113,79 @@ def test_vertical_a_brain_preparation_preserves_selection_and_trace() -> None:
     assert result.injected_context_item_ids
     assert len(result.traces) == 8
     assert all(trace.environment == LEGACY for trace in result.traces)
+
+
+def test_vertical_b_needs_cover_items_assets_recipe_and_cross_item_without_duplication() -> None:
+    deriver = PreCodeKnowledgeNeedDeriver()
+    result = deriver.derive(
+        '{"items":[{"declaration_key":"item-a"},{"declaration_key":"item-b"}],"recipes":[{"output":"item-b","ingredient":"item-a"}]}',
+        LEGACY,
+        capability_signals=("fabric.item", "fabric.item_assets", "fabric.recipe"),
+    )
+
+    assert deriver.max_needs == 8
+    assert len(result.needs) == 8
+    assert len({need.query for need in result.needs}) == 8
+    assert {need.query for need in result.needs} >= {
+        "item_registration", "item_settings", "item_assets", "recipe_resource",
+        "recipe_ingredients", "platform_versioning",
+    }
+    assert all(need.environment == LEGACY for need in result.needs)
+
+
+def test_vertical_b_source_serves_both_platforms_without_yarn_leakage_on_26_2() -> None:
+    source = FabricVerticalBKnowledgeSource()
+    for environment in (LEGACY, MODERN):
+        needs = PreCodeKnowledgeNeedDeriver().derive(
+            "standalone fabric.item with fabric.item_assets and fabric.recipe",
+            environment,
+        ).needs
+        results = [source.resolve(need, offline=True) for need in needs]
+        assert len(needs) == 8
+        assert all(result.status.value == "SUCCESS" for result in results)
+        assert all(result.items[0].environment == environment for result in results)
+    modern = source.resolve(
+        KnowledgeNeed(
+            id="vertical-b-platform",
+            type=KnowledgeType.CONCEPT,
+            query="platform_versioning",
+            environment=MODERN,
+        ),
+        offline=True,
+    )
+    assert modern.items[0].content["mappings_namespace"] is None
+    assert modern.items[0].content["platform"] == "26.2"
+
+
+def test_vertical_b_brain_on_derives_and_injects_context() -> None:
+    contract = FabricTaskContract(
+        task_id="vertical-b",
+        revision="1",
+        goal="standalone fabric.item and fabric.recipe with cross-item ingredient",
+        requirements=(),
+        required_capabilities=("fabric.item", "fabric.item_assets", "fabric.recipe"),
+    )
+    result = FabricBrainOrchestrator(
+        knowledge_service=KnowledgeService((FabricVerticalBKnowledgeSource(),))
+    ).prepare(contract=contract, environment=MODERN, brain_enabled=True)
+
+    assert len(result.needs) == 8
+    assert result.injected_context_item_ids
+    assert all(item.environment == MODERN for item in result.needs)
+
+
+def test_vertical_b_brain_off_does_not_inject_context() -> None:
+    contract = FabricTaskContract(
+        task_id="vertical-b-off",
+        revision="1",
+        goal="standalone fabric.item and fabric.recipe",
+        requirements=(),
+        required_capabilities=("fabric.item", "fabric.recipe"),
+    )
+    result = FabricBrainOrchestrator(
+        knowledge_service=KnowledgeService((FabricVerticalBKnowledgeSource(),))
+    ).prepare(contract=contract, environment=LEGACY, brain_enabled=False)
+
+    assert result.brain_enabled is False
+    assert result.needs == ()
+    assert result.injected_context_item_ids == ()

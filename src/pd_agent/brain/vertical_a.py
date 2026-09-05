@@ -49,6 +49,13 @@ _DOMAINS: tuple[tuple[str, str, KnowledgeType, str], ...] = (
     ("item_model_asset", "item model", KnowledgeType.PATTERN, "An item model references the associated BlockItem resource using the platform-valid form."),
     ("texture_reference", "texture", KnowledgeType.PATTERN, "REUSE, DERIVE and GENERATE are bounded asset strategies; REUSE needs a valid reference."),
     ("recipe_resource", "recipe", KnowledgeType.CONCEPT, "A recipe is a bounded data resource with namespace, ingredients, result and positive count."),
+    ("vertical_b_items", "standalone item", KnowledgeType.CAPABILITY, "A standalone Fabric item is a bounded registry capability independent of a BlockItem."),
+    ("item_registration", "item registration", KnowledgeType.API, "A standalone item uses a stable identifier and is registered during Fabric initialization."),
+    ("item_settings", "Item.Settings", KnowledgeType.PATTERN, "Item.Settings carries only bounded, platform-compatible settings for the item declaration."),
+    ("item_assets", "item assets", KnowledgeType.PATTERN, "An item model, language entry and bounded texture strategy provide the standalone item resources."),
+    ("item_resource", "item resource", KnowledgeType.PATTERN, "Standalone item resources stay under the namespace assets path and use the declared item identifier."),
+    ("recipe_ingredients", "recipe ingredients", KnowledgeType.PATTERN, "Recipe ingredients preserve vanilla registry references and explicit own-task item references."),
+    ("platform_versioning", "platform versioning", KnowledgeType.CONCEPT, "Fabric item and recipe APIs are selected against the exact Minecraft, Loader, API and mappings environment."),
 )
 
 
@@ -82,7 +89,7 @@ class FabricVerticalAKnowledgeSource:
             return self._result(need, KnowledgeRetrievalStatus.VERSION_MISMATCH, "Vertical A environment is incompatible")
         domain = next((item for item in _DOMAINS if item[0] == need.query.casefold()), None)
         if domain is None:
-            return self._result(need, KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE, "no Vertical A domain matched")
+            return self._result(need, KnowledgeRetrievalStatus.NO_COMPATIBLE_KNOWLEDGE, "no bounded Fabric domain matched")
         key, subject, kind, summary = domain
         content: dict[str, Any] = {
             "domain": key,
@@ -110,7 +117,10 @@ class FabricVerticalAKnowledgeSource:
             environment=need.environment,
             authority=SourceAuthority.AUTHORITATIVE_SOURCE,
             provenance=provenance,
-            metadata={"record_identity": hashlib.sha256(canonical_json(content).encode("utf-8")).hexdigest(), "capability": "vertical_a"},
+            metadata={
+                "record_identity": hashlib.sha256(canonical_json(content).encode("utf-8")).hexdigest(),
+                "capability": "vertical_b" if key in {item[0] for item in _DOMAINS[8:]} else "vertical_a",
+            },
             version_sensitive=True,
         )
         return KnowledgeSourceResult(
@@ -126,4 +136,7 @@ class FabricVerticalAKnowledgeSource:
         return KnowledgeSourceResult(status, self.source_id, self.source_kind, need, error=error)
 
 
-__all__ = ["FabricVerticalAKnowledgeSource"]
+FabricVerticalBKnowledgeSource = FabricVerticalAKnowledgeSource
+
+
+__all__ = ["FabricVerticalAKnowledgeSource", "FabricVerticalBKnowledgeSource"]

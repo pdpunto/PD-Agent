@@ -378,7 +378,10 @@ class ProductFabricTaskContractResolver:
                 task_id=task.task_id,
                 revision="product-2",
                 goal=canonical_goal,
-                required_capabilities=("Fabric project", "standalone items and recipes"),
+                required_capabilities=(
+                    "Fabric project", "standalone items and recipes",
+                    "fabric.item", "fabric.item_assets", "fabric.recipe",
+                ),
                 completion_criteria=("source change", "build", "artifact"),
                 knowledge_signals=(),
                 environment_constraints=constraints,
