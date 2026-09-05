@@ -11,6 +11,7 @@ from typing import Any, Mapping, Protocol
 from pd_agent.core import (
     FabricKnowledgeSignal,
     FabricTaskContract,
+    FabricValidationRequirement,
 )
 from pd_agent.fabric import (
     FabricNormalOrchestrator,
@@ -32,6 +33,7 @@ from pd_agent.fabric.capabilities import (
 from pd_agent.fabric.planning import CapabilityPlanner, FabricContractContext, expand_plan_to_contract
 from pd_agent.fabric.registry import foundation_capability_registry
 from pd_agent.project import ProjectInspectionStatus, ProjectSnapshot
+from pd_agent.minecraft import MinecraftObservationType
 
 from .models import ExecutionRecord, ProjectRecord, TaskRecord
 
@@ -394,7 +396,59 @@ class ProductFabricTaskContractResolver:
                 f"{failure.code if failure else 'INVALID_GENERATED_CONTRACT'}: {failure.message if failure else 'contract expansion failed'}",
                 code=failure.code if failure else "INVALID_GENERATED_CONTRACT",
             )
-        return self._add_resolved_reference_provenance(expansion.contract, plan, expansion, vertical_b=True)
+        contract = self._add_resolved_reference_provenance(expansion.contract, plan, expansion, vertical_b=True)
+        return self._add_vertical_b_runtime_requirement(contract, plan, expansion, target_mod_id, profile)
+
+    @staticmethod
+    def _add_vertical_b_runtime_requirement(
+        contract: FabricTaskContract,
+        plan: Any,
+        expansion: Any,
+        target_mod_id: str,
+        profile: Any,
+    ) -> FabricTaskContract:
+        """Add one runtime requirement containing one registry probe per item."""
+        requirement_ids_by_instance = dict(expansion.capability_requirement_ids)
+        item_instances = sorted(
+            (item for item in plan.instances if item.definition_id == "fabric.item"),
+            key=lambda item: (str(item.parameters.get("item_id", "")), item.identity),
+        )
+        observations: list[dict[str, object]] = []
+        requirement_ids: list[str] = []
+        for item in item_instances:
+            item_id = str(item.parameters["item_id"])
+            identifier = f"{target_mod_id}:{item_id}"
+            item_requirements = tuple(requirement_ids_by_instance.get(item.identity, ()))
+            requirement_ids.extend(item_requirements)
+            observations.append({
+                "observation_id": f"vertical-b-item-registry-{item_id}",
+                "observation_type": MinecraftObservationType.REGISTRY_ENTRY_PRESENT.value,
+                "profile": "registry_entry",
+                "selector": {"kind": "registry", "registry_kind": "item", "identifier": identifier},
+                "expected": {"present": True},
+                "requirement_ids": list(item_requirements),
+            })
+        if not observations:
+            return contract
+        environment = contract.environment_constraints
+        runtime = FabricValidationRequirement(
+            validation_requirement_id="validation:vertical-b-item-registry",
+            requirement_ids=tuple(dict.fromkeys(requirement_ids)),
+            kind="minecraft",
+            spec={
+                "target_mod_id": target_mod_id,
+                "platform_id": profile.platform_id,
+                "minecraft_version": environment.minecraft_version,
+                "loader_version": environment.loader_version,
+                "test_id": "vertical-b-item-registry",
+                "observations": observations,
+            },
+        )
+        return replace(
+            contract,
+            fingerprint=None,
+            validation_requirements=(*contract.validation_requirements, runtime),
+        )
 
     @staticmethod
     def _add_resolved_reference_provenance(
