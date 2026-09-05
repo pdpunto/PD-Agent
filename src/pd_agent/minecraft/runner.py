@@ -39,6 +39,7 @@ from .contracts import (
     validate_inventory_profile,
     validate_tag_membership_profile,
     validate_recipe_match_profile,
+    validate_recipe_loaded_profile,
     validate_loot_result_profile,
     validate_block_item_association_profile,
 )
@@ -261,6 +262,12 @@ def _recipe_match_properties(params: Mapping[str, Any]) -> tuple[str, str, str, 
     )
 
 
+def _recipe_loaded_properties(params: Mapping[str, Any]) -> tuple[str]:
+    recipe_id = str(params.get("recipe_id", "")).strip()
+    validate_recipe_loaded_profile({"kind": "recipe", "recipe_id": recipe_id}, {})
+    return (recipe_id,)
+
+
 def _loot_result_properties(params: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
     values = {
         "context_profile": params.get("context_profile", "generic"),
@@ -375,6 +382,8 @@ class MinecraftTestRunner:
             _tag_membership_properties(spec.observation_params)
         elif spec.observation_type is MinecraftObservationType.RECIPE_MATCH:
             _recipe_match_properties(spec.observation_params)
+        elif spec.observation_type is MinecraftObservationType.RECIPE_LOADED:
+            _recipe_loaded_properties(spec.observation_params)
         elif spec.observation_type is MinecraftObservationType.LOOT_RESULT:
             _loot_result_properties(spec.observation_params)
         elif spec.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION:
@@ -506,6 +515,11 @@ class MinecraftTestRunner:
                     _recipe_match_properties(spec.observation_params),
                 ))
                 if spec.observation_type is MinecraftObservationType.RECIPE_MATCH
+                else ()
+            ),
+            *(
+                (("pd.agent.observationRecipeId", _recipe_loaded_properties(spec.observation_params)[0]),)
+                if spec.observation_type is MinecraftObservationType.RECIPE_LOADED
                 else ()
             ),
             *(
@@ -799,10 +813,9 @@ class MinecraftTestRunner:
             if request.observation_type not in {
                 MinecraftObservationType.REGISTRY_ENTRY_PRESENT,
                 MinecraftObservationType.BLOCK_ITEM_ASSOCIATION,
+                MinecraftObservationType.RECIPE_LOADED,
             }:
-                raise MinecraftTestValidationError(
-                    "Vertical A multi-observation requests are limited to registry and BlockItem association observations"
-                )
+                raise MinecraftTestValidationError("unsupported multi-observation request type")
             selector = request.selector
             if request.observation_type is MinecraftObservationType.REGISTRY_ENTRY_PRESENT:
                 if selector.get("kind") != "registry":
@@ -811,12 +824,15 @@ class MinecraftTestRunner:
                     "registry_kind": selector.get("registry_kind"),
                     "identifier": selector.get("identifier"),
                 }
-            else:
+            elif request.observation_type is MinecraftObservationType.BLOCK_ITEM_ASSOCIATION:
                 validate_block_item_association_profile(selector, {})
                 observation_params = {
                     "item_id": selector["item_id"],
                     "block_id": selector["block_id"],
                 }
+            else:
+                validate_recipe_loaded_profile(selector, {})
+                observation_params = {"recipe_id": selector["recipe_id"]}
             child_spec = replace(
                 spec,
                 test_id=request.observation_id,
@@ -1081,6 +1097,17 @@ class MinecraftTestRunner:
                     )
                 )
                 if result.spec.observation_type is MinecraftObservationType.RECIPE_MATCH
+                else ()
+            ),
+            *(
+                tuple(
+                    f"-P{name}={value}"
+                    for name, value in zip(
+                        ("pd.agent.observationRecipeId",),
+                        _recipe_loaded_properties(result.spec.observation_params),
+                    )
+                )
+                if result.spec.observation_type is MinecraftObservationType.RECIPE_LOADED
                 else ()
             ),
             *(
@@ -1522,6 +1549,28 @@ class MinecraftTestRunner:
                         if functional_test_result == "PASS"
                         else {"code": "RECIPE_MATCH_MISMATCH", "message": reason}
                     ),
+                )
+                metadata["observation_result"] = observation.to_dict()
+            elif str(result_type).upper() == MinecraftObservationType.RECIPE_LOADED.value:
+                observation = ObservationResult(
+                    observation_id=contract_observation_id,
+                    observation_type=MinecraftObservationType.RECIPE_LOADED,
+                    status=(
+                        MinecraftObservationStatus.PASS
+                        if functional_test_result == "PASS"
+                        else MinecraftObservationStatus(functional_test_result)
+                    ),
+                    expected={"loaded": True},
+                    actual=dict(harness_result.get("observation_actual", {})),
+                    phase="RUNTIME",
+                    evidence_refs=(MinecraftEvidenceReference(
+                        kind=MinecraftEvidenceKind.OBSERVATION,
+                        ref="harness-result.json",
+                        phase="RUNTIME",
+                    ),),
+                    error=(None if functional_test_result == "PASS" else {
+                        "code": "RECIPE_LOADED_MISMATCH", "message": reason
+                    }),
                 )
                 metadata["observation_result"] = observation.to_dict()
             elif str(result_type).upper() == MinecraftObservationType.LOOT_RESULT.value:

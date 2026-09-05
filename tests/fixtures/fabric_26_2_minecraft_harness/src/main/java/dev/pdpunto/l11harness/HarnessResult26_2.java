@@ -23,6 +23,11 @@ final class HarnessResult26_2 {
         return new HarnessResult26_2(config, identity, pass, pass ? "PASS" : "FAIL", reason, actualIdentifier, null);
     }
 
+    static HarnessResult26_2 recipeLoaded(HarnessConfig26_2 config, HarnessIdentity26_2 identity, boolean pass,
+            String reason, String actualIdentifier) {
+        return new HarnessResult26_2(config, identity, pass, pass ? "PASS" : "FAIL", reason, actualIdentifier, null);
+    }
+
     static HarnessResult26_2 association(HarnessConfig26_2 config, HarnessIdentity26_2 identity, boolean pass,
             String reason, String actual) {
         return new HarnessResult26_2(config, identity, pass, pass ? "PASS" : "FAIL", reason, null, actual);
@@ -51,9 +56,14 @@ final class HarnessResult26_2 {
         field(json, "runtime_target_sha256", identity.runtimeTargetSha256()); field(json, "target_sha_match", Boolean.toString(identity.targetShaMatch()));
         field(json, "server_started", "true"); field(json, "functional_test_result", outcome);
         field(json, "reason", reason); field(json, "shutdown_requested", "true");
-        field(json, "observation_expected", "{\"present\":true}");
-        if (associationActual != null) field(json, "observation_actual", associationActual);
-        else field(json, "observation_actual", "{\"present\":" + pass + "}");
+        if (config.observationType().equals("RECIPE_LOADED")) {
+            field(json, "observation_expected", "{\"loaded\":true}");
+            field(json, "observation_actual", "{\"recipe_id\":\"" + actualIdentifier + "\",\"loaded\":" + pass + "}");
+        } else {
+            field(json, "observation_expected", "{\"present\":true}");
+            if (associationActual != null) field(json, "observation_actual", associationActual);
+            else field(json, "observation_actual", "{\"present\":" + pass + "}");
+        }
         if (!pass) {
             String errorCode = outcome.equals("INFRA_ERROR") ? "INFRA_ERROR"
                 : config.observationType().equals("BLOCK_ITEM_ASSOCIATION")

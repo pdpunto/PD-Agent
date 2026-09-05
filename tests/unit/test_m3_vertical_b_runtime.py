@@ -29,12 +29,17 @@ def test_vertical_b_contract_has_one_runtime_requirement_and_one_probe_per_item(
     runtime = [item for item in contract.validation_requirements if item.kind == "minecraft"]
     assert len(runtime) == 1
     observations = runtime[0].spec["observations"]
-    assert [item["selector"]["identifier"] for item in observations] == [
+    item_observations = [item for item in observations if item["observation_type"] == "REGISTRY_ENTRY_PRESENT"]
+    assert [item["selector"]["identifier"] for item in item_observations] == [
         "examplemod:ruby_core", "examplemod:ruby_shard"
     ]
-    assert all(item["selector"]["registry_kind"] == "item" for item in observations)
-    assert all(item["observation_type"] == "REGISTRY_ENTRY_PRESENT" for item in observations)
-    assert all(item["requirement_ids"] and all(value.startswith("requirement:") for value in item["requirement_ids"]) for item in observations)
+    assert all(item["selector"]["registry_kind"] == "item" for item in item_observations)
+    assert len([item for item in observations if item["observation_type"] == "RECIPE_LOADED"]) == 1
+    assert all(
+        item["requirement_ids"]
+        and all(value.startswith("requirement:") for value in item["requirement_ids"])
+        for item in item_observations
+    )
     assert "RECIPE_MATCH" not in json.dumps(runtime[0].spec)
 
 

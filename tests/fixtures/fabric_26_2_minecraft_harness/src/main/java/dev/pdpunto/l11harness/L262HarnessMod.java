@@ -25,6 +25,8 @@ public final class L262HarnessMod implements DedicatedServerModInitializer {
                     result = HarnessResult26_2.infra(config, identity, identity.reason());
                 } else if (config.observationType().equals("REGISTRY_ENTRY_PRESENT")) {
                     result = registry(config, identity);
+                } else if (config.observationType().equals("RECIPE_LOADED")) {
+                    result = recipeLoaded(server, config, identity);
                 } else {
                     result = association(config, identity);
                 }
@@ -48,6 +50,18 @@ public final class L262HarnessMod implements DedicatedServerModInitializer {
         return HarnessResult26_2.registry(config, identity, present, present ? "registry entry present" : "registry entry missing", identifier.toString());
     }
 
+    private static HarnessResult26_2 recipeLoaded(MinecraftServer server, HarnessConfig26_2 config, HarnessIdentity26_2 identity) {
+        var recipeId = HarnessConfig26_2.parseIdentifier(config.observationRecipeId());
+        var key = net.minecraft.resources.ResourceKey.create(
+            net.minecraft.core.registries.Registries.RECIPE, recipeId
+        );
+        boolean loaded = server.getRecipeManager().byKey(key).isPresent();
+        return HarnessResult26_2.recipeLoaded(
+            config, identity, loaded,
+            loaded ? "recipe was loaded by RecipeManager" : "recipe was not loaded by RecipeManager",
+            recipeId.toString()
+        );
+    }
     private static HarnessResult26_2 association(HarnessConfig26_2 config, HarnessIdentity26_2 identity) {
         var itemId = HarnessConfig26_2.parseIdentifier(config.associationItemId());
         var blockId = HarnessConfig26_2.parseIdentifier(config.associationBlockId());

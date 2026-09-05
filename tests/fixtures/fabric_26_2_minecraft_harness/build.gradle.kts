@@ -62,6 +62,7 @@ tasks.register<ServerProductionRunTask>("productionServerRun") {
     providers.gradleProperty("pd.agent.observationType").orNull?.let { jvmArgs.add("-Dpd.agent.observationType=$it") }
     providers.gradleProperty("pd.agent.observationRegistryKind").orNull?.let { jvmArgs.add("-Dpd.agent.observationRegistryKind=$it") }
     providers.gradleProperty("pd.agent.observationIdentifier").orNull?.let { jvmArgs.add("-Dpd.agent.observationIdentifier=$it") }
+    providers.gradleProperty("pd.agent.observationRecipeId").orNull?.let { jvmArgs.add("-Dpd.agent.observationRecipeId=$it") }
     providers.gradleProperty("pd.agent.observationAssociationItemId").orNull?.let { jvmArgs.add("-Dpd.agent.observationAssociationItemId=$it") }
     providers.gradleProperty("pd.agent.observationAssociationBlockId").orNull?.let { jvmArgs.add("-Dpd.agent.observationAssociationBlockId=$it") }
     jvmArgs.add("-Dpd.agent.resultPath=${providers.gradleProperty("pd.agent.resultPath").get()}")

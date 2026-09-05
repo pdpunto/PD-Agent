@@ -32,6 +32,7 @@ _CONTROLLED_HOPPER_POS = (8, 64, 8)
 _I4_TAG_ID = "pdagentl11_harness:i4_controlled_members"
 _I4_TAG_MEMBERS = {"minecraft:diamond", "minecraft:gold_ingot", "minecraft:stone"}
 _I5_RECIPE_ID = "pdagentl11_harness:i5_marble_lantern"
+_RECIPE_ID_RE = re.compile(r"^[a-z][a-z0-9_.-]*:[a-z0-9/._-]+$")
 _I5_INPUT_ITEM = "minecraft:diamond"
 _I5_OUTPUT_ITEM = "minecraft:gold_ingot"
 _I6_LOOT_TABLE_ID = "pdagentl11_harness:i6_fixed_drop"
@@ -61,6 +62,23 @@ def validate_recipe_match_profile(
         raise ValueError("RECIPE_MATCH only supports the controlled I5 output")
     if isinstance(parameters["expected_output_count"], bool) or parameters["expected_output_count"] != 1:
         raise ValueError("RECIPE_MATCH expected_output_count must be one")
+
+
+def validate_recipe_loaded_profile(
+    selector: Mapping[str, Any],
+    parameters: Mapping[str, Any],
+) -> None:
+    """Validate the bounded runtime recipe-load presence profile."""
+
+    if not isinstance(selector, Mapping) or set(selector) != {"kind", "recipe_id"}:
+        raise ValueError("RECIPE_LOADED selector must declare kind and recipe_id")
+    if selector.get("kind") != "recipe":
+        raise ValueError("RECIPE_LOADED selector kind is invalid")
+    recipe_id = selector.get("recipe_id")
+    if not isinstance(recipe_id, str) or not _RECIPE_ID_RE.fullmatch(recipe_id):
+        raise ValueError("RECIPE_LOADED recipe_id must be a namespaced identifier")
+    if not isinstance(parameters, Mapping) or parameters:
+        raise ValueError("RECIPE_LOADED parameters must be empty")
 
 
 def validate_loot_result_profile(
@@ -319,6 +337,7 @@ class MinecraftObservationType(StrEnum):
     INVENTORY_STATE = "INVENTORY_STATE"
     TAG_MEMBERSHIP = "TAG_MEMBERSHIP"
     RECIPE_MATCH = "RECIPE_MATCH"
+    RECIPE_LOADED = "RECIPE_LOADED"
     LOOT_RESULT = "LOOT_RESULT"
 
 
@@ -729,6 +748,10 @@ class ObservationRequest:
                 raise ValueError("BLOCK_ITEM_ASSOCIATION profile is invalid")
             if self.expected != {"associated": True}:
                 raise ValueError("BLOCK_ITEM_ASSOCIATION expected must be {'associated': true}")
+        elif self.observation_type is MinecraftObservationType.RECIPE_LOADED:
+            validate_recipe_loaded_profile(selector, parameters)
+            if self.profile != "recipe_load" or self.expected != {"loaded": True}:
+                raise ValueError("RECIPE_LOADED profile or expected value is invalid")
         object.__setattr__(self, "phase", _optional_identity("phase", self.phase))
         metadata = _closed_json(self.metadata, field_name="metadata")
         if not isinstance(metadata, dict):
@@ -784,6 +807,9 @@ def effective_observation_config(
         validate_block_item_association_profile(request.selector, params)
         params.setdefault("item_id", request.selector["item_id"])
         params.setdefault("block_id", request.selector["block_id"])
+    elif request.observation_type is MinecraftObservationType.RECIPE_LOADED:
+        validate_recipe_loaded_profile(request.selector, params)
+        params.setdefault("recipe_id", request.selector["recipe_id"])
     return request.observation_type, params
 
 

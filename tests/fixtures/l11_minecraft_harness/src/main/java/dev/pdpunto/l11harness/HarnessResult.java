@@ -333,6 +333,22 @@ final class HarnessResult {
         return result;
     }
 
+    static HarnessResult recipeLoaded(
+        HarnessConfig config,
+        HarnessIdentity identity,
+        JsonElement expected,
+        JsonElement actual,
+        String outcome,
+        String reason
+    ) {
+        HarnessResult result = create(config, identity, config.observationType(), "PASS".equals(outcome), null, null,
+            outcome, false, reason, null, null, null, null, null, null, null, false);
+        result.structuredObservation = new com.google.gson.JsonObject();
+        result.structuredObservation.getAsJsonObject().add("expected", expected);
+        result.structuredObservation.getAsJsonObject().add("actual", actual);
+        return result;
+    }
+
     static HarnessResult lootResult(
         HarnessConfig config,
         HarnessIdentity identity,

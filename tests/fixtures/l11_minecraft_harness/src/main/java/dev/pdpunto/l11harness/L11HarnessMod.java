@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
@@ -25,6 +26,8 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerWorldEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 
 public final class L11HarnessMod implements DedicatedServerModInitializer {
+    private final AtomicBoolean startupHandled = new AtomicBoolean();
+
     @Override
     public void onInitializeServer() {
         HarnessSignals.reset();
@@ -94,12 +97,19 @@ public final class L11HarnessMod implements DedicatedServerModInitializer {
             Object gameInstance = FabricLoader.getInstance().getGameInstance();
             if (gameInstance instanceof MinecraftServer server) {
                 if (server.isRunning()) {
-                    onServerStarted(server);
+                    triggerStartup(server);
                     return;
                 }
             }
             sleepShort(50L);
         }
+    }
+
+    private void triggerStartup(MinecraftServer server) {
+        if (!startupHandled.compareAndSet(false, true)) {
+            return;
+        }
+        onServerStarted(server);
     }
 
     private void onServerStarted(MinecraftServer server) {

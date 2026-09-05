@@ -93,6 +93,9 @@ final class HarnessRunner {
         if (HarnessConfig.OBSERVATION_RECIPE_MATCH.equals(config.observationType())) {
             return runRecipeMatchObservation(server, config, identity, world);
         }
+        if (HarnessConfig.OBSERVATION_RECIPE_LOADED.equals(config.observationType())) {
+            return runRecipeLoadedObservation(server, config, identity);
+        }
         if (HarnessConfig.OBSERVATION_LOOT_RESULT.equals(config.observationType())) {
             return runLootResultObservation(server, config, identity, world);
         }
@@ -281,6 +284,27 @@ final class HarnessRunner {
             && config.observationExpectedOutputCount() == output.getCount();
         return HarnessResult.recipeMatch(config, identity, expected, actual, pass ? "PASS" : "FAIL",
             pass ? "real RecipeManager recipe match observed" : "recipe match or output mismatch");
+    }
+
+    private static HarnessResult runRecipeLoadedObservation(
+        MinecraftServer server,
+        HarnessConfig config,
+        HarnessIdentity identity
+    ) {
+        Identifier recipeId = parseIdentifier(config.observationRecipeId());
+        RegistryKey<net.minecraft.recipe.Recipe<?>> key = RegistryKey.of(RegistryKeys.RECIPE, recipeId);
+        boolean loaded = server.getRecipeManager().get(key).isPresent();
+        JsonObject expected = new JsonObject();
+        expected.addProperty("recipe_id", recipeId.toString());
+        expected.addProperty("loaded", true);
+        JsonObject actual = new JsonObject();
+        actual.addProperty("recipe_id", recipeId.toString());
+        actual.addProperty("loaded", loaded);
+        HarnessResult result = HarnessResult.recipeLoaded(
+            config, identity, expected, actual, loaded ? "PASS" : "FAIL",
+            loaded ? "recipe was loaded by RecipeManager" : "recipe was not loaded by RecipeManager"
+        );
+        return result;
     }
 
     private static HarnessResult runLootResultObservation(

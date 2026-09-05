@@ -428,6 +428,22 @@ class ProductFabricTaskContractResolver:
                 "expected": {"present": True},
                 "requirement_ids": list(item_requirements),
             })
+        recipe_instances = sorted(
+            (recipe for recipe in plan.instances if recipe.definition_id == "fabric.recipe"),
+            key=lambda recipe: (str(recipe.parameters.get("recipe_id", "")), recipe.identity),
+        )
+        for recipe in recipe_instances:
+            recipe_id = str(recipe.parameters["recipe_id"])
+            recipe_requirements = tuple(requirement_ids_by_instance.get(recipe.identity, ()))
+            requirement_ids.extend(recipe_requirements)
+            observations.append({
+                "observation_id": f"vertical-b-recipe-loaded-{recipe_id}",
+                "observation_type": MinecraftObservationType.RECIPE_LOADED.value,
+                "profile": "recipe_load",
+                "selector": {"kind": "recipe", "recipe_id": f"{target_mod_id}:{recipe_id}"},
+                "expected": {"loaded": True},
+                "requirement_ids": list(recipe_requirements),
+            })
         if not observations:
             return contract
         environment = contract.environment_constraints

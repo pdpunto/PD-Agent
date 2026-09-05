@@ -78,6 +78,7 @@ record HarnessConfig(
     static final String OBSERVATION_INVENTORY_STATE = "INVENTORY_STATE";
     static final String OBSERVATION_TAG_MEMBERSHIP = "TAG_MEMBERSHIP";
     static final String OBSERVATION_RECIPE_MATCH = "RECIPE_MATCH";
+    static final String OBSERVATION_RECIPE_LOADED = "RECIPE_LOADED";
     static final String OBSERVATION_LOOT_RESULT = "LOOT_RESULT";
 
     private static final Pattern MOD_ID_RE = Pattern.compile("^[a-z][a-z0-9_.-]*$");
@@ -101,7 +102,7 @@ record HarnessConfig(
         observationCount = normalizeCount(observationType, observationCount);
         observationTagId = normalizeTagId(observationType, observationTagId);
         observationMemberId = normalizeTagMemberId(observationType, observationMemberId);
-        observationRecipeId = normalizeRecipeField(observationType, observationRecipeId, "pdagentl11_harness:i5_marble_lantern");
+        observationRecipeId = normalizeRecipeLoadedField(observationType, observationRecipeId);
         observationInputItemId = normalizeRecipeField(observationType, observationInputItemId, "minecraft:diamond");
         observationInputCount = normalizeRecipeCount(observationType, observationInputCount, "input");
         observationExpectedOutputItemId = normalizeRecipeField(observationType, observationExpectedOutputItemId, "minecraft:gold_ingot");
@@ -196,6 +197,7 @@ record HarnessConfig(
             && !OBSERVATION_INVENTORY_STATE.equals(normalized)
             && !OBSERVATION_TAG_MEMBERSHIP.equals(normalized)
             && !OBSERVATION_RECIPE_MATCH.equals(normalized)
+            && !OBSERVATION_RECIPE_LOADED.equals(normalized)
             && !OBSERVATION_BLOCK_ITEM_ASSOCIATION.equals(normalized)) {
             if (!OBSERVATION_LOOT_RESULT.equals(normalized)) {
                 throw new IllegalArgumentException("unsupported observation type: " + value);
@@ -326,6 +328,13 @@ record HarnessConfig(
         return value;
     }
 
+    private static String normalizeRecipeLoadedField(String observationType, String value) {
+        if (!OBSERVATION_RECIPE_LOADED.equals(observationType)) {
+            return null;
+        }
+        return parseIdentifier(requireTextValue("observation recipe id", value)).toString();
+    }
+
     private static int normalizeRecipeCount(String observationType, int value, String label) {
         if (!OBSERVATION_RECIPE_MATCH.equals(observationType)) {
             return 1;
@@ -392,6 +401,9 @@ record HarnessConfig(
             && (PROP_OBSERVATION_RECIPE_ID.equals(key)
                 || PROP_OBSERVATION_INPUT_ITEM_ID.equals(key)
                 || PROP_OBSERVATION_EXPECTED_OUTPUT_ITEM_ID.equals(key))) {
+            return requireTextValue(key, value);
+        }
+        if (OBSERVATION_RECIPE_LOADED.equals(observationType) && PROP_OBSERVATION_RECIPE_ID.equals(key)) {
             return requireTextValue(key, value);
         }
         if (OBSERVATION_LOOT_RESULT.equals(observationType)
